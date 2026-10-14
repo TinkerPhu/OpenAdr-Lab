@@ -1545,14 +1545,17 @@ fn bench_what_is_in_phase2_friction() {
             .filter(|&t| (sol.heater().stage[t] - sol.heater().stage[t - 1]).abs() > 1e-6)
             .count();
         let pv_kwh: f64 = sol
-            .p_pv_used_kw
-            .iter()
-            .zip(inputs.dt_h.iter())
-            .map(|(p, d)| p * d)
-            .sum();
+            .asset("pv")
+            .map(|pv| {
+                pv.net_power_kw
+                    .iter()
+                    .zip(inputs.dt_h.iter())
+                    .map(|(net_kw, d)| -net_kw * d)
+                    .sum()
+            })
+            .unwrap_or(0.0);
         // The same coefficient the objective uses, with its sign: a reward.
-        let pv_tiebreak =
-            -crate::controller::milp_interactions::PV_USE_TIEBREAK_EUR_PER_KWH * pv_kwh;
+        let pv_tiebreak = -crate::assets::forecast_declared::PV_USE_TIEBREAK_EUR_PER_KWH * pv_kwh;
         (
             switches,
             switches as f64 * switch_penalty,
@@ -1564,7 +1567,7 @@ fn bench_what_is_in_phase2_friction() {
     println!("\n── R-97: decomposing phase 2's objective ──");
     println!(
         "   (PV_USE_TIEBREAK_EUR_PER_KWH = {}, heater switching_penalty = {switch_penalty})\n",
-        crate::controller::milp_interactions::PV_USE_TIEBREAK_EUR_PER_KWH
+        crate::assets::forecast_declared::PV_USE_TIEBREAK_EUR_PER_KWH
     );
     println!(
         "  {:>16} {:>11} {:>9} {:>13} {:>11} {:>13}",

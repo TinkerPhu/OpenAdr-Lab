@@ -1,7 +1,9 @@
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
-use crate::controller::milp_planner::{AllocationBasis, AssetMilpContext, AssetSolution};
+use crate::controller::milp_planner::{
+    AllocationBasis, AssetMilpContext, AssetSolution, ForecastRole, Participation,
+};
 use crate::entities::asset::PlanTrigger;
 use crate::entities::plan::{
     AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanWarning, PlanningHorizon,
@@ -63,9 +65,9 @@ pub(crate) fn fallback_plan(
                     rate_estimated: inp.rate_stale[t],
                     import_cap_kw: inp.p_imp_max_cont_kw[t],
                     export_cap_kw: inp.p_exp_max_cont_kw[t],
-                    baseline_kw: inp.p_base_kw[t],
-                    pv_forecast_kw: inp.p_pv_kw[t],
-                    pv_used_kw: inp.p_pv_kw[t],
+                    baseline_kw: inp.load_forecast_kw[t],
+                    pv_forecast_kw: inp.generation_forecast_kw[t],
+                    pv_used_kw: inp.generation_forecast_kw[t],
                     surplus_available_kw: surplus_kw[t].max(0.0),
                     marginal_cost_import_eur_per_kwh: 0.0,
                     marginal_cost_export_eur_per_kwh: 0.0,
@@ -117,11 +119,47 @@ pub(crate) fn fallback_plan(
     }
 }
 
+/// Whether the plan dispatches an asset (forecast participants are planned around, not
+/// dispatched: no allocation, no planned power, not among the planned assets).
+fn dispatched(ctx: &dyn AssetMilpContext) -> bool {
+    matches!(ctx.participation(), Participation::Dispatched)
+}
+
 /// The roster ids of the assets a plan schedules, in planner input order.
 fn planned_asset_ids(asset_contexts: &[Box<dyn AssetMilpContext>]) -> Vec<String> {
     asset_contexts
         .iter()
+        .filter(|c| dispatched(c.as_ref()))
         .map(|c| c.asset_id().to_string())
+        .collect()
+}
+
+/// The generation the plan uses per slot [kW]: every generating forecast participant's own
+/// used generation (minus its net power), summed. A single participant's value passes through
+/// unchanged; 0 kW without one.
+fn generation_used_kw(
+    sol: &SolveOutput,
+    asset_contexts: &[Box<dyn AssetMilpContext>],
+    n: usize,
+) -> Vec<f64> {
+    (0..n)
+        .map(|t| {
+            asset_contexts
+                .iter()
+                .zip(&sol.assets)
+                .filter(|(c, _)| {
+                    matches!(
+                        c.participation(),
+                        Participation::Forecast {
+                            role: ForecastRole::Generation,
+                            ..
+                        }
+                    )
+                })
+                .map(|(_, a)| -a.net_power_kw[t])
+                .reduce(|a, b| a + b)
+                .unwrap_or(0.0)
+        })
         .collect()
 }
 
@@ -235,11 +273,14 @@ pub(crate) fn translate_to_plan(
             .all(|(a, c)| a.asset_id == c.asset_id()),
         "translate_to_plan: the solution's assets are not the contexts it was solved with"
     );
-    let mut claim_order: Vec<usize> = (0..asset_contexts.len().min(sol.assets.len())).collect();
+    let mut claim_order: Vec<usize> = (0..asset_contexts.len().min(sol.assets.len()))
+        .filter(|&i| dispatched(asset_contexts[i].as_ref()))
+        .collect();
     claim_order.sort_by_key(|&i| asset_contexts[i].surplus_claim_rank());
     let storage_throughput_kw = storage_throughput_kw(sol, n);
 
     let forecast_surplus_kw = inputs.forecast_surplus_kw();
+    let generation_used_kw = generation_used_kw(sol, asset_contexts, n);
     let mut slots = Vec::with_capacity(n);
     let mut violation_count: usize = 0;
 
@@ -281,9 +322,9 @@ pub(crate) fn translate_to_plan(
             rate_estimated: inputs.rate_stale[t],
             import_cap_kw: inputs.p_imp_max_cont_kw[t],
             export_cap_kw: inputs.p_exp_max_cont_kw[t],
-            baseline_kw: inputs.p_base_kw[t],
-            pv_forecast_kw: inputs.p_pv_kw[t],
-            pv_used_kw: sol.p_pv_used_kw[t],
+            baseline_kw: inputs.load_forecast_kw[t],
+            pv_forecast_kw: inputs.generation_forecast_kw[t],
+            pv_used_kw: generation_used_kw[t],
             surplus_available_kw,
             planned_kw_by_asset: allocations
                 .iter()

@@ -89,7 +89,7 @@ fn inputs_for(site: &Site) -> SyntheticSite {
 
     let mut syn = make_solver_site(n, 0.5);
     syn.grid.c_imp_eur_kwh = c_imp;
-    syn.grid.p_pv_kw = p_pv;
+    syn.grid.generation_forecast_kw = p_pv;
     if site.battery {
         syn.battery = Some(battery_ctx(10.0, 5.0, 1.0, 5.0, 0.96));
     }
@@ -147,7 +147,7 @@ fn dump(site: &Site, syn: &SyntheticSite, out: &SolveOutput) -> String {
         s.push_str(&format!(
             "{t:>4}  {:.2}  {:4.1}  {:5.2}  {:5.2}\n",
             syn.grid.c_imp_eur_kwh[t],
-            syn.grid.p_pv_kw[t],
+            syn.grid.generation_forecast_kw[t],
             out.ev().power_kw[t],
             out.p_imp_kw[t],
         ));

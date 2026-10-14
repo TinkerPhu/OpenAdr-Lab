@@ -36,31 +36,6 @@ pub struct GridMilpVars {
     pub u_grid: Vec<Variable>,
     pub s_imp_viol: Vec<Variable>,
     pub s_exp_viol: Vec<Variable>,
-    /// PV export decision variable: `0 <= p_pv_used[t] <= p_pv_kw[t]`. The solver curtails
-    /// below the forecast only when doing so relieves an export-capacity constraint — see
-    /// `openspec/changes/pv-export-curtailment/design.md`.
-    pub p_pv_used: Vec<Variable>,
-}
-
-/// Tiny per-kWh bias favoring full PV utilization [€/kWh]. Even though every real
-/// cost term already favors using PV over curtailing it for free (see
-/// `pv-export-curtailment` design), HiGHS's `with_mip_gap` tolerance on `u_grid`
-/// (grid mutual-exclusion binary) can still accept a solution that curtails PV
-/// by a small, cost-irrelevant amount rather than searching for the true
-/// optimum — found via `pv_used_equals_forecast_when_no_export_constraint_binds`
-/// (no export cap at all, yet the unbiased solver still curtailed). This bias
-/// is small enough that any real constraint (export cap, soft-violation
-/// penalty) still dominates and forces genuine curtailment when needed.
-pub const PV_USE_TIEBREAK_EUR_PER_KWH: f64 = 0.005;
-
-/// Objective term implementing the full-PV-utilization tie-break: a tiny
-/// reward per kWh of `p_pv_used`, for every slot.
-pub fn pv_use_tiebreak_expr(grid: &GridMilpVars, dt_h: &[f64]) -> Expression {
-    let mut expr = Expression::from(0.0);
-    for (t, &v) in grid.p_pv_used.iter().enumerate() {
-        expr += -(PV_USE_TIEBREAK_EUR_PER_KWH * dt_h[t]) * v;
-    }
-    expr
 }
 
 /// All LP variable handles of one solve: the grid's, and each asset as it declared itself, in
@@ -70,15 +45,31 @@ pub struct MilpVarPool<'a> {
     pub assets: Vec<Box<dyn DeclaredAsset + 'a>>,
 }
 
-/// The site's net controllable power in slot `t` [kW], positive = import: every asset's net
-/// power summed. The power balance and the controllable-import malus both read it, so the two
-/// cannot disagree about what an asset draws.
-pub fn site_net_power_expr(pool: &MilpVarPool, t: usize) -> Expression {
+/// Every asset's net power in slot `t` summed [kW], positive = import, over the assets `include`
+/// accepts: the one sum the power balance and the controllable-import malus read, so they cannot
+/// disagree about what an asset draws.
+fn net_power_sum(
+    pool: &MilpVarPool,
+    t: usize,
+    include: fn(&dyn DeclaredAsset) -> bool,
+) -> Expression {
     let mut e = Expression::from(0.0);
-    for asset in &pool.assets {
+    for asset in pool.assets.iter().filter(|a| include(a.as_ref())) {
         e += asset.net_power_expr(t);
     }
     e
+}
+
+/// The forecast participants' net power in slot `t` [kW] (PV's used generation, negative; the
+/// base load, a constant). The power balance's first asset term.
+pub fn forecast_net_power_expr(pool: &MilpVarPool, t: usize) -> Expression {
+    net_power_sum(pool, t, |a| !a.dispatched())
+}
+
+/// The net power of the assets the plan dispatches in slot `t` [kW]: the power balance's second
+/// asset term, and what the controllable-import malus prices above the forecast surplus.
+pub fn dispatched_net_power_expr(pool: &MilpVarPool, t: usize) -> Expression {
+    net_power_sum(pool, t, |a| a.dispatched())
 }
 
 // ── Cross-asset interaction trait ────────────────────────────────────────────
@@ -246,7 +237,7 @@ impl AssetInteraction for BatEvCoexistInteraction {
 /// Penalises any controllable-asset import that exceeds the free PV surplus.
 ///
 /// For each slot `t`, takes the site's net controllable power `p_ctrl[t]` (every asset's net
-/// power, `site_net_power_expr`) and enforces a continuous slack
+/// power, `dispatched_net_power_expr`) and enforces a continuous slack
 /// `p_ctrl_imp[t] ≥ p_ctrl[t] − surplus_pv[t]` (≥ 0).
 /// `surplus_pv[t] = max(0, p_pv[t] − p_base[t])` is a per-slot constant.
 /// The slack is penalised at `c_eur_kwh` in the Phase 1 objective, discouraging assets
@@ -287,7 +278,7 @@ impl AssetInteraction for CtrlImportMalusInteraction {
         // t indexes multiple arrays (p_ctrl_imp, forecast_surplus_kw)
         for t in 0..global.n {
             let surplus = global.forecast_surplus_kw[t].max(0.0);
-            let p_ctrl_t = site_net_power_expr(pool, t);
+            let p_ctrl_t = dispatched_net_power_expr(pool, t);
             // p_ctrl_imp[t] ≥ p_ctrl[t] − surplus_pv[t], combined with min(0.0) bound
             cs.push(constraint!(p_ctrl_imp[t] >= p_ctrl_t - surplus));
         }

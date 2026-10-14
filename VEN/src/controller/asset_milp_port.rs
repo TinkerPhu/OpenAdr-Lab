@@ -106,6 +106,29 @@ pub enum AssetSolutionDetail {
         /// The start choice per valid start slot, as solved.
         starts: Vec<f64>,
     },
+    /// A forecast participant (PV, base load): its net power is all there is to read back.
+    Forecast,
+}
+
+/// What a forecast participant contributes to the site: generation (PV) or load (base load).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForecastRole {
+    Generation,
+    Load,
+}
+
+/// Whether the plan schedules an asset or only follows its forecast.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Participation<'a> {
+    /// The plan decides the asset's power and dispatches it as allocations.
+    Dispatched,
+    /// The asset follows its own forecast (`forecast_kw`, a magnitude per slot); the plan
+    /// balances and prices around it but never dispatches it: no allocation, no planned power,
+    /// no place among the planned assets or in the controllable-import malus.
+    Forecast {
+        role: ForecastRole,
+        forecast_kw: &'a [f64],
+    },
 }
 
 /// How an asset's allocation in a slot is priced in the plan.
@@ -152,8 +175,15 @@ pub trait DeclaredAsset {
     /// The asset's net power in slot `t` [kW], positive = import: its term in the site balance.
     fn net_power_expr(&self, t: usize) -> good_lp::Expression;
 
-    /// Every constraint on the asset's own variables.
+    /// Every constraint on the asset's own variables that `slot_constraints` does not add.
     fn constraints(&self, n: usize, dt_h: &[f64]) -> Vec<good_lp::Constraint>;
+
+    /// The rows that belong to slot `t` alone, added right after that slot's power-balance row
+    /// (PV's `used <= forecast`, where the grid's own PV bound used to sit, so HiGHS receives the
+    /// rows in the order it always did).
+    fn slot_constraints(&self, _t: usize) -> Vec<good_lp::Constraint> {
+        Vec::new()
+    }
 
     /// The asset's contribution to the objective part a solve asks for.
     fn objective(&self, part: ObjectivePart<'_>, n: usize, dt_h: &[f64]) -> good_lp::Expression;
@@ -173,6 +203,12 @@ pub trait DeclaredAsset {
     /// The on/off indicator, for an asset that switches on and off at a minimum power.
     fn on_indicator(&self) -> Option<OnIndicator<'_>> {
         None
+    }
+
+    /// Whether the plan dispatches this asset (see `Participation`). Forecast participants
+    /// count in the site balance but not in the controllable-import malus.
+    fn dispatched(&self) -> bool {
+        true
     }
 }
 
@@ -207,6 +243,11 @@ pub trait AssetMilpContext: Send + Sync {
 
     /// How this asset's allocations are priced in the plan.
     fn allocation_basis(&self) -> AllocationBasis;
+
+    /// Whether the plan schedules this asset or only follows its forecast.
+    fn participation(&self) -> Participation<'_> {
+        Participation::Dispatched
+    }
 
     /// The session this asset is serving as of `now`, for the plan's session flexibility.
     /// `None` when it serves none.

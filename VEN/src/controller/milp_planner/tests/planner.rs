@@ -80,23 +80,19 @@ fn run_planner_with_heuristic_baseline_kw_varies_per_slot() {
     // traceable to a known formula (mirrors what a live BaseLoad's own
     // forecast_kw_at would produce for a `daytime_profile_kw[h] = h as f64`
     // heuristic, resolved by the caller via resolve_base_load_forecast_kw).
-    let base_load_live_forecast_kw: Vec<f64> = vec![6.0, 6.0, 7.0, 7.0];
+    let base_load_forecast_kw: Vec<f64> = vec![6.0, 6.0, 7.0, 7.0];
 
-    let plan = super::super::run_planner(
-        build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-        &test_grid(&tariffs, &no_capacity()),
-        &profile.planner,
-        profile.grid.max_import_kw,
-        profile.grid.max_export_kw,
-        &profile.assets,
+    let plan = run_planner(
+        with_forecast(
+            build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+            "base_load",
+            base_load_forecast_kw,
+        ),
+        &tariffs,
+        &no_capacity(),
+        &profile,
         now,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        None,
-        None,
-        Some(&base_load_live_forecast_kw),
-        None,
         None,
         None,
     );
@@ -152,7 +148,11 @@ fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
 
     let baseline_kw_for = |now: DateTime<Utc>| {
         let sim = make_snap_from_profile(&profile);
-        let base_load_live_forecast_kw = vec![heuristic.sample_kw(now)];
+        let crate::entities::time_grid::TimeGrid { n, cum_s, .. } =
+            crate::entities::time_grid::TimeGrid::from_zones(&profile.planner.plan_zones);
+        let base_load_forecast_kw: Vec<f64> = (0..n)
+            .map(|t| heuristic.sample_kw(now + Duration::seconds(cum_s[t])))
+            .collect();
         let tariffs = TariffTimeSeries::from_snapshots(&[TariffSnapshot {
             interval_start: now - Duration::hours(1),
             interval_end: now + Duration::hours(25),
@@ -160,21 +160,17 @@ fn run_planner_with_heuristic_baseline_kw_differs_saturday_vs_tuesday() {
             export_tariff_eur_kwh: Some(0.08),
             co2_g_kwh: Some(300.0),
         }]);
-        let plan = super::super::run_planner(
-            build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
-            &test_grid(&tariffs, &no_capacity()),
-            &profile.planner,
-            profile.grid.max_import_kw,
-            profile.grid.max_export_kw,
-            &profile.assets,
+        let plan = run_planner(
+            with_forecast(
+                build_asset_contexts(&profile, &sim, now, None, None, &tariffs),
+                "base_load",
+                base_load_forecast_kw,
+            ),
+            &tariffs,
+            &no_capacity(),
+            &profile,
             now,
             crate::entities::asset::PlanTrigger::Periodic,
-            None,
-            None,
-            None,
-            None,
-            Some(&base_load_live_forecast_kw),
-            None,
             None,
             None,
         );
@@ -235,7 +231,17 @@ fn run_planner_names_an_idle_asset_among_the_planned_ones() {
     set_ev_plugged(&mut sim, false);
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let contexts = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
-    let ids: Vec<String> = contexts.iter().map(|c| c.asset_id().to_string()).collect();
+    // The planned assets are the dispatched ones; PV and base load are only forecast.
+    let ids: Vec<String> = contexts
+        .iter()
+        .filter(|c| {
+            matches!(
+                c.participation(),
+                crate::controller::milp_planner::Participation::Dispatched
+            )
+        })
+        .map(|c| c.asset_id().to_string())
+        .collect();
     let plan = run_planner(
         contexts,
         &tariffs,
@@ -724,12 +730,10 @@ fn alert_window_clamps_import_cap_for_overlapping_slots_only() {
             ..test_grid(&tariffs, &cap)
         },
         &profile.planner,
-        &SiteInputs {
-            base_load: None,
-            ..site_inputs(&profile)
-        },
+        &site_inputs(&profile),
         &NO_REFS,
         now,
+        &[],
     );
 
     assert_eq!(inputs.p_imp_max_cont_kw[0], 0.0, "slot 0 inside alert");
@@ -772,13 +776,8 @@ fn run_planner_alert_window_yields_zero_import_cap_slots_and_solves() {
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,
-        &profile.assets,
         now,
         crate::entities::asset::PlanTrigger::Alert,
-        None,
-        None,
-        None,
-        None,
         None,
         None,
         None,
@@ -831,6 +830,7 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
         &site_inputs(&profile),
         &NO_REFS,
         now,
+        &forecast_contexts(&profile, now, None),
     );
 
     // L1: 50% of contractual 25 kW (default simple_level1_import_cap_pct).
@@ -857,12 +857,10 @@ fn simple_levels_clamp_import_cap_per_level_and_alert_overrides() {
             ..test_grid(&tariffs, &cap)
         },
         &profile.planner,
-        &SiteInputs {
-            base_load: None,
-            ..site_inputs(&profile)
-        },
+        &site_inputs(&profile),
         &NO_REFS,
         now,
+        &[],
     );
     assert_eq!(
         inputs2.p_imp_max_cont_kw[0], 0.0,

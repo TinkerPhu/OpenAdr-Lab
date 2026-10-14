@@ -260,21 +260,26 @@ fn test_mode_opportunistic_charges_from_pv_surplus() {
     let tariffs = make_tariffs(0.30, 0.02, 300.0); // flat positive import, low feed-in
 
     let opp = ev_session_with_mode(now, UserRequestMode::Opportunistic);
-    let plan = super::super::run_planner(
-        build_asset_contexts(&profile, &sim, now, Some(&opp), None, &tariffs),
-        &test_grid(&tariffs, &no_capacity()),
-        &profile.planner,
-        profile.grid.max_import_kw,
-        profile.grid.max_export_kw,
-        &profile.assets,
+    // 2.5 kW PV over a 0.5 kW base load → a 2.0 kW free-PV cap.
+    // The profile has no PV asset; the site's PV is stated as a participant of its own.
+    let mut ctxs = build_asset_contexts(&profile, &sim, now, Some(&opp), None, &tariffs);
+    let n = crate::entities::time_grid::slot_count(&profile.planner.plan_zones);
+    ctxs.insert(
+        0,
+        Box::new(crate::controller::milp_planner::ForecastMilpContext {
+            asset_id: "pv".into(),
+            role: crate::controller::milp_planner::ForecastRole::Generation,
+            forecast_kw: vec![2.5; n],
+            curtailable: true,
+        }),
+    );
+    let plan = run_planner(
+        ctxs,
+        &tariffs,
+        &no_capacity(),
+        &profile,
         now,
         crate::entities::asset::PlanTrigger::UserRequest,
-        None,
-        None,
-        Some(2.5), // pv_forecast_override: 2.5 kW PV, 0.5 kW base → 2.0 kW surplus cap
-        None,
-        None,
-        None,
         None,
         None,
     );

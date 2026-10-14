@@ -15,6 +15,7 @@ pub(crate) mod ev_schedule;
 mod ev_session_context;
 pub mod ev_trip_series;
 mod ev_usage_forecast;
+pub(crate) mod forecast_declared;
 pub mod grid;
 pub mod heater;
 mod heater_capabilities;
@@ -604,9 +605,10 @@ mod phase2a_pv_tests {
     }
 
     #[test]
-    fn no_capability_trait_overrides() {
+    /// W3: it takes part in MILP planning as a forecast participant, and has no other capability.
+    fn participates_in_planning_and_has_no_other_capability() {
         let (boxed, _) = boxed_and_state();
-        assert!(boxed.as_milp_participant().is_none());
+        assert!(boxed.as_milp_participant().is_some());
         assert!(boxed.as_request_resolvable().is_none());
         assert!(boxed.as_thermostat().is_none());
     }
@@ -673,9 +675,10 @@ mod phase2a_base_load_tests {
     }
 
     #[test]
-    fn no_capability_trait_overrides() {
+    /// W3: it takes part in MILP planning as a forecast participant, and has no other capability.
+    fn participates_in_planning_and_has_no_other_capability() {
         let (boxed, _) = boxed_and_state();
-        assert!(boxed.as_milp_participant().is_none());
+        assert!(boxed.as_milp_participant().is_some());
         assert!(boxed.as_request_resolvable().is_none());
         assert!(boxed.as_thermostat().is_none());
     }

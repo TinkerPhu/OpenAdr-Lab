@@ -7,13 +7,12 @@ use crate::controller::milp_planner::asset_port::AssetMilpContext;
 use crate::controller::SolverPort;
 use crate::controller::{HistoryPort, SolveRequest};
 use crate::entities::asset::PlanTrigger;
-use crate::entities::asset_params::{AssetParams, PvForecastParams};
+use crate::entities::asset_params::AssetParams;
 use crate::entities::device_session::BaselineOverride;
 use crate::entities::grid_signals::GridSignals;
 use crate::entities::history::GridSample;
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::PlannerParams;
-use crate::entities::solar::resolve_weather_pv_kw;
 use crate::entities::tariff_snapshot::{TariffSnapshot, TariffTimeSeries};
 use crate::entities::PlannerObjective;
 #[cfg(test)]
@@ -48,40 +47,6 @@ pub fn align_to_step(raw: DateTime<Utc>, step_s: u64) -> DateTime<Utc> {
 /// purposes — starting default, not a measured value (see
 /// docs/architecture/weather_forecast.md's staleness policy discussion).
 pub const WEATHER_STALENESS_THRESHOLD: chrono::Duration = chrono::Duration::hours(2);
-
-/// R-50: fetch (if configured) and resolve the weather-sourced PV forecast
-/// for this cycle's own slot grid. Kept here rather than in
-/// `tasks::planning` to stay under that module's stricter file-size cap —
-/// the only reason this is `async` at all is the port fetch; the
-/// staleness/config decision itself is the pure
-/// `entities::solar::resolve_weather_pv_kw`.
-pub async fn resolve_weather_pv_kw_for_cycle(
-    weather: &Arc<dyn crate::controller::WeatherForecastPort>,
-    weather_pv_params: Option<&PvForecastParams>,
-    wall_now: DateTime<Utc>,
-    now: DateTime<Utc>,
-    cum_s: &[i64],
-    n_slots: usize,
-    initial_snow: crate::entities::pv_snow::PvSnowState,
-) -> Option<Vec<f64>> {
-    let forecast = if weather_pv_params.is_some() {
-        weather.latest().await
-    } else {
-        None
-    };
-    let slot_starts: Vec<_> = cum_s[0..n_slots]
-        .iter()
-        .map(|&s| now + chrono::Duration::seconds(s))
-        .collect();
-    resolve_weather_pv_kw(
-        weather_pv_params,
-        forecast.as_ref(),
-        wall_now,
-        WEATHER_STALENESS_THRESHOLD,
-        &slot_starts,
-        initial_snow,
-    )
-}
 
 /// GB-42: fetch this cycle's diurnal-reference window (up to 168h back, plus
 /// margin) from the history store and split it into import-tariff and CO2
@@ -129,10 +94,7 @@ async fn resolve_diurnal_reference_for_cycle(
 /// Assemble the fully-owned `SolveRequest` for one plan cycle from already-computed
 /// per-cycle locals. Kept as a function (not an inline struct literal in the task
 /// loop) so the loop body stays focused on orchestration. `async` only because it
-/// resolves R-50's weather-sourced PV forecast internally
-/// (`resolve_weather_pv_kw_for_cycle`) — folding that in here, rather than a
-/// separate call in `tasks::planning::cycle`, keeps that module under its
-/// file-size cap.
+/// fetches the diurnal reference series from the history store.
 #[allow(clippy::too_many_arguments)]
 pub async fn build_solve_request(
     asset_contexts: Vec<Box<dyn AssetMilpContext>>,
@@ -140,39 +102,12 @@ pub async fn build_solve_request(
     planner: PlannerParams,
     grid_max_import_kw: f64,
     grid_max_export_kw: f64,
-    asset_params: Vec<AssetParams>,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
     baseline_override: Option<BaselineOverride>,
     objective_override: Option<PlannerObjective>,
-    pv_forecast_override: Option<f64>,
-    // pv-competence-consolidation section 4: live PvInverter-derived export
-    // ceiling per slot, resolved by the caller (tasks::planning::cycle) from
-    // a live SimState it holds before flattening to SimSnapshot. None when no
-    // live "pv" asset exists in this cycle's snapshot.
-    pv_live_forecast_kw: Option<Vec<f64>>,
-    // base-load-competence-consolidation: live BaseLoad-derived forecast per
-    // slot, resolved by the caller the same way. None when no live
-    // "base_load" asset exists in this cycle's snapshot.
-    base_load_live_forecast_kw: Option<Vec<f64>>,
-    weather: &Arc<dyn crate::controller::WeatherForecastPort>,
-    weather_pv_params: Option<&PvForecastParams>,
-    wall_now: DateTime<Utc>,
-    cum_s: &[i64],
-    n_slots: usize,
     history: Option<&Arc<dyn HistoryPort>>,
-    pv_snow: crate::entities::pv_snow::PvSnowState,
 ) -> SolveRequest {
-    let weather_pv_kw = resolve_weather_pv_kw_for_cycle(
-        weather,
-        weather_pv_params,
-        wall_now,
-        now,
-        cum_s,
-        n_slots,
-        pv_snow,
-    )
-    .await;
     let (diurnal_import_eur_kwh, diurnal_co2_g_kwh) =
         resolve_diurnal_reference_for_cycle(history, now).await;
     SolveRequest {
@@ -181,15 +116,10 @@ pub async fn build_solve_request(
         planner,
         grid_max_import_kw,
         grid_max_export_kw,
-        asset_params,
         now,
         trigger,
         baseline_override,
         objective_override,
-        pv_forecast_override,
-        pv_live_forecast_kw,
-        base_load_live_forecast_kw,
-        weather_pv_kw,
         diurnal_import_eur_kwh,
         diurnal_co2_g_kwh,
     }
@@ -516,15 +446,10 @@ mod tests {
             planner: PlannerParams::default(),
             grid_max_import_kw: 10.0,
             grid_max_export_kw: 10.0,
-            asset_params: vec![],
             now: Utc::now(),
             trigger: PlanTrigger::Periodic,
             baseline_override: None,
             objective_override: None,
-            pv_forecast_override: None,
-            pv_live_forecast_kw: None,
-            base_load_live_forecast_kw: None,
-            weather_pv_kw: None,
             diurnal_import_eur_kwh: None,
             diurnal_co2_g_kwh: None,
         };

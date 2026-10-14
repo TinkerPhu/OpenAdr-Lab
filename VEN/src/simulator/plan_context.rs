@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use tracing::{debug, warn};
 
 use crate::assets::PvInverter;
@@ -54,52 +54,6 @@ pub fn apply_pending_pv_inject(
     }
 }
 
-/// `pv-competence-consolidation` section 4: resolve one live, `PvInverter`-authoritative
-/// export-ceiling value per plan slot, using the same `uncurtailed_power_kw_at` path
-/// `max_effort_schedule` already uses — replacing the raw-snapshot
-/// `pv_ceiling_kw` reconstruction `build_milp_inputs` used to do on its own. `None` when
-/// no live `"pv"` asset exists in this snapshot (the caller falls back to the existing
-/// static-curve path unchanged); `Some(vec)` of one value per `cum_s` entry otherwise,
-/// each the *magnitude* (kW, positive) of the export ceiling at `now + cum_s[i]`, matching
-/// `pv_ceiling_kw`'s own sign convention (`uncurtailed_power_kw_at` itself returns a
-/// negative export value).
-pub fn resolve_pv_forecast_kw(
-    sim_snap: &SimState,
-    n_slots: usize,
-    cum_s: &[i64],
-    now: DateTime<Utc>,
-) -> Option<Vec<f64>> {
-    let (_, cfg) = sim_snap.find_asset(crate::ids::ASSET_PV)?;
-    let pv = cfg.as_any().downcast_ref::<PvInverter>()?;
-    Some(
-        cum_s[0..n_slots]
-            .iter()
-            .map(|&s| -pv.uncurtailed_power_kw_at(now + Duration::seconds(s), s as f64))
-            .collect(),
-    )
-}
-
-/// `base-load-competence-consolidation`: resolve one live, `BaseLoad`-authoritative forecast
-/// value per plan slot, using the asset's own `forecast_kw_at` — replacing
-/// `build_milp_inputs`'s own direct `asset_heuristics.get(ASSET_BASE_LOAD)` read. `None` when
-/// no live `"base_load"` asset exists in this snapshot (the caller falls back to the existing
-/// static-baseline path unchanged).
-pub fn resolve_base_load_forecast_kw(
-    sim_snap: &SimState,
-    n_slots: usize,
-    cum_s: &[i64],
-    now: DateTime<Utc>,
-) -> Option<Vec<f64>> {
-    let (_, cfg) = sim_snap.find_asset(crate::ids::ASSET_BASE_LOAD)?;
-    let bl = cfg.as_any().downcast_ref::<crate::assets::BaseLoad>()?;
-    Some(
-        cum_s[0..n_slots]
-            .iter()
-            .map(|&s| bl.forecast_kw_at(now + Duration::seconds(s)))
-            .collect(),
-    )
-}
-
 /// Build per-asset MILP contexts from live simulator state, for the current plan cycle.
 ///
 /// Must run before the blocking solve so asset states are captured at this instant, not
@@ -123,6 +77,8 @@ pub fn build_asset_contexts(
     // Each asset is priced by its override when it has one, its built-in default
     // otherwise — the same resolution the API and session creation use.
     comfort_overrides: &std::collections::HashMap<String, Vec<crate::entities::asset::ComfortRate>>,
+    // The PV forecast pin (sim inject `pv_plan_kw`); the PV applies it to its own forecast.
+    pv_forecast_override: Option<f64>,
 ) -> Vec<Box<dyn AssetMilpContext>> {
     sim_snap
         .iter_assets()
@@ -151,6 +107,7 @@ pub fn build_asset_contexts(
                 } else {
                     vec![]
                 },
+                pv_forecast_override,
             };
             Some(cfg.as_milp_participant()?.build_milp_context(&inputs))
         })
@@ -174,6 +131,8 @@ mod tests {
             "ev"
         } else if any.is::<HeaterMilpContext>() {
             "heater"
+        } else if any.is::<crate::controller::milp_planner::ForecastMilpContext>() {
+            "forecast"
         } else {
             "other"
         }
@@ -241,16 +200,45 @@ mod tests {
         (0..=n as i64).map(|i| i * step_s).collect()
     }
 
-    #[test]
-    fn resolve_pv_forecast_kw_none_when_no_live_pv_asset() {
-        let now = Utc::now();
-        let sim_snap = SimState::from_params(&[], now);
-        let cum_s = cum_seconds(4, 600);
-        assert_eq!(resolve_pv_forecast_kw(&sim_snap, 4, &cum_s, now), None);
+    /// The forecast participant a live asset built, by its id.
+    fn forecast_context<'a>(
+        contexts: &'a [Box<dyn AssetMilpContext>],
+        id: &str,
+    ) -> &'a crate::controller::milp_planner::ForecastMilpContext {
+        contexts
+            .iter()
+            .find(|c| c.asset_id() == id)
+            .and_then(|c| c.as_any().downcast_ref())
+            .expect("a forecast participant")
     }
 
+    fn contexts_for(
+        sim_snap: &SimState,
+        n_slots: usize,
+        cum_s: &[i64],
+        now: DateTime<Utc>,
+        pv_forecast_override: Option<f64>,
+    ) -> Vec<Box<dyn AssetMilpContext>> {
+        build_asset_contexts(
+            sim_snap,
+            n_slots,
+            cum_s,
+            now,
+            &[],
+            None,
+            &PlannerParams::default(),
+            &terminal_values(),
+            &[],
+            &std::collections::HashMap::new(),
+            pv_forecast_override,
+        )
+    }
+
+    /// W3: the live PV plans with its own forecast, one value per slot, the same
+    /// `uncurtailed_power_kw_at` its dispatch schedule uses (what `resolve_pv_forecast_kw`
+    /// used to compute outside it).
     #[test]
-    fn resolve_pv_forecast_kw_returns_one_value_per_slot_matching_uncurtailed_power_kw_at() {
+    fn the_pv_plans_with_its_own_uncurtailed_forecast() {
         use crate::entities::asset_params::{AssetParams, PvParams};
 
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap(); // sunrise-ish, varies over horizon
@@ -264,12 +252,13 @@ mod tests {
         let n_slots = 4;
         let cum_s = cum_seconds(n_slots, 3600); // hourly steps, spans sunrise to noon
 
-        let got = resolve_pv_forecast_kw(&sim_snap, n_slots, &cum_s, now)
-            .expect("live pv asset must produce Some");
+        let contexts = contexts_for(&sim_snap, n_slots, &cum_s, now, None);
+        let got = &forecast_context(&contexts, crate::ids::ASSET_PV).forecast_kw;
         assert_eq!(got.len(), n_slots);
         for (i, &kw) in got.iter().enumerate() {
             let s = cum_s[i];
-            let expected = -pv.uncurtailed_power_kw_at(now + Duration::seconds(s), s as f64);
+            let expected =
+                -pv.uncurtailed_power_kw_at(now + chrono::Duration::seconds(s), s as f64);
             assert!(
                 (kw - expected).abs() < 1e-9,
                 "slot {i}: got {kw}, expected {expected}"
@@ -284,19 +273,42 @@ mod tests {
         );
     }
 
+    /// The test pin (sim inject `pv_plan_kw`) wins over the PV's own forecast, floored at 0.
     #[test]
-    fn resolve_base_load_forecast_kw_none_when_no_live_base_load_asset() {
-        let now = Utc::now();
-        let sim_snap = SimState::from_params(&[], now);
-        let cum_s = cum_seconds(4, 600);
+    fn the_pv_forecast_pin_wins_and_is_floored_at_zero() {
+        use crate::entities::asset_params::{AssetParams, PvParams};
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        let params = vec![AssetParams::Pv(PvParams {
+            id: crate::ids::ASSET_PV.to_string(),
+            ..Default::default()
+        })];
+        let sim_snap = SimState::from_params(&params, now);
+        let cum_s = cum_seconds(3, 600);
+        let pinned = contexts_for(&sim_snap, 3, &cum_s, now, Some(2.5));
         assert_eq!(
-            resolve_base_load_forecast_kw(&sim_snap, 4, &cum_s, now),
-            None
+            forecast_context(&pinned, crate::ids::ASSET_PV).forecast_kw,
+            vec![2.5; 3]
+        );
+        let negative = contexts_for(&sim_snap, 3, &cum_s, now, Some(-1.0));
+        assert_eq!(
+            forecast_context(&negative, crate::ids::ASSET_PV).forecast_kw,
+            vec![0.0; 3]
         );
     }
 
+    /// A site without PV or base load has no forecast participant at all.
     #[test]
-    fn resolve_base_load_forecast_kw_returns_one_value_per_slot_matching_forecast_kw_at() {
+    fn no_live_pv_or_base_load_means_no_forecast_participant() {
+        let now = Utc::now();
+        let sim_snap = SimState::from_params(&[], now);
+        let cum_s = cum_seconds(4, 600);
+        assert!(contexts_for(&sim_snap, 4, &cum_s, now, None).is_empty());
+    }
+
+    /// W3: the live base load plans with its own heuristic-aware forecast
+    /// (`forecast_kw_at`), one value per slot.
+    #[test]
+    fn the_base_load_plans_with_its_own_forecast() {
         use crate::assets::BaseLoad;
         use crate::entities::asset_params::{AssetParams, BaseLoadParams};
         use crate::entities::design_vocabulary::AssetHeuristics;
@@ -335,13 +347,16 @@ mod tests {
         let n_slots = 2;
         let cum_s = cum_seconds(n_slots, 3600); // hour 8, then hour 9
 
-        let got = resolve_base_load_forecast_kw(&sim_snap, n_slots, &cum_s, now)
-            .expect("live base_load asset must produce Some");
-        assert_eq!(got, vec![1.0, 3.0]);
+        let contexts = contexts_for(&sim_snap, n_slots, &cum_s, now, None);
+        assert_eq!(
+            forecast_context(&contexts, crate::ids::ASSET_BASE_LOAD).forecast_kw,
+            vec![1.0, 3.0]
+        );
     }
 
     #[test]
-    fn build_asset_contexts_returns_one_per_milp_capable_asset_and_skips_others() {
+    fn build_asset_contexts_returns_one_per_participating_asset() {
+        // W3: the base load is a forecast participant now, so it builds a context too.
         use crate::entities::asset_params::{
             AssetParams, BaseLoadParams, BatteryParams, EvParams, HeaterParams,
         };
@@ -387,12 +402,13 @@ mod tests {
             &terminal_values(),
             &[],
             &std::collections::HashMap::new(),
+            None,
         );
 
         assert_eq!(
             contexts.len(),
-            3,
-            "base_load is not MILP-capable and must be skipped, not produce a context"
+            4,
+            "every asset takes part, the base load as a forecast"
         );
         let mut got: Vec<(String, &str)> = contexts
             .iter()
@@ -402,6 +418,7 @@ mod tests {
         assert_eq!(
             got,
             vec![
+                ("base_load".to_string(), "forecast"),
                 ("battery".to_string(), "battery"),
                 ("ev".to_string(), "ev"),
                 ("heater".to_string(), "heater"),
@@ -457,6 +474,7 @@ mod tests {
                 &terminal_values(),
                 &[],
                 overrides,
+                None,
             );
             let ev = contexts
                 .iter()
@@ -530,6 +548,7 @@ mod tests {
             &terminal_values(),
             &[],
             &std::collections::HashMap::new(),
+            None,
         );
 
         let heater_ctx = contexts
@@ -572,6 +591,7 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             &std::collections::HashMap::new(),
+            None,
         );
 
         let ids: Vec<&str> = contexts.iter().map(|c| c.asset_id()).collect();
@@ -604,6 +624,7 @@ mod tests {
             &std::collections::HashMap::new(),
             &[],
             &std::collections::HashMap::new(),
+            None,
         );
 
         let ev_ctx = contexts[0]

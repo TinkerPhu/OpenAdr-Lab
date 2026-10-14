@@ -21,8 +21,9 @@ pub(super) fn synthetic_inputs(n: usize, step_s: i64, base_kw: f64) -> MilpInput
         co2_stale_rate_warning: None,
         c_exp_eur_kwh: vec![0.08; n],
         g_imp_kgco2_kwh: vec![0.30; n],
-        p_pv_kw: vec![0.0; n],
-        p_base_kw: vec![base_kw; n],
+        generation_forecast_kw: vec![0.0; n],
+        load_forecast_kw: vec![base_kw; n],
+        load_adjust_kw: vec![0.0; n],
         p_imp_max_phys_kw: vec![25.0; n],
         p_exp_max_phys_kw: vec![10.0; n],
         p_imp_max_cont_kw: vec![25.0; n],
@@ -85,7 +86,8 @@ pub(super) struct SyntheticSite {
 impl SyntheticSite {
     /// The contexts of the assets that take part, in the order the model declares them.
     pub fn contexts(&self) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
-        let mut v: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = Vec::new();
+        // The forecast participants first, as `run_planner` orders them.
+        let mut v = site_forecast_contexts(&self.grid);
         if let Some(battery) = &self.battery {
             v.push(Box::new(battery.clone()));
         }
@@ -126,6 +128,30 @@ impl SyntheticSite {
             deadline_step,
         );
     }
+}
+
+/// The site's PV and base load as forecast participants, from the series a synthetic site's
+/// `MilpInputs` states them in: the planner tests set `generation_forecast_kw` and
+/// `load_forecast_kw` there, and the solve reads these contexts, so the two cannot disagree.
+/// Always both, as the model always had a PV variable and a base load per slot.
+pub(super) fn site_forecast_contexts(
+    grid: &MilpInputs,
+) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
+    use crate::controller::milp_planner::{ForecastMilpContext, ForecastRole};
+    vec![
+        Box::new(ForecastMilpContext {
+            asset_id: "pv".into(),
+            role: ForecastRole::Generation,
+            forecast_kw: grid.generation_forecast_kw.clone(),
+            curtailable: true,
+        }),
+        Box::new(ForecastMilpContext {
+            asset_id: "base_load".into(),
+            role: ForecastRole::Load,
+            forecast_kw: grid.load_forecast_kw.clone(),
+            curtailable: false,
+        }),
+    ]
 }
 
 /// `synthetic_inputs(n, step_s, base_kw)` as a site whose EV and heater are absent (no power).

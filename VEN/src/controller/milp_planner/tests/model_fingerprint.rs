@@ -110,6 +110,11 @@ pub(super) fn assemble_with(
     set_ev_plugged(&mut sim, true);
     let mut ctxs = build_asset_contexts(profile, &sim, now, ev, heater_target, tariffs);
     push_shiftable_load_contexts(&mut ctxs, shiftables, profile, now);
+    // The PV pin reaches the PV's own context as well as the inputs, as in production.
+    if let Some(kw) = pv_override {
+        let n = crate::entities::time_grid::slot_count(&profile.planner.plan_zones);
+        ctxs = with_forecast(ctxs, "pv", vec![kw.max(0.0); n]);
+    }
     let inputs =
         build_milp_inputs_with_override(tariffs, cap, profile, now, &[], None, pv_override);
     let p1w = build_phase1_weights(profile, PlannerObjective::MinCost);
@@ -268,13 +273,18 @@ fn solution_text(out: &SolveOutput) -> String {
     let battery = out.battery();
     let ev = out.ev();
     let heater = out.heater();
+    // W3: the PV's own used generation (minus its net power), where the grid's `p_pv_used` was.
+    let pv_used_kw: Vec<f64> = out
+        .asset("pv")
+        .map(|pv| pv.net_power_kw.iter().map(|net_kw| -net_kw).collect())
+        .unwrap_or_else(|| vec![0.0; out.p_imp_kw.len()]);
     format!(
         "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
         out.status,
         out.objective_eur,
         out.p_imp_kw,
         out.p_exp_kw,
-        out.p_pv_used_kw,
+        pv_used_kw,
         battery.charge_kw,
         battery.discharge_kw,
         ev.power_kw,

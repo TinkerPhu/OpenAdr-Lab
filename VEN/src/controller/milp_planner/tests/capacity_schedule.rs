@@ -29,6 +29,7 @@ fn inputs_with_windows(
         &site_inputs(&profile),
         &NO_REFS,
         now,
+        &forecast_contexts(&profile, now, None),
     )
 }
 

@@ -257,6 +257,10 @@ impl Default for PvParams {
 }
 
 impl PvParams {
+    /// The profile's sin-model PV curve. Test-only since W3: the planner reads the live PV's own
+    /// forecast (`PvInverter::uncurtailed_power_kw_at`); the planner tests build their PV from
+    /// this curve so every recorded plan keeps its numbers.
+    #[cfg(test)]
     pub fn forecast_kw(&self, ts: chrono::DateTime<chrono::Utc>) -> f64 {
         use chrono::Timelike;
         let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;

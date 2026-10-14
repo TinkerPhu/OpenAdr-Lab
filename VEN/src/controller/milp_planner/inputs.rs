@@ -1,51 +1,31 @@
-//! Builds `MilpInputs`, the planner's complete input parameter set, from the asset contexts,
-//! the grid signals and the site's own forecasts.
+//! Builds `MilpInputs`, the planner's complete input parameter set, from the grid signals and
+//! the forecasts the forecast participants (PV, base load) declare in their contexts.
 //!
 //! Owns the order of the stages (`input_stages`) and the one full spelling of `MilpInputs`'s
 //! fields, so a new field is a compile error here and nowhere else. It decides nothing itself:
-//! every rule (stale rates, the PV precedence chain, SIMPLE and alert caps, the baseline
-//! override) lives in its stage. It must stay infallible and free of logging; warnings travel as
+//! every rule (stale rates, the forecast totals, SIMPLE and alert caps, the baseline override)
+//! lives in its stage. It must stay infallible and free of logging; warnings travel as
 //! fields of the result.
 
 use chrono::{DateTime, Utc};
 
 use super::input_stages::{
-    apply_baseline_override, capacity_limits, forecast_series, slot_bounds, tariff_series,
+    apply_baseline_override, capacity_limits, forecast_totals, slot_bounds, tariff_series,
 };
 use super::types::*;
-use crate::entities::asset_params::{BaseLoadParams, PvParams};
+use crate::controller::milp_planner::AssetMilpContext;
 use crate::entities::device_session::BaselineOverride;
 use crate::entities::grid_signals::GridSignals;
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::time_grid::TimeGrid;
 use lab_core::time_series::TimeSeries;
 
-/// What the site contributes besides its schedulable assets: the grid connection's physical
-/// limits and where the PV and base-load forecasts come from.
+/// What the site contributes besides its assets: the grid connection's physical limits and the
+/// user's baseline override.
 pub(crate) struct SiteInputs<'a> {
     pub grid_max_import_kw: f64,
     pub grid_max_export_kw: f64,
-    pub pv_cfg: Option<&'a PvParams>,
-    pub base_load: Option<&'a BaseLoadParams>,
     pub baseline_override: Option<&'a BaselineOverride>,
-    /// Deterministic-testing pin: always wins over every other PV source.
-    pub pv_forecast_override: Option<f64>,
-    /// pv-competence-consolidation section 4: live PvInverter-derived export
-    /// ceiling per slot (simulator::plan_context::resolve_pv_forecast_kw).
-    /// None when no live "pv" asset exists this cycle.
-    pub pv_live_forecast_kw: Option<&'a [f64]>,
-    /// base-load-competence-consolidation: live BaseLoad-derived forecast per
-    /// slot (simulator::plan_context::resolve_base_load_forecast_kw). None
-    /// when no live "base_load" asset exists this cycle.
-    pub base_load_live_forecast_kw: Option<&'a [f64]>,
-    /// Weather-sourced PV forecast (R-50), pre-aligned to this call's own
-    /// slot grid by the caller (entities::solar::weather_pv_kw_for_slots).
-    /// Only consulted when pv_live_forecast_kw is None (no live "pv" asset
-    /// this cycle) — when a live asset exists, its own weather_forecast field
-    /// already factors weather in, so this and pv_live_forecast_kw are never
-    /// both meaningfully in play for the same slot. Falls back further to the
-    /// static pv_cfg sin-model curve when this is also None.
-    pub weather_pv_kw: Option<&'a [f64]>,
 }
 
 /// GB-42: history-store-backed diurnal reference series for HEURISTIC_FORECAST's
@@ -58,22 +38,26 @@ pub(crate) struct StaleRateRefs<'a> {
 }
 
 /// Build the planner's site- and grid-level inputs from the current runtime state: prices and
-/// limits from `grid`, PV and base load from `site`. Everything about a schedulable asset stays
-/// in that asset's own context, which the solve reads directly.
+/// limits from `grid`, the site's forecast generation and load summed from the forecast
+/// participants among `asset_contexts`, the baseline override from `site`. Everything else about
+/// an asset stays in its own context, which the solve reads directly.
 pub(crate) fn build_milp_inputs(
     grid: &GridSignals,
     planner: &PlannerParams,
     site: &SiteInputs,
     refs: &StaleRateRefs,
     now: DateTime<Utc>,
+    asset_contexts: &[Box<dyn AssetMilpContext>],
 ) -> MilpInputs {
     let time = TimeGrid::from_zones(&planner.plan_zones);
     let bounds = slot_bounds(&time, now);
     let tariffs = tariff_series(&grid.tariffs, planner, &bounds, refs);
-    let (p_pv_kw, mut p_base_kw) = forecast_series(&bounds, site);
-    // Before the override: SIMPLE level 2 caps import at the forecast base load.
-    let limits = capacity_limits(grid, planner, site, &bounds, &p_base_kw);
-    apply_baseline_override(&mut p_base_kw, &time, now, site.baseline_override);
+    let (generation_forecast_kw, mut load_forecast_kw) = forecast_totals(asset_contexts, time.n);
+    // Before the override: SIMPLE level 2 caps import at the forecast load.
+    let limits = capacity_limits(grid, planner, site, &bounds, &load_forecast_kw);
+    apply_baseline_override(&mut load_forecast_kw, &time, now, site.baseline_override);
+    let mut load_adjust_kw = vec![0.0; time.n];
+    apply_baseline_override(&mut load_adjust_kw, &time, now, site.baseline_override);
 
     MilpInputs {
         n: time.n,
@@ -85,8 +69,9 @@ pub(crate) fn build_milp_inputs(
         co2_stale_rate_warning: tariffs.co2_stale_rate_warning,
         c_exp_eur_kwh: tariffs.c_exp_eur_kwh,
         g_imp_kgco2_kwh: tariffs.g_imp_kgco2_kwh,
-        p_pv_kw,
-        p_base_kw,
+        generation_forecast_kw,
+        load_forecast_kw,
+        load_adjust_kw,
         p_imp_max_phys_kw: limits.p_imp_max_phys_kw,
         p_exp_max_phys_kw: limits.p_exp_max_phys_kw,
         p_imp_max_cont_kw: limits.p_imp_max_cont_kw,

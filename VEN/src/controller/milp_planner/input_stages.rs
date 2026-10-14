@@ -2,7 +2,7 @@
 //!
 //! Each stage computes its series from what it is handed and returns them; none reads another
 //! stage's result except where the planner's rules demand it, and those edges are parameters:
-//! `capacity_limits` takes the base load *before* the baseline override (SIMPLE level 2 caps at
+//! `capacity_limits` takes the forecast load *before* the baseline override (SIMPLE level 2 caps at
 //! the forecast, not at what the user added on top), and `ev_budget_warning` takes the import
 //! rates. Order of the calls is `build_milp_inputs`'s business; this module must not assemble
 //! `MilpInputs` itself, so the full field list stays in one place.
@@ -11,6 +11,7 @@ use chrono::{DateTime, Duration, Utc};
 
 use super::inputs::{SiteInputs, StaleRateRefs};
 use super::stale_rates::apply_stale_rate_policy;
+use crate::controller::milp_planner::{AssetMilpContext, ForecastRole, Participation};
 use crate::entities::capacity::tightest_capacity_limit;
 use crate::entities::capacity_curve::CommitmentDirection;
 use crate::entities::device_session::BaselineOverride;
@@ -99,47 +100,31 @@ pub(super) fn tariff_series(
     }
 }
 
-/// PV and base-load forecast per slot (the base load before any baseline override).
-pub(super) fn forecast_series(bounds: &[SlotBounds], site: &SiteInputs) -> (Vec<f64>, Vec<f64>) {
-    // Flat fallback (today's exact pre-WP5.2 behavior) used whenever no live
-    // "base_load" asset exists this cycle.
-    let flat_base_kw = site.base_load.map(|c| c.baseline_kw).unwrap_or(0.0);
-    let mut p_pv = Vec::with_capacity(bounds.len());
-    let mut p_base = Vec::with_capacity(bounds.len());
-    for (i, &(slot_t, _)) in bounds.iter().enumerate() {
-        // pv-competence-consolidation section 4: `pv_live_forecast_kw`
-        // (resolved by the caller from a live `PvInverter` via
-        // `uncurtailed_power_kw_at` — the same weather/decay-aware method
-        // `max_effort_schedule` uses) is PV's own authority for
-        // this slot. `pv_forecast_override` (the deterministic-testing pin)
-        // always wins over it; `weather_pv_kw` (R-50) and the static `pv_cfg`
-        // sin-model curve are the fallback chain for when no live "pv" asset
-        // exists at all (site described, not simulated) — `pv_live_forecast_kw`
-        // is `None` in exactly that case, since it's derived from the same
-        // live snapshot.
-        p_pv.push(
-            site.pv_forecast_override
-                .map(|kw| kw.max(0.0))
-                .or_else(|| site.pv_live_forecast_kw.and_then(|v| v.get(i)).copied())
-                .or_else(|| {
-                    site.weather_pv_kw
-                        .and_then(|v| v.get(i))
-                        .map(|kw| kw.max(0.0))
-                })
-                .unwrap_or_else(|| site.pv_cfg.map(|c| c.forecast_kw(slot_t)).unwrap_or(0.0)),
-        );
-        // base-load-competence-consolidation: `base_load_live_forecast_kw`
-        // (resolved by the caller from the live `BaseLoad`'s own
-        // heuristic-aware `forecast_kw_at`) is the base load's own answer. `flat_base_kw` (the static
-        // profile) is the fallback for when no live "base_load" asset exists.
-        p_base.push(
-            site.base_load_live_forecast_kw
-                .and_then(|v| v.get(i))
-                .copied()
-                .unwrap_or(flat_base_kw),
-        );
-    }
-    (p_pv, p_base)
+/// The forecast participants' generation and load per slot [kW], each summed over the
+/// participants of that role (PV, base load); a role no participant plays is 0 kW. A single
+/// participant's forecast passes through unchanged.
+pub(super) fn forecast_totals(
+    asset_contexts: &[Box<dyn AssetMilpContext>],
+    n: usize,
+) -> (Vec<f64>, Vec<f64>) {
+    let total = |role: ForecastRole| -> Vec<f64> {
+        (0..n)
+            .map(|t| {
+                asset_contexts
+                    .iter()
+                    .filter_map(|ctx| match ctx.participation() {
+                        Participation::Forecast {
+                            role: r,
+                            forecast_kw,
+                        } if r == role => Some(forecast_kw[t]),
+                        _ => None,
+                    })
+                    .reduce(|a, b| a + b)
+                    .unwrap_or(0.0)
+            })
+            .collect()
+    };
+    (total(ForecastRole::Generation), total(ForecastRole::Load))
 }
 
 pub(super) struct CapacityLimits {
@@ -149,14 +134,14 @@ pub(super) struct CapacityLimits {
     pub p_exp_max_cont_kw: Vec<f64>,
 }
 
-/// Physical and contractual import/export limits per slot. `p_base_kw` is the base-load forecast
-/// before the baseline override: SIMPLE level 2 caps import at it.
+/// Physical and contractual import/export limits per slot. `load_kw` is the forecast load before
+/// the baseline override: SIMPLE level 2 caps import at it.
 pub(super) fn capacity_limits(
     grid: &GridSignals,
     planner: &PlannerParams,
     site: &SiteInputs,
     bounds: &[SlotBounds],
-    p_base_kw: &[f64],
+    load_kw: &[f64],
 ) -> CapacityLimits {
     let (phys_imp, phys_exp) = (site.grid_max_import_kw, site.grid_max_export_kw);
     // WP3.3 (§8.10): subscription + reservation form one contracted allowance
@@ -176,7 +161,7 @@ pub(super) fn capacity_limits(
     };
     let mut p_imp_max_cont_kw = Vec::with_capacity(bounds.len());
     let mut p_exp_max_cont_kw = Vec::with_capacity(bounds.len());
-    for (&(slot_t, slot_end), &base_kw_t) in bounds.iter().zip(p_base_kw) {
+    for (&(slot_t, slot_end), &base_kw_t) in bounds.iter().zip(load_kw) {
         let cont_imp = slot_cap(
             CommitmentDirection::Import,
             slot_t,
@@ -234,7 +219,7 @@ pub(super) fn capacity_limits(
 /// Baseline override: additive per-slot kW adjustments, in the order the user gave them. An
 /// entry before `now` is skipped; one past the horizon lands on the last slot.
 pub(super) fn apply_baseline_override(
-    p_base_kw: &mut [f64],
+    load_kw: &mut [f64],
     grid: &TimeGrid,
     now: DateTime<Utc>,
     baseline_override: Option<&BaselineOverride>,
@@ -245,7 +230,7 @@ pub(super) fn apply_baseline_override(
         if offset_s < 0 {
             continue;
         }
-        if let Some(kw) = p_base_kw.get_mut(slot_at(&grid.cum_s, grid.n, offset_s)) {
+        if let Some(kw) = load_kw.get_mut(slot_at(&grid.cum_s, grid.n, offset_s)) {
             *kw += slot.add_kw;
         }
     }

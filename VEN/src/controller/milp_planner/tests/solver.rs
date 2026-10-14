@@ -429,7 +429,7 @@ fn battery_startup_penalty_minimises_active_restarts() {
 fn phase2_feasible_with_pv_and_production_epsilon() {
     let n = 24;
     let mut site = make_solver_site(n, 1.0);
-    site.grid.p_pv_kw = vec![5.0; n]; // substantial PV so the missing bonus >> epsilon
+    site.grid.generation_forecast_kw = vec![5.0; n]; // substantial PV so the missing bonus >> epsilon
     site.battery = Some(lossless_battery(10.0, 5.0, 1.0, 5.0));
 
     let p1w = make_phase1_weights();
@@ -464,8 +464,8 @@ fn phase2_feasible_with_pv_and_production_epsilon() {
 fn solve_power_balance_holds() {
     // For every step the power balance constraint must hold in the solution.
     let mut site = make_solver_site(4, 1.5);
-    site.grid.p_pv_kw = vec![2.0; 4]; // PV exceeds base, forces export
-                                      // Add battery so there are non-trivial flows to check
+    site.grid.generation_forecast_kw = vec![2.0; 4]; // PV exceeds base, forces export
+                                                     // Add battery so there are non-trivial flows to check
     site.battery = Some(lossless_battery(5.0, 2.5, 0.5, 3.0));
 
     let out = site
@@ -474,10 +474,11 @@ fn solve_power_balance_holds() {
 
     for t in 0..4 {
         // p_imp + p_pv + p_bat_dis = p_base + p_bat_ch + p_exp (EV=0, heater=0)
-        let residual = out.p_imp_kw[t] + site.grid.p_pv_kw[t] + out.battery().discharge_kw[t]
-            - site.grid.p_base_kw[t]
-            - out.battery().charge_kw[t]
-            - out.p_exp_kw[t];
+        let residual =
+            out.p_imp_kw[t] + site.grid.generation_forecast_kw[t] + out.battery().discharge_kw[t]
+                - site.grid.load_forecast_kw[t]
+                - out.battery().charge_kw[t]
+                - out.p_exp_kw[t];
         assert!(
             residual.abs() < 1e-4,
             "power balance violated at t={t}: residual={residual:.6}"
@@ -600,7 +601,7 @@ fn battery_does_not_discharge_during_ev_charging_with_pv_surplus() {
     // High c_bat_ev_coexist → battery should not discharge during EV-on slots.
     let n = 4;
     let mut site = make_solver_site(n, 0.5);
-    site.grid.p_pv_kw = vec![5.0; n]; // surplus = 5.0 - 0.5 = 4.5 kW ≥ ev_min
+    site.grid.generation_forecast_kw = vec![5.0; n]; // surplus = 5.0 - 0.5 = 4.5 kW ≥ ev_min
 
     site.battery = Some(lossless_battery(10.0, 8.0, 0.0, 3.0));
 
@@ -639,7 +640,7 @@ fn ctrl_import_malus_forces_mid_tier_when_pv_covers_mid() {
     // With a high malus, importing 3 kW extra for full tier is penalised → planner picks mid.
     let n = 4;
     let mut site = make_solver_site(n, 2.0); // base = 2 kW
-    site.grid.p_pv_kw = vec![5.0; n]; // surplus = 5 - 2 = 3 kW
+    site.grid.generation_forecast_kw = vec![5.0; n]; // surplus = 5 - 2 = 3 kW
     site.grid.c_imp_eur_kwh = vec![0.0; n]; // free energy — removes tariff signal, malus must do the work
     site.heater.mode = HeaterMilpMode::MayRun;
     site.heater.p_step_kw = 3.0;
@@ -681,7 +682,7 @@ fn ctrl_import_malus_disabled_allows_full_tier() {
     // avoiding expensive grid heating later.
     let n = 4;
     let mut site = make_solver_site(n, 2.0);
-    site.grid.p_pv_kw = vec![5.0, 5.0, 0.0, 0.0]; // surplus=3 kW in first 2 slots only
+    site.grid.generation_forecast_kw = vec![5.0, 5.0, 0.0, 0.0]; // surplus=3 kW in first 2 slots only
     site.grid.c_imp_eur_kwh = vec![0.0, 0.0, 0.40, 0.40];
     site.heater.mode = HeaterMilpMode::MustRun;
     site.heater.t_dead_step = Some(n - 1);
@@ -865,7 +866,7 @@ fn ctrl_import_malus_zero_when_pv_covers_full_tier() {
     // PV surplus > full tier — no import needed regardless. Malus slack = 0, both tiers are free.
     let n = 4;
     let mut site = make_solver_site(n, 2.0);
-    site.grid.p_pv_kw = vec![10.0; n]; // surplus = 10 - 2 = 8 kW > full tier (6 kW)
+    site.grid.generation_forecast_kw = vec![10.0; n]; // surplus = 10 - 2 = 8 kW > full tier (6 kW)
     site.grid.c_imp_eur_kwh = vec![0.0; n];
     site.heater.mode = HeaterMilpMode::MayRun;
     site.heater.p_step_kw = 3.0;

@@ -29,9 +29,6 @@ struct Case {
     shiftables: Vec<ShiftableLoad>,
     baseline_override: Option<BaselineOverride>,
     pv_forecast_override: Option<f64>,
-    pv_live_forecast_kw: Option<Vec<f64>>,
-    base_load_live_forecast_kw: Option<Vec<f64>>,
-    weather_pv_kw: Option<Vec<f64>>,
     diurnal_import_ref: Option<TimeSeries>,
     diurnal_co2_ref: Option<TimeSeries>,
 }
@@ -58,10 +55,6 @@ fn build(profile: &Profile, case: &Case) -> MilpInputs {
         &profile.planner,
         &SiteInputs {
             baseline_override: case.baseline_override.as_ref(),
-            pv_forecast_override: case.pv_forecast_override,
-            pv_live_forecast_kw: case.pv_live_forecast_kw.as_deref(),
-            base_load_live_forecast_kw: case.base_load_live_forecast_kw.as_deref(),
-            weather_pv_kw: case.weather_pv_kw.as_deref(),
             ..site_inputs(profile)
         },
         &StaleRateRefs {
@@ -69,6 +62,7 @@ fn build(profile: &Profile, case: &Case) -> MilpInputs {
             co2: case.diurnal_co2_ref.as_ref(),
         },
         now,
+        &forecast_contexts(profile, now, case.pv_forecast_override),
     )
 }
 
@@ -251,18 +245,13 @@ fn scenarios() -> Vec<(&'static str, MilpInputs)> {
         ),
     ));
 
-    // The PV precedence chain: the pin wins; live is taken as it is; weather is clamped; both run
-    // out before the horizon, so later slots fall through to the next source.
-    let live: Vec<f64> = (0..10).map(|i| 0.3 * i as f64 - 0.6).collect();
-    let weather: Vec<f64> = (0..18).map(|i| 1.5 - 0.2 * i as f64).collect();
+    // The PV pin wins over the PV's own forecast, and is floored at zero.
     out.push((
         "pv_override_wins",
         build(
             &all,
             &Case {
                 pv_forecast_override: Some(2.5),
-                pv_live_forecast_kw: Some(live.clone()),
-                weather_pv_kw: Some(weather.clone()),
                 ..Default::default()
             },
         ),
@@ -277,40 +266,6 @@ fn scenarios() -> Vec<(&'static str, MilpInputs)> {
             },
         ),
     ));
-    out.push((
-        "pv_live_then_weather_then_model",
-        build(
-            &all,
-            &Case {
-                pv_live_forecast_kw: Some(live),
-                weather_pv_kw: Some(weather.clone()),
-                ..Default::default()
-            },
-        ),
-    ));
-    out.push((
-        "pv_weather_then_model",
-        build(
-            &all,
-            &Case {
-                weather_pv_kw: Some(weather),
-                ..Default::default()
-            },
-        ),
-    ));
-
-    // Live base load for the first slots only; the flat profile value fills the rest.
-    out.push((
-        "base_load_live_then_flat",
-        build(
-            &all,
-            &Case {
-                base_load_live_forecast_kw: Some((0..7).map(|i| 0.4 + 0.1 * i as f64).collect()),
-                ..Default::default()
-            },
-        ),
-    ));
-
     // No PV and no base load in the profile: both series are zero.
     let mut bare = make_profile();
     bare.assets
@@ -469,44 +424,35 @@ fn scenarios_take_their_branches() {
         s["stale_heuristic_with_references"].c_imp_eur_kwh
             != s["stale_heuristic_no_reference"].c_imp_eur_kwh
     );
-    assert!(s["pv_override_wins"].p_pv_kw.iter().all(|&kw| kw == 2.5));
+    assert!(s["pv_override_wins"]
+        .generation_forecast_kw
+        .iter()
+        .all(|&kw| kw == 2.5));
     assert!(s["pv_negative_override_is_zero"]
-        .p_pv_kw
+        .generation_forecast_kw
         .iter()
         .all(|&kw| kw == 0.0));
-    let chain = &s["pv_live_then_weather_then_model"].p_pv_kw;
-    assert!(chain[0] < 0.0, "live values are not clamped");
-    assert_eq!(chain[17], 0.0, "weather values are clamped at zero");
-    assert_eq!(
-        chain[20], plain.p_pv_kw[20],
-        "past both vectors the model answers"
-    );
-    assert!(s["base_load_live_then_flat"].p_base_kw[3] != plain.p_base_kw[3]);
-    assert_eq!(
-        s["base_load_live_then_flat"].p_base_kw[10],
-        plain.p_base_kw[10]
-    );
     assert!(s["no_pv_no_base_load"]
-        .p_base_kw
+        .load_forecast_kw
         .iter()
         .all(|&kw| kw == 0.0));
     let over = &s["baseline_override_after_simple_2"];
     assert_eq!(
-        over.p_base_kw[3],
-        plain.p_base_kw[3] + 1.5,
+        over.load_forecast_kw[3],
+        plain.load_forecast_kw[3] + 1.5,
         "two entries add up"
     );
     assert_eq!(
-        over.p_base_kw[23],
-        plain.p_base_kw[23] + 0.25,
+        over.load_forecast_kw[23],
+        plain.load_forecast_kw[23] + 0.25,
         "beyond the horizon"
     );
     assert_eq!(
-        over.p_base_kw[0], plain.p_base_kw[0],
+        over.load_forecast_kw[0], plain.load_forecast_kw[0],
         "an entry before now is skipped"
     );
     assert_eq!(
-        over.p_imp_max_cont_kw[3], plain.p_base_kw[3],
+        over.p_imp_max_cont_kw[3], plain.load_forecast_kw[3],
         "SIMPLE 2 caps at the base load before the override"
     );
     assert_eq!(s["two_zones"].n, 9);
@@ -517,7 +463,7 @@ fn scenarios_take_their_branches() {
         for t in 0..inputs.n {
             assert_eq!(
                 inputs.forecast_surplus_kw()[t],
-                inputs.p_pv_kw[t] - inputs.p_base_kw[t],
+                inputs.generation_forecast_kw[t] - inputs.load_forecast_kw[t],
                 "{name} slot {t}"
             );
         }
