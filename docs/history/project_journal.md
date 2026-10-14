@@ -15575,3 +15575,37 @@ acquire would have counted as re-entrant.
 
 **Issues.** The fix was merged only after the other session's lease had ended: changing the lock
 path while a lock is held under the old path makes that lock invisible.
+
+## W1: the planner plans what each asset declares (refactor/asset-declared-planner-model)
+
+**What.** The MILP planner core no longer names an asset kind. `AssetMilpContext::declare`
+returns each asset's variables for one solve as a `DeclaredAsset`, held in a pool in input order;
+the skeleton asks every asset the same questions: its net power for the one balance sum (which
+the controllable-import malus reads too), its constraints, its `ObjectivePart::Cost` and
+`::Friction`, its phase-2 warm start and its readback into an `AssetSolution`. Friction prices
+travel on each context (`FrictionCosts`), so `Phase2Weights`, every `match asset_kind()` and the
+`c_startup_eur == 0.0` phase signal are gone; the marginal-cost pass pins each asset to its own
+winning solution. The plan side reads what assets declare: surplus-claim rank, allocation basis,
+planned state, storage legs (the site's battery fields), warnings and one session-flexibility
+rule over each asset's window. `AssetScalars`, `planned_state.rs`, `ev_diagnostics.rs`,
+`AssetKind`, `milp_params`, the `*Scalars`, the session arguments of `SolveRequest`/`run_planner`,
+and the first-EV `min_charge_kw` lookup are deleted; contexts carry their roster id and build
+from one `MilpBuildInputs`. Two batteries or two EVs plan correctly (`tests/multi_instance.rs`);
+a VEN profile still holds one asset per kind. Audit rules 16/17 keep kinds out of the core.
+
+**Why.** Every per-kind copy in the planner was a second place that knew what an asset is, the
+shape this project's bugs come from (R-98), and the only thing stopping two assets of a kind.
+
+**How it was proven.** A plan golden (`tests/plans_golden.rs`, 15 scenarios incl. a heater target,
+all three sessions at once, budget and firm-shortfall warnings, the fallback plan) was recorded
+on the untouched code first and never changed. The model fingerprint changed in 494 records, every
+one only in its as-sent digest (balance and malus rows now summed per asset, warm starts listed
+per asset); no sorted, objective or solution digest moved. `milp_inputs.txt` lost only lines.
+
+**Issues.** An edit script truncated a test file twice by reopening it for writing before reading
+it back; the ignored-test count (33 → 29) was the only sign. A scratch script named `types.py`
+shadowed Python's stdlib. Behaviour that changes off the recorded paths: friction is friction
+only even at a 0.0 startup cost; the heater's planned temperature uses the `temp_min` its tank
+energy is measured above; a shiftable load's session entry comes from its own context. Filed:
+R-140 (two firm-obligation energy rules), R-141 (first heater's switching penalty), R-142
+(hard-coded 0.03 wear). quinn-proto bumped for five new advisories.

@@ -3358,3 +3358,19 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
 - Two scripts implementing one lock had already drifted (the WSL copy lacked the atomic owner
   write and the unreadable-owner grace period). One core (`scripts/lib/lease_lock_core.sh`),
   one test that drives both entry points (`scripts/test_lease_lock.sh`).
+
+## A behaviour-preserving refactor is proven by goldens at two levels, recorded first (2026-10-14)
+
+- Record the whole *output* (here the translated `Plan` JSON, sorted keys, `{:?}`-exact floats)
+  on the untouched code before the first production edit, for scenarios that take every branch.
+  A model-level golden alone would not have shown a plan assembled differently from the same
+  solution.
+- A model golden needs two digests per expression: one independent of term order (what the model
+  *means*) and one as sent (what HiGHS *sees*). Regrouping a sum changes only the second; the gate
+  is "no sorted or solution digest moved", and every changed line can be classified by script.
+- Keep each floating-point expression's operation order when moving it (`g × g_imp × 1000 × dt`,
+  not a precomputed `g_imp × 1000`), and let a single leg pass through unsummed: `0.0 + x` is exact,
+  but a different association is not.
+- Edit scripts: never `open(p, "w").write(open(p).read())`, which truncates before reading. Watch a
+  count that should not move (here ignored tests): it caught a file emptied twice. Do not name a
+  scratch script after a stdlib module (`types.py`), and run scripts with `python -I`.

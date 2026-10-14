@@ -171,11 +171,11 @@ otherwise.
 - [x] 9.3 Update `docs/reference/architectural_smells.md` (#1, R-127). Keep the decision that a VEN
       has one asset per kind, but correct the facts: the MILP no longer has one slot per kind, and
       the boundary is now the profile check plus W2–W7.
-- [ ] 9.4 `docs/reference/TECHNICAL_DEBTS.md`: file the `MinCost`/`MaxRevenue` hard-coded wear
+- [x] 9.4 `docs/reference/TECHNICAL_DEBTS.md`: file the `MinCost`/`MaxRevenue` hard-coded wear
       `0.03` as needs-decision (Severity, Kind, Cost, Why-open). Update R-118 (`translate_to_plan`
       is split) and R-71 (`build_milp_context` now takes a parameter object) with re-measured
       numbers, or delete them if done. Verify: `audit_debt_gate.py` passes.
-- [ ] 9.5 `docs/history/project_journal.md` entry (what, why, learnings). Add any durable lesson
+- [x] 9.5 `docs/history/project_journal.md` entry (what, why, learnings). Add any durable lesson
       to `docs/reference/KEY_LEARNINGS.md`. Run `/wiki-sync` for the planner pages.
 - [ ] 9.6 Full suites on Node2: `DOCKER_HOST=Node2 bash run_all_tests.sh` (Rust, E2E BDD,
       resilience), under the Node2 lock with the branch verified on the host. Verify: all green.
