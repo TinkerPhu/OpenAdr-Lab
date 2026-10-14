@@ -36,6 +36,7 @@ impl EvMilpContext {
     /// the limit (`reachable_target_frac`), and the user learns why the car will not reach the
     /// number they asked for. Known before the solve (R-140).
     fn targets_above_the_charge_limit(&self) -> Vec<PlanWarning> {
+        use crate::entities::units::pct_from_frac;
         let limit_frac = self.soc_ceiling();
         self.obligations
             .iter()
@@ -51,9 +52,9 @@ impl EvMilpContext {
                     message: format!(
                         "EV target{whose} of {:.0} % is above the charge limit of {:.0} % \
                          — the plan charges to {:.0} %",
-                        ob.target_soc_frac * 100.0,
-                        limit_frac * 100.0,
-                        limit_frac * 100.0
+                        pct_from_frac(ob.target_soc_frac),
+                        pct_from_frac(limit_frac),
+                        pct_from_frac(limit_frac)
                     ),
                     suggested_action: Some(
                         "raise the charge limit or lower the target".to_string(),
