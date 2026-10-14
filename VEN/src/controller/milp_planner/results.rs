@@ -100,6 +100,7 @@ pub(crate) fn fallback_plan(
         created_at: now,
         trigger,
         horizon,
+        planned_asset_ids: planned_asset_ids(asset_contexts),
         slots,
         summary: PlanSummary::default(),
         session_flexibility,
@@ -116,6 +117,14 @@ pub(crate) fn fallback_plan(
         solver_ms: None,
         mip_gap_target: Some(planner.mip_gap_target),
     }
+}
+
+/// The roster ids of the assets a plan schedules, in planner input order.
+fn planned_asset_ids(asset_contexts: &[Box<dyn AssetMilpContext>]) -> Vec<String> {
+    asset_contexts
+        .iter()
+        .map(|c| c.asset_id().to_string())
+        .collect()
 }
 
 /// One asset's allocation in slot `t`, priced by the basis the asset declares, claiming the
@@ -452,6 +461,7 @@ pub(crate) fn translate_to_plan(
         created_at: now,
         trigger,
         horizon,
+        planned_asset_ids: planned_asset_ids(asset_contexts),
         slots,
         summary,
         session_flexibility,

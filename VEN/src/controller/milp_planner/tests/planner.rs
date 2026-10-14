@@ -238,6 +238,35 @@ fn run_planner_battery_absent_no_bat_allocation() {
     );
 }
 
+/// An unplugged EV is planned idle: it has no allocation in any slot, and the plan still names it
+/// among the assets it planned, in the order the contexts were handed in.
+#[test]
+fn run_planner_names_an_idle_asset_among_the_planned_ones() {
+    let now = fixed_now();
+    let profile = make_profile_1800s();
+    let mut sim = make_snap_from_profile(&profile);
+    set_ev_plugged(&mut sim, false);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    let contexts = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
+    let ids: Vec<String> = contexts.iter().map(|c| c.asset_id().to_string()).collect();
+    let plan = run_planner(
+        contexts,
+        &tariffs,
+        &no_capacity(),
+        &profile,
+        now,
+        crate::entities::asset::PlanTrigger::Periodic,
+        None,
+        None,
+    );
+    assert!(plan
+        .slots
+        .iter()
+        .all(|s| !s.allocations.iter().any(|a| a.asset_id == "ev")));
+    assert!(ids.iter().any(|id| id == "ev"), "contexts: {ids:?}");
+    assert_eq!(plan.planned_asset_ids, ids);
+}
+
 #[test]
 fn run_planner_ev_absent_no_ev_allocation() {
     let now = fixed_now();
