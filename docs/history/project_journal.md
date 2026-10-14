@@ -15880,3 +15880,18 @@ per-resource or aggregated results (`reportDescriptor.aggregate`); the VEN read 
 required `kind()` exposed; it is the site meter now, and its tests of the unused trait surface went
 with it. The first sweep missed that the site meter is held in `SimState.grid_asset`: deleting the
 file broke the build, which showed it was in use.
+
+## Capacity events replan at once, not after GB-55's rate hold (fix/capacity-event-trigger)
+
+**What.** The event poll classified every change as `PlanTrigger::RateChange`, and GB-55 holds a
+rate change for a jittered 0-60 s. A `CapacityChange` trace was only emitted when the import limit
+in force *now* moved, so a reservation, a subscription or a limit announced for later waited in
+the rate queue. The poll now compares the whole capacity picture (state in force plus the limit
+schedule, minus the poll timestamp; `CapacityPicture` in `tasks/poll_events/detect.rs`) and sends
+`CapacityChange` when it changed (`EventChanges::plan_trigger`). Tests: `plan_trigger_tests` in
+the same file; the reservation scenario now waits for a `CAPACITY_CHANGE` plan.
+
+**Why.** Found while measuring where the E2E suite waits: ven-1 held 31 replans for 12 min in one
+run, and the capacity scenarios each waited 45-76 s for a plan whose solve took 1 s. The
+documented rule was already "only RateChange is delayed"; the architecture doc described the
+old behaviour as intended.

@@ -7,7 +7,7 @@ use lab_core::time_window::TimeWindow;
 
 /// Capacity state in force now, derived from the listed OpenADR events
 /// (`controller::openadr_interface::parse_capacity_state`, GB-48).
-#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, TS)]
 pub struct OadrCapacityState {
     /// Import limit in force at the last poll (kW); None = no limit now. A
     /// limit scheduled for later is in `CapacitySnapshot`s, not here.
@@ -154,7 +154,7 @@ mod injected_limit_tests {
 /// payloads (the OpenADR 3.1 "Dynamic Operating Envelope", User Guide §8.10.1),
 /// priority-resolved and non-overlapping. The schedule is the single source
 /// for which limit applies when — read it through `tightest_capacity_limit`.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct CapacitySnapshot {
     pub interval_start: DateTime<Utc>,
     #[serde(skip_serializing)]
