@@ -21,7 +21,12 @@ COPY VTN/bff/src ./src
 # Registry and `target/` in BuildKit cache mounts (same reasoning as VEN/Dockerfile):
 # cargo rebuilds only what changed. The binary is copied out in the same step
 # because a cache mount is not part of the image.
-RUN --mount=type=cache,id=bff-cargo-registry,target=/usr/local/cargo/registry     --mount=type=cache,id=bff-cargo-git,target=/usr/local/cargo/git     --mount=type=cache,id=bff-target,target=/repo/VTN/bff/target,sharing=locked     cargo build --release && cp target/release/vtn-bff /vtn-bff
+# `release` for production; the E2E stack passes `ci` (see Cargo.toml).
+ARG CARGO_PROFILE=release
+RUN --mount=type=cache,id=bff-cargo-registry,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=bff-cargo-git,target=/usr/local/cargo/git \
+    --mount=type=cache,id=bff-target,target=/repo/VTN/bff/target,sharing=locked \
+    cargo build --profile "$CARGO_PROFILE" && cp "target/$CARGO_PROFILE/vtn-bff" /vtn-bff
 
 FROM alpine:latest
 RUN apk add --no-cache ca-certificates curl
