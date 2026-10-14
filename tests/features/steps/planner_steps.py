@@ -344,10 +344,22 @@ def _ev_power_by_slot(context):
 @then("the plan allocates no EV power while the EV is predicted away")
 def step_no_ev_power_while_away(context):
     leave, back = _predicted_trip(context)
+    # The planner's availability rule (assets/ev_trip_series.rs): a slot is away when
+    # the car is gone at its start - except the slot in progress, which a return
+    # part-way through already makes chargeable (GB-54: `now` is aligned to the slot
+    # grid, so that slot began before the wall clock). Judging slot 0 by its start
+    # alone failed whenever the suite ran in the hour of the predicted return.
+    now = datetime.now(timezone.utc)
+    ends = {
+        slot.get("slot_index"): datetime.fromisoformat(slot["end"].replace("Z", "+00:00"))
+        for slot in context.ven_plan.get("slots", [])
+    }
     charging_while_away = [
         (idx, start.isoformat(), kw)
         for idx, start, kw in _ev_power_by_slot(context)
-        if leave <= start < back and kw > 1e-6
+        if leave <= start < back
+        and not (start <= now < ends[idx] and back < ends[idx])
+        and kw > 1e-6
     ]
     assert not charging_while_away, (
         "the plan schedules EV charging inside the predicted away window "
