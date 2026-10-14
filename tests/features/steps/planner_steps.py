@@ -228,6 +228,36 @@ def step_every_allocation_planned(context):
     assert not strays, f"allocations for assets the plan does not name: {sorted(strays)}"
 
 
+def _warnings_of_kind(plan, kind):
+    return [w for w in (plan or {}).get("warnings", []) if w.get("kind") == kind]
+
+
+@when('I wait for the VEN /plan to carry a "{kind}" warning')
+def step_wait_for_plan_warning(context, kind):
+    def fetch():
+        resp = ven_get("/plan")
+        return resp.json() if resp.ok else None
+
+    context.ven_plan = poll_until(
+        fetch,
+        lambda plan: isinstance(plan, dict) and bool(_warnings_of_kind(plan, kind)),
+        timeout=150,
+        description=f"VEN /plan carries a {kind} warning",
+    )
+
+
+@then("the plan's \"{kind}\" warning names \"{first}\" and \"{second}\"")
+def step_plan_warning_names(context, kind, first, second):
+    message = _warnings_of_kind(context.ven_plan, kind)[0].get("message", "")
+    assert first in message and second in message, f"{kind} warning: {message!r}"
+
+
+@then('the plan has no "{kind}" warning')
+def step_plan_has_no_warning(context, kind):
+    found = _warnings_of_kind(context.ven_plan, kind)
+    assert not found, f"unexpected {kind} warning(s): {found}"
+
+
 @then("the plan.slots is a non-empty array")
 def step_plan_slots_nonempty(context):
     plan = context.ven_plan

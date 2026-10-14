@@ -32,6 +32,37 @@ fn own_readback(own: &AssetSolution) -> &EvSolOutput {
 }
 
 impl EvMilpContext {
+    /// One warning per obligation whose target is above the charge limit: the plan holds it to
+    /// the limit (`reachable_target_frac`), and the user learns why the car will not reach the
+    /// number they asked for. Known before the solve (R-140).
+    fn targets_above_the_charge_limit(&self) -> Vec<PlanWarning> {
+        let limit_frac = self.soc_ceiling();
+        self.obligations
+            .iter()
+            .filter(|ob| ob.target_soc_frac > limit_frac + 1e-9)
+            .map(|ob| {
+                let whose = match ob.session_id {
+                    Some(id) => format!(" for request {id}"),
+                    None => String::new(),
+                };
+                PlanWarning {
+                    severity: WarningSeverity::Warning,
+                    kind: WarningKind::TargetAboveLimit,
+                    message: format!(
+                        "EV target{whose} of {:.0} % is above the charge limit of {:.0} % \
+                         — the plan charges to {:.0} %",
+                        ob.target_soc_frac * 100.0,
+                        limit_frac * 100.0,
+                        limit_frac * 100.0
+                    ),
+                    suggested_action: Some(
+                        "raise the charge limit or lower the target".to_string(),
+                    ),
+                }
+            })
+            .collect()
+    }
+
     /// A firm obligation the plan could not meet: the window is too short, the car is
     /// away for too much of it, or the charger cannot deliver it in time.
     ///
@@ -52,7 +83,7 @@ impl EvMilpContext {
             .max_by(|a, b| a.1.total_cmp(b.1))
             .map(|(i, &kwh)| (i, kwh))?;
         let ob = self.obligations.get(idx)?;
-        let required = self.obligation_kwh(ob);
+        let required = self.required_kwh(ob);
         let delivered = (required - short).max(0.0);
         let whose = match ob.session_id {
             Some(id) => format!(" for request {id}"),
@@ -62,10 +93,13 @@ impl EvMilpContext {
             severity: WarningSeverity::Warning,
             kind: WarningKind::EvCoreEnergyUnmet,
             message: format!(
-                "EV charging{whose} falls {short:.1} kWh short of its guaranteed {required:.1} kWh              before the deadline — the plan delivers {delivered:.1} kWh, which is all the              available window allows"
+                "EV charging{whose} falls {short:.1} kWh short of its guaranteed {required:.1} kWh \
+                 before the deadline — the plan delivers {delivered:.1} kWh, which is all the \
+                 available window allows"
             ),
             suggested_action: Some(
-                "move the deadline later, lower the target, or check whether the car is predicted              away for part of the window"
+                "move the deadline later, lower the target, or check whether the car is predicted \
+                 away for part of the window"
                     .to_string(),
             ),
         })
@@ -190,7 +224,7 @@ impl AssetMilpContext for EvMilpContext {
     /// that is nothing.
     fn flexibility_window(&self, now: DateTime<Utc>) -> Option<FlexibilityWindow> {
         let window_end = self.session_departure?;
-        let firm_kwh = self.firm_obligation_kwh();
+        let firm_kwh = self.firm_required_kwh();
         let energy_needed_kwh = if firm_kwh > 0.0 {
             firm_kwh
         } else {
@@ -209,21 +243,23 @@ impl AssetMilpContext for EvMilpContext {
     /// MAX_COST mode) exceeds the budget, so charging will stop early. Stable text: WP4.3's
     /// notification dedup keys on it.
     fn input_warnings(&self, c_imp_eur_kwh: &[f64]) -> Vec<PlanWarning> {
+        let mut warnings = self.targets_above_the_charge_limit();
         let Some(budget_eur) = self.budget_eur else {
-            return Vec::new();
+            return warnings;
         };
         let min_rate = c_imp_eur_kwh.iter().cloned().fold(f64::INFINITY, f64::min);
         if self.e_extra_max_kwh * min_rate <= budget_eur {
-            return Vec::new();
+            return warnings;
         }
-        vec![PlanWarning {
+        warnings.push(PlanWarning {
             severity: WarningSeverity::Warning,
             kind: WarningKind::BudgetShortfall,
             message: "EV charging budget too low to reach the session target — \
                       charging stops at the budget (MAX_COST)"
                 .to_string(),
             suggested_action: Some("raise the budget or lower the target SoC".to_string()),
-        }]
+        });
+        warnings
     }
 
     fn inject_grid_slots(&mut self, c_imp_eur_kwh: &[f64], p_pv_kw: &[f64], p_base_kw: &[f64]) {

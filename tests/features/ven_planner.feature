@@ -24,6 +24,18 @@ Feature: VEN Planner — Stage 3 (EnergyPacket + Algorithm)
     Then the plan names the planned assets "ev, heater, battery"
     And every allocation in the plan belongs to a planned asset
 
+  # --- A target above the charge limit ---
+
+  Scenario: A firm EV target above the charge limit is planned to the limit and says so
+    # The car can only be charged to its limit; the plan says why the target will not be
+    # reached instead of reporting an unmet guarantee the window could never have held.
+    Given I inject ev_soc 0.50 via sim inject
+    And I inject ev_soc_target 0.80 via sim inject
+    When I POST a user request for asset "ev" with target_soc 0.95 and latest_end in 8 hours
+    And I wait for the VEN /plan to carry a "TARGET_ABOVE_LIMIT" warning
+    Then the plan's "TARGET_ABOVE_LIMIT" warning names "95 %" and "80 %"
+    And the plan has no "EV_CORE_ENERGY_UNMET" warning
+
   # --- Slots ---
 
   Scenario: Plan slots cover the planning horizon

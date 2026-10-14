@@ -113,7 +113,7 @@ impl SyntheticSite {
 
     /// The firm energy this EV's obligations demand above its live SoC [kWh].
     pub fn firm_kwh(&self) -> f64 {
-        self.ev.firm_obligation_kwh()
+        self.ev.firm_required_kwh()
     }
 
     /// State one firm EV obligation of `kwh` by `deadline_step`, from this EV's own pack size
