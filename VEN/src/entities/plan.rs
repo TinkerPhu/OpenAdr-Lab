@@ -114,14 +114,6 @@ pub struct PlanTimeSlot {
     /// How much more could be exported in this slot (kW)
     pub export_flexibility_kw: f64,
 
-    // --- Battery setpoints (MILP output) ---
-    /// Planned battery charge power in this slot (kW, ≥ 0). Set by MILP solver.
-    #[serde(default)]
-    pub bat_charge_kw: f64,
-    /// Planned battery discharge power in this slot (kW, ≥ 0). Set by MILP solver.
-    #[serde(default)]
-    pub bat_discharge_kw: f64,
-
     // --- Normalized plan output ---
     /// Power allocated to each asset in this slot (kW), keyed by asset_id.
     /// Positive = consumption/charging, negative = discharge/generation.
@@ -395,10 +387,6 @@ pub struct Plan {
     // --- Diagnostics ---
     pub warnings: Vec<PlanWarning>,
     // --- MILP solver output ---
-    /// Battery SoC trajectory [kWh] at the end of each planning step (length = num_steps + 1).
-    /// First entry is the initial SoC; populated by the MILP solver.
-    #[serde(default)]
-    pub soc_trajectory_kwh: Vec<f64>,
     /// Optimization objective used for this planning cycle.
     #[serde(default)]
     pub objective: PlannerObjective,
@@ -574,6 +562,29 @@ mod planned_assets_tests {
         p.planned_asset_ids = vec!["heater".into()];
         p.slots[1].planned_kw_by_asset.insert("ev".into(), 7.4);
         assert_eq!(p.planned_assets(), ["heater", "ev"]);
+    }
+
+    /// A storage asset's charge, discharge and SoC are its own entries; the plan carries no summed
+    /// battery field.
+    #[test]
+    fn a_serialized_plan_has_no_battery_fields() {
+        let v = serde_json::to_value(plan()).expect("serializes");
+        assert!(v.get("soc_trajectory_kwh").is_none());
+        let slot = &v["slots"][0];
+        assert!(slot.get("bat_charge_kw").is_none());
+        assert!(slot.get("bat_discharge_kw").is_none());
+    }
+
+    /// Plans stored before the battery fields were deleted still load (`plan_snapshots`, the
+    /// persisted active plan): unknown fields are ignored.
+    #[test]
+    fn a_stored_plan_with_the_deleted_battery_fields_still_loads() {
+        let mut v = serde_json::to_value(plan()).expect("serializes");
+        v["soc_trajectory_kwh"] = serde_json::json!([5.0, 5.5, 6.0]);
+        v["slots"][0]["bat_charge_kw"] = serde_json::json!(1.0);
+        v["slots"][0]["bat_discharge_kw"] = serde_json::json!(0.0);
+        let p: super::Plan = serde_json::from_value(v).expect("old fields are ignored");
+        assert_eq!(p.slots.len(), 2);
     }
 
     #[test]

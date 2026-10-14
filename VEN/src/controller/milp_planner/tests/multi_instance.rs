@@ -143,21 +143,11 @@ fn two_batteries_are_planned_independently() {
                 .collect::<Vec<_>>()
         );
     }
-    // The site's storage fields are the two batteries together.
-    assert!((plan.soc_trajectory_kwh[0] - (2.0 + 4.5)).abs() < 1e-9);
-    for slot in &plan.slots {
-        let net: f64 = ["bat-a", "bat-b"]
-            .iter()
-            .map(|id| allocated_kw(&plan, id)[slot.slot_index])
-            .sum();
-        assert!(
-            (slot.bat_charge_kw - slot.bat_discharge_kw - net).abs() < 0.03,
-            "slot {}: site storage {:.3} − {:.3} is not the two batteries' {net:.3}",
-            slot.slot_index,
-            slot.bat_charge_kw,
-            slot.bat_discharge_kw
-        );
-    }
+    // The plan names both, and the site balances over both of them.
+    assert!(["bat-a", "bat-b"]
+        .iter()
+        .all(|id| plan.planned_asset_ids.iter().any(|p| p == id)));
+    assert_site_balance(&plan, 0.05);
 }
 
 #[test]

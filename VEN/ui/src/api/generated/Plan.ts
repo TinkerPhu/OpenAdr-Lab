@@ -14,12 +14,14 @@ import type { SolveStatus } from "./SolveStatus";
 /**
  * A complete plan covering the planning horizon (§6.10).
  */
-export type Plan = { id: string, created_at: string, trigger: PlanTrigger, horizon: PlanningHorizon, slots: Array<PlanTimeSlot>, summary: PlanSummary, session_flexibility: Array<SessionFlexibility>, warnings: Array<PlanWarning>, 
+export type Plan = { id: string, created_at: string, trigger: PlanTrigger, horizon: PlanningHorizon, 
 /**
- * Battery SoC trajectory [kWh] at the end of each planning step (length = num_steps + 1).
- * First entry is the initial SoC; populated by the MILP solver.
+ * The roster id of every asset this plan scheduled, in planner input order, including an
+ * asset it keeps idle in every slot (which has no allocation anywhere). Fallback plans carry
+ * it too. Read it through `Plan::planned_assets`, which also covers plans stored before this
+ * field existed (`#[serde(default)]` reads them as empty).
  */
-soc_trajectory_kwh: Array<number>, 
+planned_asset_ids: Array<string>, slots: Array<PlanTimeSlot>, summary: PlanSummary, session_flexibility: Array<SessionFlexibility>, warnings: Array<PlanWarning>, 
 /**
  * Optimization objective used for this planning cycle.
  */

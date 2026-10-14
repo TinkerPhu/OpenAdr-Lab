@@ -28,10 +28,9 @@ fn run_planner_no_assets_covers_base_load() {
             "expected net_import ≈ 1.0 kW, got {:.4}",
             slot.net_import_kw
         );
-        assert!(slot.bat_charge_kw < 1e-3);
-        assert!(slot.bat_discharge_kw < 1e-3);
-        assert!(!slot.allocations.iter().any(|a| a.asset_id == "ev"));
+        assert!(slot.allocations.is_empty(), "nothing to schedule");
     }
+    assert!(plan.planned_asset_ids.is_empty());
 }
 
 // WP-T2 (docs/history/project_journal.md, search "WP-T"): a feasible solve reports
@@ -220,22 +219,10 @@ fn run_planner_battery_absent_no_bat_allocation() {
         None,
         None,
     );
+    assert!(!plan.planned_assets().contains(&"battery"));
     for slot in &plan.slots {
-        assert!(
-            slot.bat_charge_kw < 1e-3,
-            "battery absent → bat_charge_kw=0, got {:.4}",
-            slot.bat_charge_kw
-        );
-        assert!(
-            slot.bat_discharge_kw < 1e-3,
-            "battery absent → bat_discharge_kw=0, got {:.4}",
-            slot.bat_discharge_kw
-        );
+        assert!(!slot.planned_state_by_asset.contains_key("battery"));
     }
-    assert!(
-        plan.soc_trajectory_kwh.is_empty() || plan.soc_trajectory_kwh.iter().all(|&v| v < 1e-3),
-        "no battery → soc_trajectory_kwh empty or all-zero"
-    );
 }
 
 /// An unplugged EV is planned idle: it has no allocation in any slot, and the plan still names it
@@ -312,8 +299,14 @@ fn run_planner_battery_charges_on_cheap_tariff() {
         None,
         None,
     );
-    let cheap_charge: f64 = plan.slots[0..2].iter().map(|s| s.bat_charge_kw).sum();
-    let exp_dis: f64 = plan.slots[2..4].iter().map(|s| s.bat_discharge_kw).sum();
+    let cheap_charge: f64 = plan.slots[0..2]
+        .iter()
+        .map(|s| planned_kw(s, "battery").max(0.0))
+        .sum();
+    let exp_dis: f64 = plan.slots[2..4]
+        .iter()
+        .map(|s| (-planned_kw(s, "battery")).max(0.0))
+        .sum();
     assert!(
         cheap_charge > 0.1 || exp_dis > 0.1,
         "expected charging in cheap slots or discharging in expensive slots; \
@@ -390,23 +383,7 @@ fn run_planner_power_balance_invariant() {
         None,
         None,
     );
-    for (t, slot) in plan.slots.iter().enumerate() {
-        let ev_kw = slot.planned_kw_by_asset.get("ev").copied().unwrap_or(0.0);
-        let heat_kw = slot
-            .planned_kw_by_asset
-            .get("heater")
-            .copied()
-            .unwrap_or(0.0);
-        // p_imp + p_pv_used + p_dis = p_base + p_ev + p_heat + p_ch + p_exp
-        let lhs = slot.net_import_kw + slot.pv_used_kw + slot.bat_discharge_kw;
-        let rhs = slot.baseline_kw + ev_kw + heat_kw + slot.bat_charge_kw + slot.net_export_kw;
-        assert!(
-            (lhs - rhs).abs() < 0.1,
-            "power balance violated at slot {t}: lhs={:.4} rhs={:.4}",
-            lhs,
-            rhs
-        );
-    }
+    assert_site_balance(&plan, 0.1);
 }
 
 #[test]
@@ -429,10 +406,7 @@ fn run_planner_absent_battery_no_panic() {
         None,
     );
     assert_eq!(plan.slots.len(), 4, "plan must have 4 slots");
-    assert!(
-        plan.soc_trajectory_kwh.is_empty() || plan.soc_trajectory_kwh.iter().all(|&v| v < 1e-3),
-        "no battery → soc_trajectory_kwh empty or all-zero"
-    );
+    assert!(!plan.planned_assets().contains(&"battery"));
 }
 
 // ── T019: n=48 test profile fixture (24 h / 1800 s = 48 slots) ───────────
@@ -530,21 +504,17 @@ fn run_planner_n48_full_horizon() {
         None,
     );
     assert_eq!(plan.slots.len(), 48, "n=48: 24 h / 1800 s = 48 slots");
-    // Battery SoC trajectory: len = n+1, values within [e_min=1.0, e_nom=10.0] kWh
-    if !plan.soc_trajectory_kwh.is_empty() {
-        assert_eq!(
-            plan.soc_trajectory_kwh.len(),
-            49,
-            "SoC trajectory must have n+1=49 entries"
-        );
-        for (i, &soc_kwh) in plan.soc_trajectory_kwh.iter().enumerate() {
+    // The battery's planned SoC stays within its bounds, 1.0 to 10.0 kWh of 10 kWh, in every slot.
+    assert!(plan.planned_assets().contains(&"battery"));
+    for (t, slot) in plan.slots.iter().enumerate() {
+        if let Some(&soc) = slot
+            .planned_state_by_asset
+            .get("battery")
+            .and_then(|s| s.get("soc"))
+        {
             assert!(
-                soc_kwh >= 0.99,
-                "SoC[{i}]={soc_kwh:.4} kWh below e_min 1.0 kWh"
-            );
-            assert!(
-                soc_kwh <= 10.01,
-                "SoC[{i}]={soc_kwh:.4} kWh above e_nom 10.0 kWh"
+                (0.099..=1.001).contains(&soc),
+                "slot {t}: battery SoC {soc:.4} outside [0.1, 1.0]"
             );
         }
     }

@@ -147,8 +147,6 @@ mod tests {
             net_export_kw: 0.0,
             import_flexibility_kw: 0.0,
             export_flexibility_kw: 0.0,
-            bat_charge_kw: 0.0,
-            bat_discharge_kw: 0.0,
             planned_kw_by_asset: std::collections::HashMap::new(),
             planned_state_by_asset: std::collections::HashMap::new(),
         };
@@ -171,7 +169,6 @@ mod tests {
             summary: PlanSummary::default(),
             session_flexibility: vec![],
             warnings: vec![],
-            soc_trajectory_kwh: vec![],
             planned_asset_ids: vec![],
             objective: crate::entities::PlannerObjective::MinCost,
             objective_eur: 0.0,
