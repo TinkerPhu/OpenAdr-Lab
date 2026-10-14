@@ -10,7 +10,9 @@ WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY VEN/ui/package.json VEN/ui/
 COPY VTN/ui/package.json VTN/ui/
-RUN npm ci
+# npm's download cache survives in a BuildKit cache mount, so a lockfile change
+# fetches only the packages that changed.
+RUN --mount=type=cache,id=npm-cache,target=/root/.npm npm ci --prefer-offline --no-audit --no-fund
 
 COPY lab-ui/ lab-ui/
 COPY VTN/ui/ VTN/ui/

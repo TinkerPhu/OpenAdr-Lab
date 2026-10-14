@@ -31,12 +31,16 @@ WORKDIR /tests
 # it is by far the most expensive step here (115 MB), and it has no reason to
 # repeat when an unrelated dependency like `behave` or `requests` changes.
 # `requirements.txt` includes this same file, so the version is declared once.
+# pip's download cache lives in a BuildKit cache mount rather than the image, so
+# a requirements change re-downloads only what changed.
 COPY requirements-browser.txt .
-RUN pip install --no-cache-dir -r requirements-browser.txt \
+RUN --mount=type=cache,id=pip-cache,target=/root/.cache/pip \
+    pip install -r requirements-browser.txt \
     && playwright install chromium --with-deps
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,id=pip-cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
 COPY behave.ini .
 COPY features/ features/
