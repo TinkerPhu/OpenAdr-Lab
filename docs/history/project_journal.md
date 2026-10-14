@@ -15609,3 +15609,24 @@ only even at a 0.0 startup cost; the heater's planned temperature uses the `temp
 energy is measured above; a shiftable load's session entry comes from its own context. Filed:
 R-140 (two firm-obligation energy rules), R-141 (first heater's switching penalty), R-142
 (hard-coded 0.03 wear). quinn-proto bumped for five new advisories.
+
+## Build and test caching for a fast warm gate (refactor/build-cache)
+
+**What.** The VEN and BFF images build with BuildKit cache mounts (cargo registry, git, `target/`)
+instead of a stub-`main` dependency layer plus `cargo clean`, and link with mold. The E2E stack
+builds them with a new `ci` cargo profile (own crates opt-level 1 + incremental, dependencies at
+release optimisation); production keeps `release` through the Dockerfile's `CARGO_PROFILE` default.
+npm and pip downloads sit in cache mounts; the test-stack healthchecks use `start_interval: 1s`.
+`tests/settle.sh` replaces the loadavg-based settle gate with sampled CPU busy (POSIX sh, tests in
+`tests/test_settle.sh`).
+
+**Why.** Evaluating Node3, a third Pi, as a dedicated CI host: a warm gate should be as short as
+the hardware allows. Measured on Node3 with the same suite: a one-line VEN edit rebuilt the test
+images in 265 s before and 24 s after; the warm full suite (Rust, E2E, resilience) took 54 min,
+against 69 min for the same phases before (the settle gate alone had cost ~8 min).
+
+**Issues.** The entrypoint runs under dash, so the first `settle.sh` (bash arrays, `source`) would
+have failed in the container; the test now runs under dash too. A flat 100 % busy first counted as
+"the host's floor", which would have released the gate during a build; a saturation guard fixed it.
+The remaining E2E time is mostly waiting for replans: ven-1 held 31 replans for 12 min in total
+under GB-55, including capacity events the hold was never meant for (fixed separately).
