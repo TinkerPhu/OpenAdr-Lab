@@ -247,7 +247,18 @@ fn solved_and_fallback_plans_name_the_assets_they_planned() {
         .into_iter()
         .find(|f| f.name == "all_sessions")
         .expect("scenario exists");
-    let ids: Vec<String> = all.ctxs.iter().map(|c| c.asset_id().to_string()).collect();
+    // The planned assets are the dispatched ones; PV and base load are only forecast.
+    let ids: Vec<String> = all
+        .ctxs
+        .iter()
+        .filter(|c| {
+            matches!(
+                c.participation(),
+                crate::controller::milp_planner::Participation::Dispatched
+            )
+        })
+        .map(|c| c.asset_id().to_string())
+        .collect();
     assert!(ids.len() >= 3, "the scenario plans several assets: {ids:?}");
     assert_eq!(solved_plan(&all).planned_asset_ids, ids);
     assert_eq!(fallback(&all).planned_asset_ids, ids);

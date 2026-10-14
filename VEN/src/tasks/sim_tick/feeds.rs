@@ -11,9 +11,9 @@ use chrono::{DateTime, Utc};
 /// and transposition physics over every forecast sample plus a snow
 /// trajectory, and the tick loop runs once a second, so resolving the instant
 /// and the slot grid separately would double that work on every tick of every
-/// VEN. Same staleness gating and same translation the planner's own PV input
-/// uses (R-50), reached through the one shared entry point rather than
-/// re-derived, so a plan and the headroom drawn against it never disagree.
+/// VEN. The staleness gate and the translation are `entities::solar`'s one
+/// `fresh_weather_pv_series`; the planner reads the PV's forecast, which this series
+/// feeds, so a plan and the headroom drawn against it never disagree.
 pub(crate) async fn resolve_weather_pv_kw_for_tick(
     weather: &dyn crate::controller::WeatherForecastPort,
     weather_pv_params: Option<&crate::entities::asset_params::PvForecastParams>,
@@ -23,17 +23,19 @@ pub(crate) async fn resolve_weather_pv_kw_for_tick(
     Option<f64>,
     Option<Vec<crate::entities::solar::WeatherPvForecastSlot>>,
 ) {
-    let Some(params) = weather_pv_params else {
-        return (None, None);
-    };
-    let Some(forecast) = weather.latest().await else {
-        return (None, None);
-    };
-    if !forecast.is_fresh(now, crate::services::planning::WEATHER_STALENESS_THRESHOLD) {
+    if weather_pv_params.is_none() {
         return (None, None);
     }
-    let series =
-        crate::entities::solar::weather_pv_forecast_series(params, &forecast, initial_snow);
+    let forecast = weather.latest().await;
+    let Some(series) = crate::entities::solar::fresh_weather_pv_series(
+        weather_pv_params,
+        forecast.as_ref(),
+        now,
+        crate::services::planning::WEATHER_STALENESS_THRESHOLD,
+        initial_snow,
+    ) else {
+        return (None, None);
+    };
     let now_kw = crate::entities::solar::weather_pv_kw_for_slots(&series, &[now])
         .first()
         .copied();

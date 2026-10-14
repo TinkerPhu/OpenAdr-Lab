@@ -6,7 +6,6 @@ use chrono::{DateTime, Utc};
 
 use crate::controller::asset_milp_port::AssetMilpContext;
 use crate::entities::asset::PlanTrigger;
-use crate::entities::asset_params::AssetParams;
 use crate::entities::device_session::BaselineOverride;
 use crate::entities::grid_signals::GridSignals;
 use crate::entities::plan::Plan;
@@ -26,31 +25,10 @@ pub struct SolveRequest {
     pub planner: PlannerParams,
     pub grid_max_import_kw: f64,
     pub grid_max_export_kw: f64,
-    pub asset_params: Vec<AssetParams>,
     pub now: DateTime<Utc>,
     pub trigger: PlanTrigger,
     pub baseline_override: Option<BaselineOverride>,
     pub objective_override: Option<PlannerObjective>,
-    pub pv_forecast_override: Option<f64>,
-    /// `pv-competence-consolidation` section 4: live `PvInverter`-derived export
-    /// ceiling per slot, resolved by the caller from a live `SimState` it still
-    /// holds before flattening to `SimSnapshot` (`simulator::plan_context::
-    /// resolve_pv_forecast_kw`). Takes precedence over `weather_pv_kw`/the
-    /// static-curve fallback in `build_milp_inputs` (it already reflects
-    /// weather internally via `PvInverter.weather_forecast`), but not over
-    /// `pv_forecast_override`. `None` when no live `"pv"` asset exists.
-    pub pv_live_forecast_kw: Option<Vec<f64>>,
-    /// `base-load-competence-consolidation`: live `BaseLoad`-derived forecast
-    /// per slot, resolved by the caller from the same live `SimState`
-    /// (`simulator::plan_context::resolve_base_load_forecast_kw`). `None`
-    /// when no live `"base_load"` asset exists.
-    pub base_load_live_forecast_kw: Option<Vec<f64>>,
-    /// Weather-sourced PV forecast (R-50), already aligned to this cycle's
-    /// slot grid. `None` when no weather feed is configured, no
-    /// `weather_pv` profile section exists, or the cached forecast has
-    /// gone stale — see `entities::solar::weather_pv_kw_for_slots` and
-    /// `WeatherForecast::is_fresh`.
-    pub weather_pv_kw: Option<Vec<f64>>,
     /// GB-42: history-store-backed diurnal reference series for
     /// HEURISTIC_FORECAST's stale-slot fill, resolved once per cycle
     /// (`services::planning::resolve_diurnal_reference_for_cycle`). `None`

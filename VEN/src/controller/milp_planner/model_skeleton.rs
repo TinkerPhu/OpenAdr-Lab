@@ -24,11 +24,11 @@ use super::asset_port::pinned_binary;
 use super::penalty::{self, PenaltyRuleVars};
 use super::types::*;
 use crate::controller::milp_interactions::{
-    build_interactions, pv_use_tiebreak_expr, site_net_power_expr, AssetInteraction,
+    build_interactions, dispatched_net_power_expr, forecast_net_power_expr, AssetInteraction,
     GlobalMilpInputs, GridMilpVars, InteractionVars, MilpVarPool,
 };
 use crate::controller::milp_planner::{
-    AssetMilpContext, CostWeights, DeclareMode, DeclaredAsset, ObjectivePart,
+    AssetMilpContext, CostWeights, DeclareMode, DeclaredAsset, ObjectivePart, Participation,
 };
 
 /// How a solve declares its decisions. The one place the three solves differ in what they build.
@@ -95,9 +95,12 @@ pub(super) struct ModelSkeleton<'c> {
 }
 
 impl<'c> ModelSkeleton<'c> {
-    /// Declare the skeleton's variables, in this order: grid variables, penalty slacks, each
-    /// asset's variables, then the variables of every interaction that applies. Returns
-    /// `ProblemVariables` apart from the handles so the caller can `minimise` it.
+    /// Declare the skeleton's variables, in this order: grid variables, the forecast
+    /// participants' (PV's used generation, where the grid's own PV variable used to be), penalty
+    /// slacks, the dispatched assets' variables, then the variables of every interaction that
+    /// applies. `asset_contexts` lists the forecast participants first (`run_planner` sorts them
+    /// so), and the pool keeps that order. Returns `ProblemVariables` apart from the handles so
+    /// the caller can `minimise` it.
     pub(super) fn declare(
         inputs: &MilpInputs,
         p1w: &Phase1Weights,
@@ -121,7 +124,6 @@ impl<'c> ModelSkeleton<'c> {
             .collect();
         let s_imp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
         let s_exp_viol: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
-        let p_pv_used: Vec<Variable> = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
 
         let mut pool = MilpVarPool {
             grid: GridMilpVars {
@@ -130,10 +132,24 @@ impl<'c> ModelSkeleton<'c> {
                 u_grid,
                 s_imp_viol,
                 s_exp_viol,
-                p_pv_used,
             },
             assets: Vec::with_capacity(asset_contexts.len()),
         };
+
+        let forecast_count = asset_contexts
+            .iter()
+            .take_while(|c| !matches!(c.participation(), Participation::Dispatched))
+            .count();
+        debug_assert!(
+            asset_contexts[forecast_count..]
+                .iter()
+                .all(|c| matches!(c.participation(), Participation::Dispatched)),
+            "the forecast participants come first among the asset contexts"
+        );
+        for ctx in &asset_contexts[..forecast_count] {
+            pool.assets
+                .push(declaration.declare_asset(ctx.as_ref(), n, &mut vars));
+        }
 
         // WP6.3 (BL-09): one slack per window per active penalty rule, a free continuous slack
         // rather than a mode decision, so it is never pinned. Empty `penalty_rules` declares
@@ -141,7 +157,7 @@ impl<'c> ModelSkeleton<'c> {
         let penalty_vars =
             penalty::declare_penalty_vars(&inputs.penalty_rules, &inputs.cum_s, &mut vars);
 
-        for ctx in asset_contexts {
+        for ctx in &asset_contexts[forecast_count..] {
             let declared = declaration.declare_asset(ctx.as_ref(), n, &mut vars);
             pool.assets.push(declared);
         }
@@ -171,7 +187,7 @@ impl<'c> ModelSkeleton<'c> {
     }
 
     /// Phase 1's economic cost: energy, emissions, grid and violation terms, the penalty slacks,
-    /// each asset's own cost part, the interactions, and the PV-use tie-break.
+    /// each asset's own cost part (PV's full-use tie-break among them) and the interactions.
     ///
     /// This single expression is phase 1's objective, phase 2's cost cap and the marginal-cost
     /// pass's objective. They must be one expression: `c_star` (phase 1's optimum) has to equal the
@@ -198,28 +214,35 @@ impl<'c> ModelSkeleton<'c> {
         let weights = CostWeights {
             c_storage_wear_eur_kwh: p1w.c_storage_wear_eur_kwh,
         };
-        for asset in &self.pool.assets {
-            objective += asset.objective(ObjectivePart::Cost(&weights), n, &inputs.dt_h);
+        let cost = |asset: &&Box<dyn DeclaredAsset + 'c>| {
+            asset.objective(ObjectivePart::Cost(&weights), n, &inputs.dt_h)
+        };
+        for asset in self.pool.assets.iter().filter(|a| a.dispatched()) {
+            objective += cost(&asset);
         }
         for active in &self.interactions {
             objective += active.interaction.objective(&active.vars, &inputs.dt_h);
         }
-        // Full-PV-utilization tie-break (see PV_USE_TIEBREAK_EUR_PER_KWH for the rationale).
-        objective += pv_use_tiebreak_expr(&self.pool.grid, &inputs.dt_h);
+        // The forecast participants' parts (PV's full-use tie-break) last: the order HiGHS
+        // receives the terms in, and so the evaluated objective, stays what it was when the
+        // tie-break was a grid term.
+        for asset in self.pool.assets.iter().filter(|a| !a.dispatched()) {
+            objective += cost(&asset);
+        }
         objective
     }
 
-    /// Phase 2's friction: each asset's friction part and the PV-use tie-break. No economic
-    /// terms; those are capped by `cost_expr` instead.
+    /// Phase 2's friction: each asset's friction part. No economic terms; those are capped by
+    /// `cost_expr` instead. PV's full-use tie-break is in its friction part too, or the epsilon
+    /// cost budget could let friction smoothing curtail PV arbitrarily.
     pub(super) fn friction_expr(&self, inputs: &MilpInputs) -> Expression {
         let mut friction = Expression::from(0.0);
-        for asset in &self.pool.assets {
+        // Dispatched assets first, forecast participants last (see `cost_expr`).
+        let (dispatched, forecast): (Vec<_>, Vec<_>) =
+            self.pool.assets.iter().partition(|a| a.dispatched());
+        for asset in dispatched.into_iter().chain(forecast) {
             friction += asset.objective(ObjectivePart::Friction, inputs.n, &inputs.dt_h);
         }
-        // Phase 2's objective is friction-only and otherwise has no opinion on p_pv_used at
-        // all; without this, the epsilon cost budget could let friction smoothing curtail PV
-        // arbitrarily.
-        friction += pv_use_tiebreak_expr(&self.pool.grid, &inputs.dt_h);
         friction
     }
 
@@ -236,14 +259,24 @@ impl<'c> ModelSkeleton<'c> {
         let grid = &pool.grid;
         let mut power_balance_refs = Vec::with_capacity(n);
         for t in 0..n {
-            // Import plus the PV used covers the base load, every asset's net power and export.
+            // Import covers the forecast participants' net power (PV's generation, the base
+            // load), the dispatched assets', export and the user's baseline override. Two sums in
+            // this order, so HiGHS receives the row as it did when PV and base load were grid
+            // terms.
             let power_balance = constraint!(
-                grid.p_imp[t] + grid.p_pv_used[t] - site_net_power_expr(pool, t) - grid.p_exp[t]
-                    == inputs.p_base_kw[t]
+                grid.p_imp[t]
+                    - forecast_net_power_expr(pool, t)
+                    - dispatched_net_power_expr(pool, t)
+                    - grid.p_exp[t]
+                    == inputs.load_adjust_kw[t]
             );
             probe!(constraint, &power_balance);
             power_balance_refs.push(model.add_constraint(power_balance));
-            model = with_constraint(model, constraint!(grid.p_pv_used[t] <= inputs.p_pv_kw[t]));
+            for asset in &pool.assets {
+                for c in asset.slot_constraints(t) {
+                    model = with_constraint(model, c);
+                }
+            }
             model = with_constraint(
                 model,
                 constraint!(grid.p_imp[t] <= inputs.p_imp_max_phys_kw[t] * grid.u_grid[t]),
@@ -301,7 +334,6 @@ impl<'c> ModelSkeleton<'c> {
             objective_eur: solution.eval(objective),
             p_imp_kw: series(&grid.p_imp),
             p_exp_kw: series(&grid.p_exp),
-            p_pv_used_kw: series(&grid.p_pv_used),
             s_imp_viol_kw: series(&grid.s_imp_viol),
             s_exp_viol_kw: series(&grid.s_exp_viol),
             s_penalty_kw: penalty::read_penalty_solution(solution, &self.penalty_vars),
@@ -329,7 +361,6 @@ impl<'c> ModelSkeleton<'c> {
             ));
             iv.push((grid.s_imp_viol[t], p1.s_imp_viol_kw[t].max(0.0)));
             iv.push((grid.s_exp_viol[t], p1.s_exp_viol_kw[t].max(0.0)));
-            iv.push((grid.p_pv_used[t], p1.p_pv_used_kw[t].max(0.0)));
         }
         for asset in &self.pool.assets {
             if let Some(own) = p1.asset(asset.asset_id()) {

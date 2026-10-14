@@ -235,3 +235,27 @@ impl PvInverter {
             .max(0) as f64
     }
 }
+
+impl super::capability_traits::MilpParticipant for PvInverter {
+    /// The PV takes part in the plan with its own forecast: the generation it expects in each
+    /// slot (`uncurtailed_power_kw_at`, the same answer its dispatch schedule uses), or the test
+    /// pin when one is set. The plan may use less of it (curtailment), never more.
+    fn build_milp_context(
+        &self,
+        inputs: &super::MilpBuildInputs<'_>,
+    ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
+        let forecast_kw = inputs.cum_s[..inputs.n]
+            .iter()
+            .map(|&s| match inputs.pv_forecast_override {
+                Some(kw) => kw.max(0.0),
+                None => -self.uncurtailed_power_kw_at(inputs.now + Duration::seconds(s), s as f64),
+            })
+            .collect();
+        Box::new(crate::controller::milp_planner::ForecastMilpContext {
+            asset_id: inputs.asset_id.to_string(),
+            role: crate::controller::milp_planner::ForecastRole::Generation,
+            forecast_kw,
+            curtailable: true,
+        })
+    }
+}

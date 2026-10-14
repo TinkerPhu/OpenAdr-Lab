@@ -36,12 +36,10 @@ use test_prelude::*;
 
 pub use self::asset_port::{
     AllocationBasis, AssetMilpContext, AssetSolution, AssetSolutionDetail, CostWeights,
-    DeclareMode, DeclaredAsset, DischargeLeg, FlexibilityWindow, FrictionCosts, ObjectivePart,
-    OnIndicator, StorageLegs,
+    DeclareMode, DeclaredAsset, DischargeLeg, FlexibilityWindow, ForecastRole, FrictionCosts,
+    ObjectivePart, OnIndicator, Participation, StorageLegs,
 };
-pub(crate) use self::types::ShiftableLoadMilpContext;
-use crate::entities::asset_params::AssetParams;
-use crate::entities::asset_params::{BaseLoadParams, PvParams};
+pub(crate) use self::types::{ForecastMilpContext, ShiftableLoadMilpContext};
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
 pub mod asset_port;
@@ -71,20 +69,6 @@ use self::solver_phase1::*;
 use self::solver_phase2::*;
 use self::types::*;
 
-fn pv_params(asset_params: &[AssetParams]) -> Option<&PvParams> {
-    asset_params.iter().find_map(|p| match p {
-        AssetParams::Pv(v) => Some(v),
-        _ => None,
-    })
-}
-
-fn base_load_params(asset_params: &[AssetParams]) -> Option<&BaseLoadParams> {
-    asset_params.iter().find_map(|p| match p {
-        AssetParams::BaseLoad(v) => Some(v),
-        _ => None,
-    })
-}
-
 /// Run the MILP planner: build inputs from asset contexts and live state, solve via HiGHS,
 /// and translate the solution into a Plan.
 /// `objective_override` — when `Some`, overrides the planner default objective.
@@ -95,15 +79,10 @@ pub fn run_planner(
     planner: &PlannerParams,
     grid_max_import_kw: f64,
     grid_max_export_kw: f64,
-    asset_params: &[AssetParams],
     now: DateTime<Utc>,
     trigger: PlanTrigger,
     baseline_override: Option<&BaselineOverride>,
     objective_override: Option<PlannerObjective>,
-    pv_forecast_override: Option<f64>,
-    pv_live_forecast_kw: Option<&[f64]>,
-    base_load_live_forecast_kw: Option<&[f64]>,
-    weather_pv_kw: Option<&[f64]>,
     diurnal_import_ref: Option<&lab_core::time_series::TimeSeries>,
     diurnal_co2_ref: Option<&lab_core::time_series::TimeSeries>,
 ) -> Plan {
@@ -118,28 +97,25 @@ pub fn run_planner(
         "run_planner: two asset contexts report the same asset id"
     );
 
+    // The forecast participants (PV, base load) come first, the assets the plan dispatches after
+    // them; each group keeps its input order. The model declares PV's used generation where the
+    // grid's own PV variable used to be, before the penalty slacks (`ModelSkeleton::declare`).
+    asset_contexts.sort_by_key(|c| matches!(c.participation(), Participation::Dispatched));
     let objective = objective_override.unwrap_or(planner.objective);
-    let pv = pv_params(asset_params);
-    let base_load = base_load_params(asset_params);
     let inputs = build_milp_inputs(
         grid,
         planner,
         &inputs::SiteInputs {
             grid_max_import_kw,
             grid_max_export_kw,
-            pv_cfg: pv,
-            base_load,
             baseline_override,
-            pv_forecast_override,
-            pv_live_forecast_kw,
-            base_load_live_forecast_kw,
-            weather_pv_kw,
         },
         &inputs::StaleRateRefs {
             import: diurnal_import_ref,
             co2: diurnal_co2_ref,
         },
         now,
+        &asset_contexts,
     );
     // WP4.1 (BL-28): give contexts the per-slot grid data they cannot know at
     // construction time (e.g. the OPPORTUNISTIC free-energy charge cap).
@@ -207,15 +183,10 @@ impl crate::controller::SolverPort for MilpSolver {
             &req.planner,
             req.grid_max_import_kw,
             req.grid_max_export_kw,
-            &req.asset_params,
             req.now,
             req.trigger,
             req.baseline_override.as_ref(),
             req.objective_override,
-            req.pv_forecast_override,
-            req.pv_live_forecast_kw.as_deref(),
-            req.base_load_live_forecast_kw.as_deref(),
-            req.weather_pv_kw.as_deref(),
             req.diurnal_import_eur_kwh.as_ref(),
             req.diurnal_co2_g_kwh.as_ref(),
         )

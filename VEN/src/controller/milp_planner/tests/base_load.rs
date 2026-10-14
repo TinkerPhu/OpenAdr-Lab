@@ -2,15 +2,14 @@ use super::*;
 
 // ── base-load-competence-consolidation: p_base_kw numeric equivalence ────
 
-/// `build_milp_inputs`'s `p_base_kw` output must match a live `BaseLoad`'s
-/// own `forecast_kw_at` directly, not just "tests still pass" — so a future
-/// edit to one side can't silently drift from the other (same reasoning as
-/// PV's own equivalence tests, `pv.rs`).
+/// `build_milp_inputs`'s forecast load must match a live `BaseLoad`'s own `forecast_kw_at`
+/// directly, not just "tests still pass" — so a future edit to one side can't silently drift
+/// from the other (same reasoning as PV's own equivalence tests, `pv.rs`). W3: the planner reads
+/// it from the base load's own context.
 #[test]
 fn build_milp_inputs_p_base_kw_matches_live_base_load_forecast_kw_at() {
     use crate::assets::BaseLoad;
     use crate::entities::design_vocabulary::AssetHeuristics;
-    use crate::simulator::plan_context::resolve_base_load_forecast_kw;
     use crate::simulator::SimState;
 
     let now = fixed_now(); // 2026-04-11 06:00 UTC, a Saturday
@@ -47,35 +46,30 @@ fn build_milp_inputs_p_base_kw_matches_live_base_load_forecast_kw_at() {
     let crate::entities::time_grid::TimeGrid {
         n: n_slots, cum_s, ..
     } = crate::entities::time_grid::TimeGrid::from_zones(&profile.planner.plan_zones);
-    let base_load_live_forecast_kw =
-        resolve_base_load_forecast_kw(&sim_state, n_slots, &cum_s, now);
-
     let inputs = super::super::inputs::build_milp_inputs(
         &test_grid(&TariffTimeSeries::from_snapshots(&[]), &no_capacity()),
         &profile.planner,
-        &SiteInputs {
-            base_load_live_forecast_kw: base_load_live_forecast_kw.as_deref(),
-            ..site_inputs(&profile)
-        },
+        &site_inputs(&profile),
         &NO_REFS,
         now,
+        &live_forecast_contexts(&sim_state, &profile, now),
     );
 
     for (i, &slot_s) in cum_s[0..n_slots].iter().enumerate() {
         let ts = now + Duration::seconds(slot_s);
         let expected = bl_ref.forecast_kw_at(ts);
         assert!(
-            (inputs.p_base_kw[i] - expected).abs() < 1e-9,
+            (inputs.load_forecast_kw[i] - expected).abs() < 1e-9,
             "slot {i}: p_base_kw={}, forecast_kw_at={}",
-            inputs.p_base_kw[i],
+            inputs.load_forecast_kw[i],
             expected
         );
     }
     // Sanity: must actually vary (hour 6 -> 2.0, hour 7 -> 5.0) -- otherwise
     // this test wouldn't exercise the heuristic path at all.
     assert!(
-        inputs.p_base_kw.contains(&2.0) && inputs.p_base_kw.contains(&5.0),
+        inputs.load_forecast_kw.contains(&2.0) && inputs.load_forecast_kw.contains(&5.0),
         "expected both hour-6 (2.0) and hour-7 (5.0) slots, got {:?}",
-        inputs.p_base_kw
+        inputs.load_forecast_kw
     );
 }

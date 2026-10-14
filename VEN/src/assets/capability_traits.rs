@@ -32,6 +32,9 @@ pub struct MilpBuildInputs<'a> {
     pub c_terminal_eur_kwh: f64,
     /// Per-slot power the plan in force pins [kW]; empty for an asset that takes no anchor.
     pub heater_anchor: Vec<Option<f64>>,
+    /// The PV forecast pin [kW] (sim inject `pv_plan_kw`, for deterministic tests): when set, a
+    /// PV forecasts this, floored at 0, in every slot instead of its own forecast.
+    pub pv_forecast_override: Option<f64>,
 }
 
 #[cfg(test)]
@@ -56,6 +59,7 @@ impl<'a> MilpBuildInputs<'a> {
             planner,
             c_terminal_eur_kwh: 0.0,
             heater_anchor: vec![],
+            pv_forecast_override: None,
         }
     }
 }

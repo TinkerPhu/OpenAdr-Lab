@@ -265,7 +265,31 @@ impl BaseLoad {
     }
 }
 
+impl super::capability_traits::MilpParticipant for BaseLoad {
+    /// The base load takes part in the plan with its own forecast (`forecast_kw_at`): fixed
+    /// load the plan balances around, never dispatches and never curtails.
+    fn build_milp_context(
+        &self,
+        inputs: &super::MilpBuildInputs<'_>,
+    ) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
+        let forecast_kw = inputs.cum_s[..inputs.n]
+            .iter()
+            .map(|&s| self.forecast_kw_at(inputs.now + chrono::Duration::seconds(s)))
+            .collect();
+        Box::new(crate::controller::milp_planner::ForecastMilpContext {
+            asset_id: inputs.asset_id.to_string(),
+            role: crate::controller::milp_planner::ForecastRole::Load,
+            forecast_kw,
+            curtailable: false,
+        })
+    }
+}
+
 impl Asset for BaseLoad {
+    fn as_milp_participant(&self) -> Option<&dyn super::capability_traits::MilpParticipant> {
+        Some(self)
+    }
+
     fn set_observed_window(&mut self, window: Option<LoadWindowStats>) {
         BaseLoad::set_observed_window(self, window);
     }

@@ -224,7 +224,6 @@ fn grid_vars(vars: &mut ProblemVariables, n: usize) -> GridMilpVars {
         u_grid: series(),
         s_imp_viol: series(),
         s_exp_viol: series(),
-        p_pv_used: series(),
     }
 }
 

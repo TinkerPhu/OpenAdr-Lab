@@ -278,6 +278,10 @@ impl PvInverter {
 }
 
 impl Asset for PvInverter {
+    fn as_milp_participant(&self) -> Option<&dyn super::capability_traits::MilpParticipant> {
+        Some(self)
+    }
+
     fn key_features(&self, _state: &AssetState) -> Vec<KeyFeature> {
         vec![KeyFeature::power_kw("peak power", self.rated_kw)]
     }

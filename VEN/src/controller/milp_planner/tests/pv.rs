@@ -16,15 +16,10 @@ fn set_pv_inject(sim: &mut SimSnapshot, offset: f64, tau_s: f64) {
     snap.values.insert("tau_s".to_string(), tau_s);
 }
 
-/// `pv-competence-consolidation` section 4: build p_pv_kw the way production
-/// now does — a live `SimState` with irradiance_offset/tau_s injected on its
-/// `PvInverter`, resolved via `resolve_pv_forecast_kw` (the same helper
-/// `tasks::planning::cycle::run_plan_cycle` calls) and threaded into
-/// `build_milp_inputs` as `pv_live_forecast_kw`. Supersedes `set_pv_inject`'s
-/// raw-SimSnapshot mutation for tests exercising the live-PV precedence path
-/// specifically (`set_pv_inject`/`bmi` still cover the no-live-PV fallback).
+/// Build the planner's PV forecast the way production does: a live `SimState` with
+/// irradiance_offset/tau_s injected on its `PvInverter`, whose own context (W3) the planner sums
+/// into its site PV forecast.
 fn bmi_with_live_pv(profile: &Profile, now: DateTime<Utc>, offset: f64, tau_s: f64) -> MilpInputs {
-    use crate::simulator::plan_context::resolve_pv_forecast_kw;
     use crate::simulator::SimState;
 
     let mut sim_state = SimState::from_params(&profile.assets, now);
@@ -37,21 +32,13 @@ fn bmi_with_live_pv(profile: &Profile, now: DateTime<Utc>, offset: f64, tau_s: f
         pv.irradiance_offset = offset;
         pv.tau_s = tau_s;
     }
-    let crate::entities::time_grid::TimeGrid {
-        n: n_slots, cum_s, ..
-    } = crate::entities::time_grid::TimeGrid::from_zones(&profile.planner.plan_zones);
-    let pv_live_forecast_kw = resolve_pv_forecast_kw(&sim_state, n_slots, &cum_s, now);
-
     super::super::inputs::build_milp_inputs(
         &test_grid(&TariffTimeSeries::from_snapshots(&[]), &no_capacity()),
         &profile.planner,
-        &SiteInputs {
-            base_load: None,
-            pv_live_forecast_kw: pv_live_forecast_kw.as_deref(),
-            ..site_inputs(profile)
-        },
+        &site_inputs(profile),
         &NO_REFS,
         now,
+        &live_forecast_contexts(&sim_state, profile, now),
     )
 }
 
@@ -67,9 +54,9 @@ fn pv_irradiance_offset_in_forecast() {
     // slot 0: elapsed_s=0 -> decayed_offset = 0.5 * e^0 = 0.5
     // p_pv[0] = (0.0 + 0.5).clamp(0,1) × 5.0 = 2.5 kW
     assert!(
-        inp.p_pv_kw[0] > 1.0,
+        inp.generation_forecast_kw[0] > 1.0,
         "p_pv_kw[0] should reflect irradiance_offset (got {:.4})",
-        inp.p_pv_kw[0]
+        inp.generation_forecast_kw[0]
     );
 }
 
@@ -87,19 +74,19 @@ fn pv_irradiance_offset_decays_by_elapsed_seconds() {
     // slot 0 (elapsed_s=0): 0.5 × e^0 × 5.0 = 2.5 kW
     // slot 1 (elapsed_s=300): 0.5 × e^(-300/tau) × 5.0 -- must remain clearly non-zero.
     assert!(
-        inp.p_pv_kw[1] > 1.0,
+        inp.generation_forecast_kw[1] > 1.0,
         "slot 1 must retain most of the offset after one 300s step, got {:.6}",
-        inp.p_pv_kw[1]
+        inp.generation_forecast_kw[1]
     );
     // slot 5 (elapsed_s=1500): still a meaningful fraction of the original offset.
     assert!(
-        inp.p_pv_kw[5] > 0.5,
+        inp.generation_forecast_kw[5] > 0.5,
         "slot 5 must still show partial offset, got {:.6}",
-        inp.p_pv_kw[5]
+        inp.generation_forecast_kw[5]
     );
     // Decay is monotonically decreasing (offset fades over horizon)
     assert!(
-        inp.p_pv_kw[1] < inp.p_pv_kw[0],
+        inp.generation_forecast_kw[1] < inp.generation_forecast_kw[0],
         "slot 1 must be less than slot 0 (offset decaying)"
     );
 }
@@ -120,11 +107,11 @@ fn pv_shorter_tau_decays_faster_in_forecast() {
     //   fast (tau=20):  0.5 × e^(-900/20)   ≈ 0.5 × ~0     ≈ 0.00 kW
     let t = 3;
     assert!(
-        inp_fast.p_pv_kw[t] < inp_slow.p_pv_kw[t],
+        inp_fast.generation_forecast_kw[t] < inp_slow.generation_forecast_kw[t],
         "a shorter tau_s should produce lower p_pv_kw at later slots: \
              fast={:.4} >= slow={:.4}",
-        inp_fast.p_pv_kw[t],
-        inp_slow.p_pv_kw[t]
+        inp_fast.generation_forecast_kw[t],
+        inp_slow.generation_forecast_kw[t]
     );
 }
 
@@ -154,10 +141,10 @@ fn pv_zero_offset_matches_sin_model() {
         let slot_t = now + Duration::seconds(t as i64 * 300);
         let expected = pv_cfg.forecast_kw(slot_t);
         assert!(
-            (inp.p_pv_kw[t] - expected).abs() < 1e-9,
+            (inp.generation_forecast_kw[t] - expected).abs() < 1e-9,
             "slot {t}: zero-offset p_pv_kw should match sin model \
                  (got {:.6}, expected {:.6})",
-            inp.p_pv_kw[t],
+            inp.generation_forecast_kw[t],
             expected
         );
     }
@@ -186,7 +173,7 @@ fn pv_forecast_override_zeros_all_slots() {
     );
 
     // All horizon slots must be 0.0
-    for (t, &pv) in inp1.p_pv_kw.iter().enumerate() {
+    for (t, &pv) in inp1.generation_forecast_kw.iter().enumerate() {
         assert!(
             pv.abs() < 1e-9,
             "slot {t}: expected p_pv_kw=0.0 with override=Some(0.0), got {pv:.6}"
@@ -206,10 +193,10 @@ fn pv_forecast_override_zeros_all_slots() {
     assert_eq!(inp1.n, inp2.n, "two identical calls must produce same n");
     for t in 0..inp1.n {
         assert!(
-            (inp1.p_pv_kw[t] - inp2.p_pv_kw[t]).abs() < 1e-9,
+            (inp1.generation_forecast_kw[t] - inp2.generation_forecast_kw[t]).abs() < 1e-9,
             "slot {t}: second call differs: inp1={:.6} inp2={:.6}",
-            inp1.p_pv_kw[t],
-            inp2.p_pv_kw[t]
+            inp1.generation_forecast_kw[t],
+            inp2.generation_forecast_kw[t]
         );
     }
 }
@@ -231,101 +218,9 @@ fn pv_forecast_override_none_is_non_zero_during_day() {
         None,
     );
     assert!(
-        inp.p_pv_kw[0] > 0.0,
+        inp.generation_forecast_kw[0] > 0.0,
         "at noon with override=None, p_pv_kw[0] must be > 0 (got {:.4})",
-        inp.p_pv_kw[0]
-    );
-}
-
-// ── R-50: weather_pv_kw precedence ────────────────────────────────────────
-
-/// Direct call to the real `inputs::build_milp_inputs` (not the
-/// `build_milp_inputs_with_override` test wrapper, which hardcodes
-/// `weather_pv_kw: None`) — needed to exercise the weather precedence branch.
-#[allow(clippy::too_many_arguments)]
-fn bmi_with_weather(
-    tariffs: &TariffTimeSeries,
-    cap: &OadrCapacityState,
-    profile: &Profile,
-    now: DateTime<Utc>,
-    pv_forecast_override: Option<f64>,
-    weather_pv_kw: Option<&[f64]>,
-) -> MilpInputs {
-    super::super::inputs::build_milp_inputs(
-        &test_grid(tariffs, cap),
-        &profile.planner,
-        &SiteInputs {
-            base_load: None,
-            pv_forecast_override,
-            weather_pv_kw,
-            ..site_inputs(profile)
-        },
-        &NO_REFS,
-        now,
-    )
-}
-
-#[test]
-fn weather_pv_kw_overrides_sin_model_fallback() {
-    let now = fixed_midnight(); // natural sin-model irradiance = 0 at midnight
-    let profile = make_profile(); // rated_kw=5.0
-
-    let weather_kw = vec![3.5; 100]; // clearly non-zero, distinct from the midnight sin model
-    let inp = bmi_with_weather(
-        &TariffTimeSeries::from_snapshots(&[]),
-        &no_capacity(),
-        &profile,
-        now,
-        None,
-        Some(&weather_kw),
-    );
-    assert!(
-        (inp.p_pv_kw[0] - 3.5).abs() < 1e-9,
-        "weather_pv_kw must override the midnight sin-model fallback (0.0), got {:.4}",
-        inp.p_pv_kw[0]
-    );
-}
-
-#[test]
-fn weather_pv_kw_none_falls_back_to_sin_model() {
-    let noon = {
-        use chrono::TimeZone;
-        Utc.with_ymd_and_hms(2026, 4, 11, 12, 0, 0).unwrap()
-    };
-    let profile = make_profile();
-
-    let inp = bmi_with_weather(
-        &TariffTimeSeries::from_snapshots(&[]),
-        &no_capacity(),
-        &profile,
-        noon,
-        None,
-        None,
-    );
-    assert!(
-        inp.p_pv_kw[0] > 0.0,
-        "weather_pv_kw=None must fall back to the sin model (non-zero at noon)"
-    );
-}
-
-#[test]
-fn pv_forecast_override_wins_over_weather_pv_kw() {
-    let now = fixed_midnight();
-    let profile = make_profile();
-
-    let weather_kw = vec![3.5; 100];
-    let inp = bmi_with_weather(
-        &TariffTimeSeries::from_snapshots(&[]),
-        &no_capacity(),
-        &profile,
-        now,
-        Some(0.0), // deterministic-testing pin
-        Some(&weather_kw),
-    );
-    assert!(
-        inp.p_pv_kw[0].abs() < 1e-9,
-        "pv_forecast_override must win over weather_pv_kw, got {:.4}",
-        inp.p_pv_kw[0]
+        inp.generation_forecast_kw[0]
     );
 }
 
@@ -404,13 +299,8 @@ fn export_cap_forces_pv_curtailment_without_soft_violation() {
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,
-        &profile.assets,
         noon,
         crate::entities::asset::PlanTrigger::Periodic,
-        None,
-        None,
-        None,
-        None,
         None,
         None,
         None,

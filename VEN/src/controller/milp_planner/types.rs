@@ -90,10 +90,15 @@ pub(crate) struct MilpInputs {
     pub(crate) c_exp_eur_kwh: Vec<f64>,
     /// Grid CO₂ intensity [kgCO₂/kWh] (÷1000 from stored g/kWh)
     pub(crate) g_imp_kgco2_kwh: Vec<f64>,
-    /// PV generation forecast [kW]
-    pub(crate) p_pv_kw: Vec<f64>,
-    /// Non-controllable baseline load [kW]
-    pub(crate) p_base_kw: Vec<f64>,
+    /// The forecast participants' generation summed (PV) [kW]: what the plan reports as the
+    /// site's PV forecast.
+    pub(crate) generation_forecast_kw: Vec<f64>,
+    /// The forecast participants' load summed (base load), plus the user's baseline override
+    /// [kW]: what the plan reports as the site's baseline.
+    pub(crate) load_forecast_kw: Vec<f64>,
+    /// The baseline override alone [kW] (0 without one): a statement about the site, not an
+    /// asset's forecast, so it sits on the power balance's right-hand side.
+    pub(crate) load_adjust_kw: Vec<f64>,
     /// Physical import limit at meter/breaker [kW]
     pub(crate) p_imp_max_phys_kw: Vec<f64>,
     /// Physical export limit [kW]
@@ -120,9 +125,9 @@ impl MilpInputs {
     /// coexistence interaction, the import malus, the EV free-PV cap, the plan's
     /// `surplus_available_kw`) calls it and floors it where it needs a non-negative surplus.
     pub(crate) fn forecast_surplus_kw(&self) -> Vec<f64> {
-        self.p_pv_kw
+        self.generation_forecast_kw
             .iter()
-            .zip(&self.p_base_kw)
+            .zip(&self.load_forecast_kw)
             .map(|(pv_kw, base_kw)| pv_kw - base_kw)
             .collect()
     }
@@ -149,6 +154,21 @@ pub(crate) struct ShiftableLoadMilpContext {
     /// The request's own window, for the plan's session flexibility.
     pub(crate) earliest_start: chrono::DateTime<chrono::Utc>,
     pub(crate) latest_end: chrono::DateTime<chrono::Utc>,
+}
+
+/// A forecast participant as the planner sees it (W3): a PV array or a base load, built by the
+/// asset from its own forecast. It is never dispatched (`Participation::Forecast`); a
+/// curtailable one declares how much of its forecast the plan uses. Implements
+/// `AssetMilpContext` in `assets/forecast_declared.rs`.
+#[derive(Debug, Clone)]
+pub(crate) struct ForecastMilpContext {
+    pub(crate) asset_id: String,
+    pub(crate) role: super::asset_port::ForecastRole,
+    /// The asset's own forecast per slot [kW], a magnitude (generation or load).
+    pub(crate) forecast_kw: Vec<f64>,
+    /// Whether the plan may use less than the forecast (PV curtailment). A non-curtailable
+    /// participant contributes exactly its forecast.
+    pub(crate) curtailable: bool,
 }
 
 // ── Builder functions ────────────────────────────────────────────────────────
@@ -238,8 +258,6 @@ pub(crate) struct SolveOutput {
     pub(crate) p_imp_kw: Vec<f64>,
     /// Grid export power per step [kW]
     pub(crate) p_exp_kw: Vec<f64>,
-    /// PV export decision variable solution per step [kW]; `<= p_pv_kw[t]` (§ pv-export-curtailment)
-    pub(crate) p_pv_used_kw: Vec<f64>,
     /// Import contractual-limit violation slack [kW]
     pub(crate) s_imp_viol_kw: Vec<f64>,
     /// Export contractual-limit violation slack [kW]

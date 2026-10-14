@@ -181,8 +181,8 @@ fn instance_from(profile: Profile, now: DateTime<Utc>, slots: &[Slot]) -> Instan
     let mut inputs = build_milp_inputs(&tariffs, &cap, &profile, now, &[], None);
     assert_eq!(inputs.n, 288);
     for (i, &(pv, base, _, _, _)) in slots.iter().enumerate() {
-        inputs.p_pv_kw[i] = pv;
-        inputs.p_base_kw[i] = base;
+        inputs.generation_forecast_kw[i] = pv;
+        inputs.load_forecast_kw[i] = base;
     }
     for ctx in ctxs.iter_mut() {
         ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &inputs.forecast_surplus_kw());

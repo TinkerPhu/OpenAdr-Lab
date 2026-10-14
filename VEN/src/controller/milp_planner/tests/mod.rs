@@ -74,23 +74,52 @@ pub(super) fn test_grid(
     }
 }
 
-/// The site half of a `build_milp_inputs` call for a test profile: its grid limits, PV and base
-/// load, and nothing else. A test names what it adds through struct-update syntax.
+/// The site half of a `build_milp_inputs` call for a test profile: its grid limits and nothing
+/// else. A test names what it adds through struct-update syntax.
 fn site_inputs(profile: &Profile) -> SiteInputs<'_> {
     SiteInputs {
         grid_max_import_kw: profile.grid.max_import_kw,
         grid_max_export_kw: profile.grid.max_export_kw,
-        pv_cfg: profile.pv_config(),
-        base_load: profile.assets.iter().find_map(|a| match a {
-            AssetParams::BaseLoad(v) => Some(v),
-            _ => None,
-        }),
         baseline_override: None,
-        pv_forecast_override: None,
-        pv_live_forecast_kw: None,
-        base_load_live_forecast_kw: None,
-        weather_pv_kw: None,
     }
+}
+
+/// The profile's PV and base load as the forecast participants the planner tests plan with
+/// (W3 design D5): PV from the profile's sin-model curve, base load flat at its profile
+/// baseline, the forecasts these tests have always used, with the PV pin applied when set.
+/// Production builds both from the live assets instead (`PvInverter`, `BaseLoad`).
+fn forecast_contexts(
+    profile: &Profile,
+    now: DateTime<Utc>,
+    pv_forecast_override: Option<f64>,
+) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
+    use crate::controller::milp_planner::{ForecastMilpContext, ForecastRole};
+    let crate::entities::time_grid::TimeGrid { n, cum_s, .. } =
+        crate::entities::time_grid::TimeGrid::from_zones(&profile.planner.plan_zones);
+    let mut ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> = Vec::new();
+    for ap in &profile.assets {
+        let (role, curtailable, forecast_kw): (ForecastRole, bool, Vec<f64>) = match ap {
+            AssetParams::Pv(cfg) => (
+                ForecastRole::Generation,
+                true,
+                (0..n)
+                    .map(|t| match pv_forecast_override {
+                        Some(kw) => kw.max(0.0),
+                        None => cfg.forecast_kw(now + Duration::seconds(cum_s[t])),
+                    })
+                    .collect(),
+            ),
+            AssetParams::BaseLoad(cfg) => (ForecastRole::Load, false, vec![cfg.baseline_kw; n]),
+            _ => continue,
+        };
+        ctxs.push(Box::new(ForecastMilpContext {
+            asset_id: ap.id().to_string(),
+            role,
+            forecast_kw,
+            curtailable,
+        }));
+    }
+    ctxs
 }
 
 /// No diurnal reference series: history disabled, as in almost every planner test.
@@ -456,6 +485,7 @@ impl<'a> TestCycle<'a> {
             planner: self.planner,
             c_terminal_eur_kwh,
             heater_anchor: vec![],
+            pv_forecast_override: None,
         }
     }
 }
@@ -567,7 +597,64 @@ fn build_asset_contexts(
             _ => {}
         }
     }
-    ctxs
+    // The forecast participants come first, as `run_planner` orders them.
+    let mut all = forecast_contexts(profile, now, None);
+    all.extend(ctxs);
+    all
+}
+
+/// The forecast participants a live simulator state builds (its PV and base load, each from its
+/// own forecast), the way production builds them (`simulator::plan_context::build_asset_contexts`).
+fn live_forecast_contexts(
+    sim_state: &crate::simulator::SimState,
+    profile: &Profile,
+    now: DateTime<Utc>,
+) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
+    use crate::controller::milp_planner::Participation;
+    let crate::entities::time_grid::TimeGrid { n, cum_s, .. } =
+        crate::entities::time_grid::TimeGrid::from_zones(&profile.planner.plan_zones);
+    crate::simulator::plan_context::build_asset_contexts(
+        sim_state,
+        n,
+        &cum_s,
+        now,
+        &[],
+        None,
+        &profile.planner,
+        &std::collections::HashMap::new(),
+        &[],
+        &std::collections::HashMap::new(),
+        None,
+    )
+    .into_iter()
+    .filter(|c| matches!(c.participation(), Participation::Forecast { .. }))
+    .collect()
+}
+
+/// `ctxs` with the forecast participant `id` replaced by one forecasting `forecast_kw`: a test
+/// stating what that asset's own forecast is (e.g. a learned base-load profile).
+fn with_forecast(
+    ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
+    id: &str,
+    forecast_kw: Vec<f64>,
+) -> Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>> {
+    use crate::controller::milp_planner::{ForecastMilpContext, Participation};
+    ctxs.into_iter()
+        .map(|c| match c.participation() {
+            Participation::Forecast { role, .. } if c.asset_id() == id => {
+                Box::new(ForecastMilpContext {
+                    asset_id: id.to_string(),
+                    role,
+                    forecast_kw: forecast_kw.clone(),
+                    curtailable: c
+                        .as_any()
+                        .downcast_ref::<ForecastMilpContext>()
+                        .is_some_and(|f| f.curtailable),
+                }) as Box<dyn crate::controller::milp_planner::AssetMilpContext>
+            }
+            _ => c,
+        })
+        .collect()
 }
 
 /// One firm EV obligation of `kwh` to be delivered by `deadline_step`, expressed
@@ -671,17 +758,20 @@ fn build_milp_inputs_with_override(
         &profile.planner,
         &SiteInputs {
             baseline_override,
-            pv_forecast_override,
             ..site_inputs(profile)
         },
         &NO_REFS,
         now,
+        &forecast_contexts(profile, now, pv_forecast_override),
     )
 }
 
+/// `run_planner` for a test profile. Contexts built by hand without any forecast participant
+/// get the profile's PV and base load added, which is what the profile always contributed to the
+/// site before PV and base load became participants (W3).
 #[allow(clippy::too_many_arguments)] // test wrapper mirrors the real solve-path signature
 fn run_planner(
-    asset_contexts: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
+    mut asset_contexts: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
     tariffs: &TariffTimeSeries,
     capacity: &OadrCapacityState,
     profile: &Profile,
@@ -690,21 +780,25 @@ fn run_planner(
     baseline_override: Option<&crate::entities::device_session::BaselineOverride>,
     objective_override: Option<PlannerObjective>,
 ) -> Plan {
+    use crate::controller::milp_planner::Participation;
+    if !asset_contexts
+        .iter()
+        .any(|c| matches!(c.participation(), Participation::Forecast { .. }))
+    {
+        let mut with_site = forecast_contexts(profile, now, None);
+        with_site.extend(asset_contexts);
+        asset_contexts = with_site;
+    }
     super::run_planner(
         asset_contexts,
         &test_grid(tariffs, capacity),
         &profile.planner,
         profile.grid.max_import_kw,
         profile.grid.max_export_kw,
-        &profile.assets,
         now,
         trigger,
         baseline_override,
         objective_override,
-        None,
-        None,
-        None,
-        None,
         None,
         None,
     )

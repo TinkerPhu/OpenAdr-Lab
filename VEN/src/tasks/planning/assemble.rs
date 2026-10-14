@@ -25,16 +25,14 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
-use crate::controller::{HistoryPort, SolveRequest, WeatherForecastPort};
+use crate::controller::{HistoryPort, SolveRequest};
 use crate::entities::asset::PlanTrigger;
-use crate::entities::asset_params::{AssetParams, PvForecastParams};
+use crate::entities::asset_params::AssetParams;
 use crate::entities::grid_signals::GridSignals;
 use crate::entities::plan::Plan;
 use crate::entities::planner_params::PlannerParams;
 use crate::services::planning::PlanCycleInputs;
-use crate::simulator::plan_context::{
-    build_asset_contexts, resolve_base_load_forecast_kw, resolve_pv_forecast_kw,
-};
+use crate::simulator::plan_context::build_asset_contexts;
 use crate::simulator::SimState;
 use crate::state::AppState;
 
@@ -56,13 +54,9 @@ pub(super) struct SolveAssembly<'a> {
     pub asset_params: &'a [AssetParams],
     pub grid_max_import_kw: f64,
     pub grid_max_export_kw: f64,
-    pub weather: &'a Arc<dyn WeatherForecastPort>,
-    pub weather_pv_params: Option<&'a PvForecastParams>,
     pub history: Option<&'a Arc<dyn HistoryPort>>,
     /// Step-aligned cycle instant — the slot grid's origin.
     pub now: DateTime<Utc>,
-    /// True wall clock, for anything measuring real elapsed time.
-    pub wall_now: DateTime<Utc>,
     pub trigger: PlanTrigger,
     /// The plan in force, which the heater anchor pins against. Read by the
     /// caller because it needs the same value again after the solve, for the
@@ -116,36 +110,20 @@ pub(super) async fn assemble_solve_request(a: SolveAssembly<'_>, st: CycleState)
         &c_terminal_eur_kwh_by_asset,
         &heater_anchor,
         &a.state.comfort_overrides_map().await,
+        st.pv_forecast_override,
     );
 
-    // Each asset's own forecast, from the asset rather than reconstructed by a
-    // site-level caller: `None` when that asset is not live this cycle.
-    let pv_live_forecast_kw = resolve_pv_forecast_kw(a.sim_snap, n_slots, &cum_s, a.now);
-    let base_load_live_forecast_kw =
-        resolve_base_load_forecast_kw(a.sim_snap, n_slots, &cum_s, a.now);
-
-    // R-50: resolves the weather-sourced PV forecast internally.
     crate::services::planning::build_solve_request(
         asset_contexts,
         grid,
         a.planner.clone(),
         a.grid_max_import_kw,
         a.grid_max_export_kw,
-        a.asset_params.to_vec(),
         a.now,
         a.trigger,
         st.bl_override,
         Some(st.obj),
-        st.pv_forecast_override,
-        pv_live_forecast_kw,
-        base_load_live_forecast_kw,
-        a.weather,
-        a.weather_pv_params,
-        a.wall_now,
-        &cum_s,
-        n_slots,
         a.history,
-        a.state.pv_snow_state().await,
     )
     .await
 }

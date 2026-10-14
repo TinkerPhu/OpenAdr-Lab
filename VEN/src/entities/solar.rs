@@ -2,13 +2,10 @@
 //! `docs/architecture/weather_forecast.md` ("The transposition problem")
 //! for the full derivation. Pure math, no I/O, no `crate::profile` import.
 //!
-//! `resolve_weather_pv_kw` (below) is the single entry point both consumers
-//! share: `GET /weather` (`routes::weather`, read-only diagnostic) and the
-//! planner's own PV input (`tasks::planning::spawn_planning` →
-//! `SolveRequest.weather_pv_kw` → `controller::milp_planner::inputs::build_milp_inputs`,
-//! R-50) both resolve through the same staleness-gated function, so the two
-//! can never silently diverge on what a `WeatherForecast` implies for PV
-//! output.
+//! `fresh_weather_pv_series` (below) is the one staleness gate on weather PV: the
+//! sim tick hands its series to the live `PvInverter` (`tasks::sim_tick::feeds`), which is
+//! the PV's own forecast and so the planner's (R-50, W3). `weather_pv_forecast_series` is
+//! the one translation of a `WeatherForecast` into PV output, shared with `GET /weather`.
 
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use ts_rs::TS;
@@ -221,9 +218,9 @@ pub struct WeatherPvForecastSlot {
 /// start coverage if it snowed within that hour.
 ///
 /// This is the single source of truth for "how a `WeatherForecast` becomes a
-/// PV forecast" — both `GET /weather` (read-only diagnostic) and the
-/// planner's own PV input (via `resolve_weather_pv_kw`, R-50) call this same
-/// function rather than re-deriving the transposition/snow-override loop.
+/// PV forecast" — `GET /weather` (read-only diagnostic) and the live PV's weather input (via
+/// `fresh_weather_pv_series`, R-50) call this same function rather than re-deriving the
+/// transposition/snow-override loop.
 pub fn weather_pv_forecast_series(
     params: &PvForecastParams,
     forecast: &WeatherForecast,
@@ -249,29 +246,25 @@ pub fn weather_pv_forecast_series(
         .collect()
 }
 
-/// The full "should the planner trust this weather feed right now" decision,
-/// R-50's staleness gate — resolves `None` (fall back to the pre-existing
-/// sin-model/live-snapshot behavior) unless a `PvForecastParams` config
-/// exists, a forecast has actually been received, AND that forecast is
-/// still fresh; otherwise runs `weather_pv_forecast_series` +
-/// `weather_pv_kw_for_slots` and returns the aligned series. Pure — the
-/// only I/O (fetching `latest()` from `WeatherForecastPort`) happens in the
-/// caller, so this three-way decision is unit-testable without a live port.
-pub fn resolve_weather_pv_kw(
+/// The full "should the PV trust this weather feed right now" decision, R-50's staleness
+/// gate — `None` (the PV falls back to its own irradiance model) unless a `PvForecastParams`
+/// config exists, a forecast has actually been received, AND that forecast is still fresh;
+/// otherwise the `weather_pv_forecast_series`. Pure — the only I/O (fetching `latest()` from
+/// `WeatherForecastPort`) happens in the caller, so this three-way decision is unit-testable
+/// without a live port.
+pub fn fresh_weather_pv_series(
     params: Option<&PvForecastParams>,
     forecast: Option<&WeatherForecast>,
     now: DateTime<Utc>,
     staleness_threshold: chrono::Duration,
-    slot_starts: &[DateTime<Utc>],
     initial_snow: PvSnowState,
-) -> Option<Vec<f64>> {
+) -> Option<Vec<WeatherPvForecastSlot>> {
     let params = params?;
     let forecast = forecast?;
     if !forecast.is_fresh(now, staleness_threshold) {
         return None;
     }
-    let series = weather_pv_forecast_series(params, forecast, initial_snow);
-    Some(weather_pv_kw_for_slots(&series, slot_starts))
+    Some(weather_pv_forecast_series(params, forecast, initial_snow))
 }
 
 /// Align a `weather_pv_forecast_series` (hourly) onto an arbitrary plan slot
@@ -782,53 +775,50 @@ mod tests {
         assert_eq!(kw, vec![0.0, 0.0]);
     }
 
-    // ── resolve_weather_pv_kw — the three R-50 staleness-gate cases ──────────
+    // ── fresh_weather_pv_series — the R-50 staleness-gate cases ──────────────
 
     #[test]
-    fn resolve_weather_pv_kw_fresh_forecast_and_config_is_used() {
+    fn fresh_weather_pv_series_fresh_forecast_and_config_is_used() {
         let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 11, 0, 0).unwrap();
         let params = default_forecast_params();
         let forecast = make_forecast(vec![sample_at(500.0, 20.0, t0)]);
         let now = t0; // fetched_at == now → fresh
-        let result = resolve_weather_pv_kw(
+        let result = fresh_weather_pv_series(
             Some(&params),
             Some(&forecast),
             now,
             chrono::Duration::hours(2),
-            &[t0],
             PvSnowState::default(),
         );
         assert!(result.is_some(), "fresh forecast + config must be used");
-        assert!(result.unwrap()[0] > 0.0);
+        assert!(weather_pv_kw_for_slots(&result.unwrap(), &[t0])[0] > 0.0);
     }
 
     #[test]
-    fn resolve_weather_pv_kw_stale_forecast_falls_back() {
+    fn fresh_weather_pv_series_stale_forecast_falls_back() {
         let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 11, 0, 0).unwrap();
         let params = default_forecast_params();
         let forecast = make_forecast(vec![sample_at(500.0, 20.0, t0)]);
         let now = t0 + chrono::Duration::hours(3); // 3h old, past the 2h threshold
-        let result = resolve_weather_pv_kw(
+        let result = fresh_weather_pv_series(
             Some(&params),
             Some(&forecast),
             now,
             chrono::Duration::hours(2),
-            &[t0],
             PvSnowState::default(),
         );
         assert!(result.is_none(), "stale forecast must fall back to None");
     }
 
     #[test]
-    fn resolve_weather_pv_kw_no_config_falls_back() {
+    fn fresh_weather_pv_series_no_config_falls_back() {
         let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 11, 0, 0).unwrap();
         let forecast = make_forecast(vec![sample_at(500.0, 20.0, t0)]);
-        let result = resolve_weather_pv_kw(
+        let result = fresh_weather_pv_series(
             None,
             Some(&forecast),
             t0,
             chrono::Duration::hours(2),
-            &[t0],
             PvSnowState::default(),
         );
         assert!(
@@ -838,15 +828,14 @@ mod tests {
     }
 
     #[test]
-    fn resolve_weather_pv_kw_no_forecast_received_falls_back() {
+    fn fresh_weather_pv_series_no_forecast_received_falls_back() {
         let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 11, 0, 0).unwrap();
         let params = default_forecast_params();
-        let result = resolve_weather_pv_kw(
+        let result = fresh_weather_pv_series(
             Some(&params),
             None,
             t0,
             chrono::Duration::hours(2),
-            &[t0],
             PvSnowState::default(),
         );
         assert!(
