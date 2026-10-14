@@ -13,6 +13,7 @@ This manual shows how to observe all 14 HEMS controller use cases using the live
 |---|---|
 | **Dashboard** | Latest sensor snapshot + three traffic-light status rows (VTN connection, background tasks, plan health). The Energy Ledger card shows each asset's running totals and, under "Closed periods", its archived monthly totals (period, energy, cost, CO₂), newest first; it says so when none has closed yet, when the VEN runs without a history store, or when they could not be loaded |
 | **Controller** | Power chart (history + plan), Rate chart, Packets table (fill%), Ledger, Status bar, and the Flexibility & Forecast panel: per asset its feasible import/export band and, in small writing under the asset name, its key features (PV peak power; battery and EV capacity; base load average and maximum over the last 14 days, `-` until history exists) |
+| **Planner** | The active plan: header (objective, solve status, phase report), trigger timeline, power stack, and the Decision Matrix: one row per asset the plan scheduled, idle ones included (an unplugged EV or a heater the plan keeps off still has its row), one column per slot, under the tariff and marginal-cost header and above the PV and baseline forecast rows. Below it the Decision Trace |
 | **Requests** | User requests table with status chips; form to create new requests; inline cancel |
 | **Simulation** | Device state cards (EV SoC, Heater temp, PV output), Setpoints chart, Override sliders |
 | **Trace** | Per-tick decision log: mode, active events, setpoints, constraints |

@@ -3390,3 +3390,17 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
 - Measure where a slow test waits before tuning its polling. The 45-76 s "plan reflects the event"
   waits were not polling and not the solver (median cycle 3.4 s): they were GB-55's deliberate
   rate-change hold, applied to capacity events it was never meant for.
+
+## Count a field's readers before redesigning it (2026-10-14)
+
+- The W2 estimate (3–5 days) assumed the plan's battery fields had readers that would need a
+  per-asset replacement. A grep across the VEN, the UI, the BFF, `experiments/` and the BDD steps
+  found none, only tests and fixtures: a field nobody reads is deleted, not renamed to a
+  kind-neutral total that would be a third copy with no reader either.
+- When two readers answer the same question by guessing from a structure (here: which assets a
+  plan covers, from allocations and slot-map keys), the producer usually knows the answer and is
+  dropping it. Put the answer on the output once, and give readers one function that also covers
+  data stored before the field existed (`Plan::planned_assets`).
+- "Absent" and "zero" were one case on the wire: an idle asset has no allocation, and the
+  dispatcher reads that as "no say" (default setpoint, thermostat). Naming the planned assets
+  separately makes the difference expressible without changing what dispatch does.

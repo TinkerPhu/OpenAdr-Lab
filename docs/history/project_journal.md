@@ -15630,3 +15630,34 @@ have failed in the container; the test now runs under dash too. A flat 100 % bus
 "the host's floor", which would have released the gate during a build; a saturation guard fixed it.
 The remaining E2E time is mostly waiting for replans: ven-1 held 31 replans for 12 min in total
 under GB-55, including capacity events the hold was never meant for (fixed separately).
+
+## W2: the plan says per asset what it planned (refactor/asset-declared-plan-output)
+
+**What.** The plan's wire format names no asset kind. `PlanTimeSlot.bat_charge_kw`,
+`bat_discharge_kw` and `Plan.soc_trajectory_kwh` are deleted: each storage asset's net power and
+state of charge already go out under its own id (`allocations`, `planned_kw_by_asset`,
+`planned_state_by_asset`), and the cost breakdown's wear figure reads the storage legs internally
+(`results.rs::storage_throughput_kw`). `Plan.planned_asset_ids` names the assets a plan scheduled,
+in input order, idle ones included, on solved and fallback plans. `Plan::planned_assets()` is the
+one reader-side answer to "which assets does this plan cover" (the list, then any id an older
+stored plan names only in its slots); `services/forecast.rs::build_asset_forecasts` calls it
+instead of collecting slot-map keys, and the Planner tab's Decision Matrix applies the same rule
+instead of a hard-coded `"battery"` row and a `"pv"`/`"base_load"` filter. Audit rule 16 now covers
+`entities/plan.rs` and lost its wire-field exemption.
+
+**Why.** The rest of W2 had landed with W1 (allocations, surplus order, planned state, session
+flexibility, the EV diagnostic). The battery fields were the plan's last kind-named copy, and the
+search for their readers found none outside tests: the 3–5 day estimate had assumed readers
+needing a per-asset replacement. A plan that did not say which assets it planned made two readers
+guess, differently.
+
+**How it was proven.** `plans.txt` regenerated and checked by script: the old golden with the
+battery fields and the `soc_trajectory_kwh` lines removed, plus one `planned_asset_ids` line per
+plan, equals the new golden byte for byte (wear cost included). Model fingerprints and planner
+inputs unchanged. A planted `bat_charge_kw` in a copy of `entities/plan.rs` trips rule 16.
+
+**Issues.** Behaviour that changes: a planned asset that stays idle with no planned state (a
+shiftable load waiting for its window) now gets a zero `Optimization` forecast, so a heuristic one
+no longer takes its place; forecasts come in plan order instead of sorted. Dispatch is unchanged:
+an asset with no allocation in a slot still runs at its default or thermostat, which is why "planned
+idle" stays a reader-side fact for now. Deferred: R-141 (a test fixture in its file was touched).

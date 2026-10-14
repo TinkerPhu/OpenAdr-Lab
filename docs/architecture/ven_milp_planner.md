@@ -60,10 +60,16 @@ when a kind is named in `controller/milp_planner/` or `controller/milp_interacti
   planned state, storage legs, warnings, its own detail) and seeds phase 2 from its own phase-1
   solution (§4.1).
 - *Plan.* Allocations claim PV surplus in the order each asset declares (`surplus_claim_rank`),
-  priced by its `AllocationBasis` (§8); the site's `bat_charge_kw`, `bat_discharge_kw` and
-  `soc_trajectory_kwh` are the summed storage legs; planned state and warnings come from the
-  asset, the budget warning from `input_warnings`; session flexibility is one rule over each
-  asset's `FlexibilityWindow`.
+  priced by its `AllocationBasis` (§8); planned state and warnings come from the asset, the
+  budget warning from `input_warnings`; session flexibility is one rule over each asset's
+  `FlexibilityWindow`. Every per-asset fact on the plan is keyed by the asset's id
+  (`allocations`, `planned_kw_by_asset`, `planned_state_by_asset`, `session_flexibility`), and
+  `Plan.planned_asset_ids` names the assets the plan scheduled, in input order, idle ones
+  included. A reader asks `Plan::planned_assets()` which assets a plan covers (it also covers
+  plans stored before the list existed); the forecast service and the Planner tab's Decision
+  Matrix both do. The storage legs stay internal: the cost breakdown's `c_wear_eur` prices
+  their summed throughput. The audit's rule 16 also covers `entities/plan.rs`, so no field
+  named for one kind can return to the plan.
 
 Several assets of one kind are therefore planned like any other assets
 (`tests/multi_instance.rs`: two batteries, two EVs, coexistence pairs). A VEN profile still holds
@@ -239,10 +245,7 @@ With aligned grids, the active `Plan` is a near-feasible starting point for the 
 | MILP variable | Source in Plan |
 |---|---|
 | `p_imp[t]`, `p_exp[t]` | `slots[t].net_import_kw`, `net_export_kw` |
-| `p_bat_ch[t]`, `p_bat_dis[t]` | `slots[t].bat_charge_kw`, `bat_discharge_kw` |
-| `e_bat[t]` | `soc_trajectory_kwh[t]` |
-| `p_ev[t]` | `slots[t].planned_kw_by_asset["ev"]` |
-| `z_heat_mid[t]`, `z_heat_full[t]` | approximated from `planned_kw_by_asset["heater"]` |
+| each asset's variables | that asset's `slots[t].planned_kw_by_asset[id]` and `planned_state_by_asset[id]`, read back by the asset itself (as its phase-2 warm start reads its own `AssetSolution`) |
 
 The warm start is skipped if the slot count differs (horizon change), which the alignment invariant makes rare (only at zone-A boundaries, every 300 s).
 

@@ -20,7 +20,7 @@ restored in `4d8b0447`). **Fixed**: the rows are deleted (by the `docs/register-
 
 | # | Sev | Smell | Where | Cost | Now |
 |---|---|---|---|---|---|
-| 1 | S3 | **The plan contract hard-codes one PV and one battery.** `PlanSlot` carries `baseline_kw`, `pv_forecast_kw`, `pv_used_kw`, `bat_charge_kw`, `bat_discharge_kw` beside the generic `allocations`, and readers branch on asset id to pick the field (`controller/timeline.rs:316-330`). A second PV or battery cannot be represented; the UI reads the same fields. | `VEN/src/entities/plan.rs` (PlanSlot), `VEN/src/controller/timeline.rs` | Medium (wire contract to the UI) | Closed, out of scope (2026-10-10): see below |
+| 1 | S3 | **The plan contract hard-codes one PV and one battery.** `PlanSlot` carries `baseline_kw`, `pv_forecast_kw`, `pv_used_kw`, `bat_charge_kw`, `bat_discharge_kw` beside the generic `allocations`, and readers branch on asset id to pick the field (`controller/timeline.rs:316-330`). A second PV or battery cannot be represented; the UI reads the same fields. | `VEN/src/entities/plan.rs` (PlanSlot), `VEN/src/controller/timeline.rs` | Medium (wire contract to the UI) | Closed, out of scope (2026-10-10); battery half fixed 2026-10-14: see below |
 | 2 | S3 | **The controller decides by asset identity instead of asking the asset.** "battery or EV = has a SoC to protect" (`controller/arbiter.rs:105`), "EV planned?" (`controller/dispatcher.rs:69`), "PV's own embodied CO2" (`controller/monitor.rs:65`), and request routing `is_ev` / `is_heater` compare ids with `"ev"`, `"heater"`, `"boiler"` (`services/user_request.rs:270-279`): an asset named `ev2` is "unrecognised". An `asset-competence` violation; the asset should declare it (has storage, request kind). | `VEN/src/controller/arbiter.rs`, `VEN/src/controller/dispatcher.rs`, `VEN/src/controller/monitor.rs`, `VEN/src/services/user_request.rs` | Small–Medium | **fixed** (R-128) |
 | 3 | S3 | **The report routes bypass `VtnPort` and call the concrete `VtnClient`.** `post_reports` / `put_report` cannot be unit-tested (a comment in `routes/reports.rs` says so); `/health` and `/vtn/status` reach the concrete client too. | `VEN/src/routes/reports.rs`, `VEN/src/routes/system.rs` | Small | **fixed** (R-129) |
 | 4 | S4 | **Request transitions are string-typed and partly invented.** `ControllerEvent::RequestTransition { from_status, to_status }` are `String`s made with `format!("{:?}")`; cancelling always records `from_status: "Active"`, although `cancel` also accepts a `Failed` request, which is then logged as `Active -> Cancelled`. | `VEN/src/controller/trace.rs`, `VEN/src/services/request_submission.rs` | Small | **fixed** (R-130) |
@@ -54,11 +54,15 @@ duplication), R-125 (SoC names without a unit). R-121 (`ui-charts/` held more th
 - Closed without a fix: #1 (R-127). **Several assets of one kind in a VEN do not fit into this
   project** (user decision, 2026-10-10). Since 2026-10-13 the MILP core itself is not the
   obstacle: it plans each asset by its own id from what the asset declares (no per-kind slot,
-  `tests/multi_instance.rs`). What remains is the rest of the way: the per-asset plan wire format,
-  PV and base load as single site series, sessions, the arbiter and the UI, and the places that
-  look an asset up by its fixed id. Lifting that is a different product, beyond what an
-  OpenADR lab needs. A VEN has at most one asset of each kind (shiftable loads excepted), and the
-  one-PV / one-battery plan fields are that boundary written down, not a debt. Do not re-file.
+  `tests/multi_instance.rs`). Since 2026-10-14 the plan's wire format is not either: the battery
+  fields (`bat_charge_kw`, `bat_discharge_kw`, `soc_trajectory_kwh`) are gone, every per-asset
+  fact is keyed by asset id, and `Plan.planned_asset_ids` names the assets a plan scheduled
+  (audit rule 16 covers `entities/plan.rs`). What remains is the rest of the way: PV and base
+  load as single site series (`baseline_kw`, `pv_forecast_kw`, `pv_used_kw`), sessions, the
+  arbiter and the UI, and the places that look an asset up by its fixed id. Lifting that is a
+  different product, beyond what an OpenADR lab needs. A VEN has at most one asset of each kind
+  (shiftable loads excepted), and the one-PV plan fields are that boundary written down, not a
+  debt. Do not re-file.
   The boundary is enforced: `profile::validate` refuses a profile with two assets of a kind
   (`validate_asset_roster`), which before 2026-10-10 loaded and was silently mis-planned.
 - Decided: #8 delete `SimulatorPort` (tasks call `to_sim_snapshot()` directly; done 2026-10-12, `refactor/delete-simulator-port` — the earlier note that `docs/register-cleanup` had done it was wrong); #9 ts-rs, incrementally (R-133).
