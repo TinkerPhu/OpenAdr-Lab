@@ -266,3 +266,65 @@ fn coexistence_couples_every_discharger_with_every_switched_load() {
     // No discharger: the interaction does not apply and declares nothing.
     assert_eq!(coexist_pairs(&[&car]), None);
 }
+
+/// A PV array forecasting `forecast_kw` in every slot, planned as `id`.
+fn pv_array(
+    id: &str,
+    forecast_kw: f64,
+    n: usize,
+) -> Box<dyn crate::controller::milp_planner::AssetMilpContext> {
+    Box::new(crate::controller::milp_planner::ForecastMilpContext {
+        asset_id: id.into(),
+        role: crate::controller::milp_planner::ForecastRole::Generation,
+        forecast_kw: vec![forecast_kw; n],
+        curtailable: true,
+    })
+}
+
+/// W3: two PV arrays take part side by side. Under an export cap below their surplus the plan
+/// curtails; the site's PV forecast is their sum, and neither array is dispatched: no allocation,
+/// no planned power, not among the planned assets.
+#[test]
+fn two_pv_arrays_are_planned_as_one_site_forecast() {
+    let now = fixed_now();
+    let mut profile = base_load_only_profile(); // 1 kW base load, 4 × 30 min
+    profile.grid.max_export_kw = 1.0;
+    let n = crate::entities::time_grid::slot_count(&profile.planner.plan_zones);
+    let mut ctxs = forecast_contexts(&profile, now, None);
+    ctxs.insert(0, pv_array("pv-roof", 3.0, n));
+    ctxs.insert(1, pv_array("pv-garage", 2.0, n));
+    let plan = run_planner(
+        ctxs,
+        &make_tariffs(0.25, 0.08, 300.0),
+        &no_capacity(),
+        &profile,
+        now,
+        PlanTrigger::Periodic,
+        None,
+        None,
+    );
+    assert_eq!(
+        plan.solve_status,
+        crate::entities::plan::SolveStatus::Optimal
+    );
+    assert!(
+        plan.planned_asset_ids.is_empty(),
+        "{:?}",
+        plan.planned_asset_ids
+    );
+    for slot in &plan.slots {
+        assert!(
+            (slot.pv_forecast_kw - 5.0).abs() < 1e-9,
+            "the sum of both arrays"
+        );
+        assert!((slot.baseline_kw - 1.0).abs() < 1e-9);
+        // 5 kW generated, 1 kW used on site, at most 1 kW exported: the rest is curtailed.
+        assert!(
+            slot.pv_used_kw <= 2.0 + 1e-6 && slot.pv_used_kw >= 1.0 - 1e-6,
+            "slot {}: used {:.3} kW",
+            slot.slot_index,
+            slot.pv_used_kw
+        );
+        assert!(slot.allocations.is_empty() && slot.planned_kw_by_asset.is_empty());
+    }
+}

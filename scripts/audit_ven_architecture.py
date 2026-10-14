@@ -116,6 +116,11 @@ The rules, and why each exists:
      own decisions and seed its own warm start. Anything else reading it is the same second copy
      rule 16 keeps out of the planner.
 
+  18. No string literal with a run of six or more spaces between words in production code. That
+     run is what a Rust `\` line continuation becomes when an edit loses the backslash (an edit
+     script passed through a shell heredoc does): the message reads "does not              open
+     the grid". It happened to eleven user- and operator-visible messages before this rule.
+
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
 """
@@ -282,6 +287,7 @@ DETAIL_OWNER = {
     "Ev": "assets/ev_declared.rs",
     "Heater": "assets/heater_declared.rs",
     "ShiftableLoad": "assets/shiftable_declared.rs",
+    "Forecast": "assets/forecast_declared.rs",
 }
 
 
@@ -295,6 +301,16 @@ def solution_detail_outside_its_kind() -> "list[str]":
                 if DETAIL_OWNER.get(kind) != rel:
                     hits.append(f"  {f.relative_to(REPO_ROOT)}:{n}: {line.strip()}")
     return hits
+
+
+# A string literal whose words are separated by a run of 6+ spaces: a lost `\` continuation
+# (rule 18).
+COLLAPSED_CONTINUATION = r'"[^"]*\S {6,}\S[^"]*"'
+
+
+def collapsed_continuations(base=None) -> "list[str]":
+    """Rule 18: production string literals that lost their line continuation."""
+    return forbid("collapsed-continuation", [VEN_SRC if base is None else base], COLLAPSED_CONTINUATION)
 
 
 # How a request authenticates itself by hand, instead of through `ClientCredentials::send`.
@@ -347,6 +363,7 @@ CHECKS = [
               if "lab-core/src/vtn_auth.rs" not in h.replace(os.sep, "/")]),
     ("an asset kind named in the planner core or the plan", asset_kind_in_planner),
     ("an asset's solution detail read outside its kind", solution_detail_outside_its_kind),
+    ("a string literal that lost its line continuation", collapsed_continuations),
 ]
 
 

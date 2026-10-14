@@ -19,7 +19,7 @@ impl Profile {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors: Vec<String> = Vec::new();
 
-        validate_asset_roster(&self.assets, &mut errors);
+        validate_asset_roster(&self.assets, self.weather_pv.is_some(), &mut errors);
 
         // Planner numeric bounds.
         if self.planner.replan_interval_s == 0 {
@@ -380,9 +380,18 @@ impl Profile {
 /// there, only silently wrong; several assets of one kind are outside this project's scope
 /// (`docs/reference/architectural_smells.md`). Shiftable loads are not profile assets and are
 /// not limited here.
-fn validate_asset_roster(assets: &[AssetProfile], errors: &mut Vec<String>) {
+/// The roster: at least one asset, at most one of each kind, and a `weather_pv` section (the
+/// panels of a PV asset) only beside a PV asset (W3 design D6).
+fn validate_asset_roster(assets: &[AssetProfile], has_weather_pv: bool, errors: &mut Vec<String>) {
     if assets.is_empty() {
         errors.push("profile must declare at least one asset".into());
+    }
+    if has_weather_pv && !assets.iter().any(|a| matches!(a, AssetProfile::Pv(_))) {
+        errors.push(
+            "weather_pv describes the panels of a pv asset, but the profile has no pv asset: \
+             add one or remove weather_pv"
+                .into(),
+        );
     }
     let kind = |a: &AssetProfile| match a {
         AssetProfile::Ev(_) => "ev",
@@ -736,6 +745,47 @@ spikes:
             "error message should mention 'no assets': {msg}"
         );
         let _ = tokio::fs::remove_file(path).await;
+    }
+
+    /// W3 design D6: `weather_pv` describes the panels of a PV asset; without one it would describe
+    /// PV the site does not have. The weather feed itself needs no `weather_pv` (GB-57).
+    #[test]
+    fn validate_refuses_weather_pv_without_a_pv_asset() {
+        let weather = r#"
+weather_pv:
+  latitude_deg: 47.4491
+  longitude_deg: 7.8081
+  tilt_deg: 22.0
+  azimuth_deg: 267.0
+  rated_kwp: 14.4
+"#;
+        let without_pv: Profile = serde_yaml::from_str(&format!(
+            "assets:
+  - type: base_load
+    id: base_load
+    baseline_kw: 0.5
+{weather}"
+        ))
+        .expect("must parse");
+        let msg = format!("{:?}", without_pv.validate().expect_err("must be refused"));
+        assert!(
+            msg.contains("weather_pv") && msg.contains("pv asset"),
+            "{msg}"
+        );
+
+        let with_pv: Profile = serde_yaml::from_str(&format!(
+            "assets:
+  - type: pv
+    id: pv
+    rated_kw: 14.4
+{weather}"
+        ))
+        .expect("must parse");
+        let errors = with_pv.validate().err().unwrap_or_default();
+        assert!(
+            !errors.iter().any(|e| e.contains("weather_pv")),
+            "{errors:?}"
+        );
     }
 
     // thermostat-deadband: the band check must reject a delta that leaves no
