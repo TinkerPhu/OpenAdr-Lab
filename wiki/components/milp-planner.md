@@ -2,9 +2,9 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-08-21
+updated: 2026-10-14
 synced_commit: 6a5a678
-sources: [docs/architecture/ven_milp_planner.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, VEN/src/controller/milp_planner/solver_duals.rs, VEN/src/entities/asset.rs, VEN/src/entities/planner_params.rs, VEN/src/profile/validate.rs, VEN/src/assets/ev_milp.rs, VEN/src/assets/heater_milp.rs]
+sources: [docs/architecture/ven_milp_planner.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/controller/asset_milp_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, VEN/src/controller/milp_planner/solver_duals.rs, VEN/src/entities/asset.rs, VEN/src/entities/planner_params.rs, VEN/src/profile/validate.rs, VEN/src/assets/ev_milp.rs, VEN/src/assets/heater_milp.rs]
 tags: [planner, milp, highs, optimization]
 ---
 
@@ -22,6 +22,22 @@ see [[milp-over-greedy]].
 2. **Friction minimisation** — minimises relay switches and ramp changes while staying
    within `phase2_epsilon_eur` of Phase 1's optimum; warm-starts from Phase 1
    (`solver_phase2.rs`).
+
+## How assets take part (2026-10-14)
+
+The planner core names no asset kind (`refactor/asset-declared-planner-model`). Each context
+declares its own variables for a solve (`AssetMilpContext::declare` → `DeclaredAsset`,
+`VEN/src/controller/asset_milp_port.rs`), states its net power for the one balance sum, contributes
+an `ObjectivePart::Cost` and an `ObjectivePart::Friction` priced by its own `FrictionCosts`, seeds
+phase 2 from its own phase-1 solution, and reads its part back as an `AssetSolution`; the plan's
+allocations, planned state, warnings and session flexibility come from what each asset declares.
+This replaced one pool slot per kind, `Phase2Weights`, the `c_startup_eur == 0.0` phase signal and
+the planner-side parameter copy `AssetScalars`, and it is what lets two batteries or two EVs be
+planned together (`VEN/src/controller/milp_planner/tests/multi_instance.rs`); a profile still
+holds one asset per kind ([[asset-layer]]). Proof of identical plans: `tests/plans_golden.rs` plus
+the model fingerprint's sorted digests. Details: `docs/architecture/ven_milp_planner.md` "How
+assets take part"; the ring rule it enforces is in [[ven-hexagonal-architecture]] (audit rules 16
+and 17).
 
 ## Key mechanics
 
