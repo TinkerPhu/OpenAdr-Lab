@@ -16,13 +16,12 @@ use super::SimState;
 
 impl SimState {
     /// Build a SensorSnapshot for backward compatibility with /sensors endpoint.
+    /// The sensor has one temperature: the first heater's in roster order, found by its state, not
+    /// its id (W7).
     pub fn to_sensor_snapshot(&self) -> SensorSnapshot {
-        let temp_c = self.asset(crate::ids::ASSET_HEATER).and_then(|e| {
-            if let AssetState::Heater(s) = &e.state {
-                Some(s.temperature_c)
-            } else {
-                None
-            }
+        let temp_c = self.assets.iter().find_map(|e| match &e.state {
+            AssetState::Heater(s) => Some(s.temperature_c),
+            _ => None,
         });
         SensorSnapshot {
             id: Uuid::new_v4(),
@@ -206,6 +205,20 @@ mod tests {
             serde_json::to_value(SensorRaw::default()).unwrap(),
             serde_json::json!({})
         );
+    }
+
+    /// `/sensors` reports the heater's temperature whatever the heater's id (W7).
+    #[test]
+    fn sensor_snapshot_reads_the_heater_by_its_type_not_its_id() {
+        let sim = SimState::from_params(
+            &[AssetParams::Heater(HeaterParams {
+                id: "boiler".into(),
+                temp_initial_c: 47.0,
+                ..Default::default()
+            })],
+            chrono::Utc::now(),
+        );
+        assert_eq!(sim.to_sensor_snapshot().temperature_c, Some(47.0));
     }
 
     #[test]

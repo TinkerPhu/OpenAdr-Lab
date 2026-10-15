@@ -15852,3 +15852,11 @@ multi-asset profile exercises them together end to end.
 **Issues.** The two tests that pinned the refusal of a second asset of a kind were replaced, not
 weakened: they tested the reversed decision; their successors pin acceptance and the new
 unique-id rule.
+
+**Review of W1-W7 (2026-10-16).** A sweep for fixed-id and first-of-kind lookups left in
+production code found three:
+- The plan's snapshot applied a PV inject only to the asset with id `pv`, while the tick applied it to every array.
+- `/sensors` read the heater with id `heater`.
+- The site snow state was read from the first array, while only the measured array, which may be any one of them, can conclude snow.
+
+All three are fixed, each with a test. `SimState::asset(id)` lost its last production caller and is now test-only. The SoC report still looks its samples up by the ids `ev`/`battery`; that is filed as R-143, because it needs a decision on the wire (one resource per storage asset, or one combined SoC). Five doc passages still described the one-per-kind limit; they are corrected.

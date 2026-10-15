@@ -1571,8 +1571,10 @@ weather series and the measured asset's reading reach only that asset
 Behaviour B smoothing state and learned heuristic, the site generation limit is shared over the
 arrays by their AC ceilings (`simulator::generation_limit_share`, used by the tick and by
 `peek_pv`), and the arbiter projects each previewed asset at its own live value
-(`controller/arbiter/live.rs`: `LiveKwByAsset`, `tighten_generation`). Profile validation still
-allows one asset of each kind; lifting that limit is a separate step. Tests:
+(`controller/arbiter/live.rs`: `LiveKwByAsset`, `tighten_generation`). A sim PV inject reaches
+every array, in the tick and in the plan's snapshot (`apply_pending_pv_inject`); the site counts as
+snow-covered when any array concludes so (`SimState::pv_snow_state`; only a measured array can).
+Tests:
 `simulator/tests/per_asset_tests.rs`, `routes/weather.rs`
 (`east_and_west_arrays_derive_their_own_forecasts`), `profile/validate.rs`
 (`each_pv_asset_carries_its_own_weather_and_measurement`). Two properties matter and are

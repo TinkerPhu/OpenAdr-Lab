@@ -203,7 +203,9 @@ pub(crate) fn generation_limit_share(asset: &dyn Asset, total_ac_ceiling_kw: f64
 }
 
 impl SimState {
-    /// Look up an asset entry by id (immutable).
+    /// Look up an asset entry by id (immutable). Test-only: production code finds an asset by
+    /// what it declares, not by a fixed id.
+    #[cfg(test)]
     pub fn asset(&self, id: &str) -> Option<&AssetEntry> {
         self.assets.iter().find(|a| a.id == id)
     }

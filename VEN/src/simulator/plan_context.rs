@@ -45,7 +45,8 @@ pub fn apply_pending_pv_inject(
 ) {
     if let Some(forced) = inject.pv_irradiance {
         let natural = PvInverter::natural_irradiance_at(now);
-        if let Some((_, cfg)) = sim_snap.find_asset_mut(crate::ids::ASSET_PV) {
+        // Every array, whatever its id — as the tick applies it (W7).
+        for cfg in sim_snap.asset_configs.iter_mut() {
             if let Some(pv) = cfg.as_any_mut().downcast_mut::<PvInverter>() {
                 pv.irradiance_offset = forced - natural;
                 pv.tau_s = inject.pv_tau_s;
@@ -178,12 +179,20 @@ mod tests {
         // No panic is the assertion — nothing else observable without a PV asset.
     }
 
+    /// Every array gets the forced irradiance, whatever its id (W7): the tick applies it to every
+    /// PV asset, so the plan's snapshot must as well.
     #[test]
-    fn apply_pending_pv_inject_sets_offset_and_alpha_from_forced_irradiance() {
+    fn apply_pending_pv_inject_sets_offset_and_alpha_on_every_array() {
         use crate::entities::asset_params::{AssetParams, PvParams};
 
         let now = Utc::now();
-        let mut sim_snap = SimState::from_params(&[AssetParams::Pv(PvParams::default())], now);
+        let array = |id: &str| {
+            AssetParams::Pv(PvParams {
+                id: id.into(),
+                ..Default::default()
+            })
+        };
+        let mut sim_snap = SimState::from_params(&[array("pv-east"), array("pv-west")], now);
         let inject = SimInjectState {
             pv_irradiance: Some(0.9),
             pv_tau_s: 1200.0,
@@ -193,16 +202,18 @@ mod tests {
         apply_pending_pv_inject(&mut sim_snap, &inject, now);
 
         let natural = PvInverter::natural_irradiance_at(now);
-        let (_, cfg) = sim_snap.find_asset(crate::ids::ASSET_PV).unwrap();
-        let pv = cfg
-            .as_any()
-            .downcast_ref::<PvInverter>()
-            .expect("expected Pv config");
-        assert!(
-            (pv.irradiance_offset - (0.9 - natural)).abs() < 1e-9,
-            "offset must be forced-minus-natural irradiance"
-        );
-        assert!((pv.tau_s - 1200.0).abs() < 1e-9);
+        for id in ["pv-east", "pv-west"] {
+            let (_, cfg) = sim_snap.find_asset(id).unwrap();
+            let pv = cfg
+                .as_any()
+                .downcast_ref::<PvInverter>()
+                .expect("expected Pv config");
+            assert!(
+                (pv.irradiance_offset - (0.9 - natural)).abs() < 1e-9,
+                "{id}: offset must be forced-minus-natural irradiance"
+            );
+            assert!((pv.tau_s - 1200.0).abs() < 1e-9, "{id}");
+        }
     }
 
     fn cum_seconds(n: usize, step_s: i64) -> Vec<i64> {
