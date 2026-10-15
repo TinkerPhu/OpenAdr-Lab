@@ -2,7 +2,7 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-10-14
+updated: 2026-10-15
 synced_commit: 6a5a678
 sources: [VEN/ui/src, docs/history/project_journal.md, docs/architecture/chart_diagrams.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/pages/Weather.tsx, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx]
 tags: [ui, react, timeline]
@@ -58,6 +58,17 @@ React + TypeScript SPA (Vite build, nginx-served, port 8214) — the per-site da
   vitest ^4 / plugin-react ^5; vite 8's rolldown bundler mis-resolves a MUI
   default-import interop at bundle time (React #130 at runtime with all unit
   tests green), so the vite major is held at 7 until that interop is proven.
+
+## Every asset under its own id (W6, 2026-10-15)
+
+The UI never names a fixed asset id. `/sim` carries each asset's declared `asset_type` and its
+`roster_index`, and `VEN/ui/src/api/assets.ts` is the one place asking "which assets of this type,
+in roster order" (`assetsOfType`) and "in which order do power charts stack" (`stackOrder`). The
+Devices page renders one EV and one heater card per asset, titled with its id; a card requests for
+its own asset. The Controller builds one cell per asset from a per-type table, and the History,
+comfort-curve and tariff paths cover every roster asset. Since W7 a profile may hold two EVs or
+two arrays (`VEN/profiles/multi_asset_test.yaml`), which [[asset-layer]] and [[deviation-arbiter]]
+handle per asset as well.
 
 ## Chart kit
 
