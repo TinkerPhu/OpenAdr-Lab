@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from behave import given, when, then
 from features.helpers.api_client import ven_get
+from features.helpers.wait import poll_until
 
 
 def _publish_mqtt(topic: str, payload: dict) -> None:
@@ -106,6 +107,17 @@ def _sample_status_message(status: str) -> dict:
 @when("a weather status heartbeat is published to the test Mosquitto broker for VEN-1")
 def step_publish_status_heartbeat(context):
     _publish_mqtt("openadr-lab/weather/ven-1/status", _sample_status_message("ok"))
+
+
+@then('/weather derives a PV forecast for the array "{asset_id}"')
+def step_weather_derives_for_array(context, asset_id):
+    poll_until(
+        lambda: ven_get("/weather"),
+        lambda resp: resp.ok and len((resp.json().get("derived") or {}).get(asset_id) or []) > 0,
+        timeout=20,
+        interval=1,
+        description=f"/weather derives a forecast for the array {asset_id}",
+    )
 
 
 @then("/weather reports the source as not alive")

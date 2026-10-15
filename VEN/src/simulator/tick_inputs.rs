@@ -27,9 +27,6 @@ pub struct TickInputs {
     pub pv_tau_s: f64,
     pub pv_generation_limit_override: Option<f64>,
     pub pv_curtailment_source: PvCurtailmentSource,
-    pub pv_measured_kw: Option<f64>,
-    pub weather_pv_kw: Option<f64>,
-    pub weather_pv_forecast: Option<Vec<WeatherPvForecastSlot>>,
 
     // Heater
     pub ambient_temp_c_override: Option<f64>,
@@ -42,15 +39,59 @@ pub struct TickInputs {
     // Base load
     pub base_load_kw_override: Option<f64>,
     pub base_load_alpha: f64,
-    pub base_load_measured_kw: Option<f64>,
-    pub base_load_heuristic_kw: Option<f64>,
-    pub base_load_heuristic: Option<AssetHeuristics>,
 
     // EV
     pub ev_plugged_override: Option<bool>,
     pub ev_soc_target_override: Option<f64>,
     /// The departure of the session governing each EV now, by EV id.
     pub ev_departure_by_asset: HashMap<String, DateTime<Utc>>,
+
+    /// This tick's external feeds, each for the asset it belongs to.
+    pub feeds: AssetTickFeeds,
+}
+
+/// This tick's external feeds, per asset (W5b): each PV array's weather estimate and the
+/// series behind it (`entities::solar::fresh_weather_pv_series`, from that array's own
+/// geometry), the real measured reading of the asset a feed measures, and each base load's
+/// learned heuristic. An asset without an entry has no such feed this tick.
+#[derive(Debug, Clone, Default)]
+pub struct AssetTickFeeds {
+    pub weather_pv_kw: HashMap<String, f64>,
+    pub weather_pv_forecast: HashMap<String, Vec<WeatherPvForecastSlot>>,
+    pub measured_kw: HashMap<String, f64>,
+    pub heuristic: HashMap<String, AssetHeuristics>,
+}
+
+impl AssetTickFeeds {
+    /// `asset_id`'s learned heuristic sampled at `now`, if it has one.
+    pub fn heuristic_kw(&self, asset_id: &str, now: DateTime<Utc>) -> Option<f64> {
+        self.heuristic.get(asset_id).map(|h| h.sample_kw(now))
+    }
+
+    /// Only a weather estimate of `kw` for the array `asset_id`.
+    #[cfg(test)]
+    pub fn weather_kw(asset_id: &str, kw: f64) -> Self {
+        Self {
+            weather_pv_kw: HashMap::from([(asset_id.to_string(), kw)]),
+            ..Self::default()
+        }
+    }
+
+    /// Only a learned heuristic for `asset_id` that samples to `kw` at every hour.
+    #[cfg(test)]
+    pub fn heuristic_flat_kw(asset_id: &str, kw: f64) -> Self {
+        let flat = AssetHeuristics {
+            asset_id: asset_id.to_string(),
+            daytime_profile_kw: std::array::from_fn(|_| vec![kw; 24]),
+            seasonal_factor: 1.0,
+            last_updated: None,
+            recent_mean_abs_error_kw: None,
+        };
+        Self {
+            heuristic: HashMap::from([(asset_id.to_string(), flat)]),
+            ..Self::default()
+        }
+    }
 }
 
 impl TickInputs {
@@ -76,21 +117,16 @@ impl TickInputs {
             pv_tau_s: DEFAULT_PV_TAU_S,
             pv_generation_limit_override: None,
             pv_curtailment_source: PvCurtailmentSource::None,
-            pv_measured_kw: None,
-            weather_pv_kw: None,
-            weather_pv_forecast: None,
             ambient_temp_c_override: None,
             heater_temp_min_override: None,
             heater_temp_max_override: None,
             heater_emergency_by_asset: HashMap::new(),
             base_load_kw_override: None,
             base_load_alpha: DEFAULT_BASE_LOAD_ALPHA,
-            base_load_measured_kw: None,
-            base_load_heuristic_kw: None,
-            base_load_heuristic: None,
             ev_plugged_override: None,
             ev_soc_target_override: None,
             ev_departure_by_asset: HashMap::new(),
+            feeds: AssetTickFeeds::default(),
         }
     }
 }

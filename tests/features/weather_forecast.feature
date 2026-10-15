@@ -13,6 +13,13 @@ Feature: Weather Forecast Plugin — MQTT-sourced PV forecast
     When a plan cycle runs on VEN-1
     Then the plan's PV allocation reflects the weather-sourced forecast rather than the sin model
 
+  # W5b: each PV array carries its own geometry (its profile `weather:` block), so the
+  # derived forecast is per array, named by the array's id.
+  @weather-forecast
+  Scenario: Each PV array gets its own derived forecast
+    Given a weather forecast message is published to the test Mosquitto broker for VEN-1
+    Then /weather derives a PV forecast for the array "pv"
+
   @weather-forecast
   Scenario: No weather forecast configured falls back to the sin-model PV forecast
     Given no weather forecast has ever been published for VEN-1

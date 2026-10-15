@@ -6,7 +6,6 @@ use tokio::sync::Mutex;
 use crate::controller::arbiter::heater_emergency_modes;
 use crate::controller::{MeasurementPort, WeatherForecastPort};
 use crate::entities::asset::PlanTriggerSignal;
-use crate::entities::asset_params::PvForecastParams;
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
 use crate::state::AppState;
@@ -23,11 +22,9 @@ pub(crate) async fn tick_once(
     persist_every_ticks: u64,
     tick_s: u64,
     weather: Arc<dyn WeatherForecastPort>,
-    weather_pv_params: Option<PvForecastParams>,
+    asset_feeds: Arc<crate::entities::asset_params::AssetFeedConfig>,
     pv_measurement: Arc<dyn MeasurementPort>,
-    pv_measurement_enabled: bool,
     base_load_measurement: Arc<dyn MeasurementPort>,
-    base_load_measurement_enabled: bool,
     notifier: crate::services::notify::Notifier,
     comms_loss_config: Option<crate::profile::comms_loss::CommsLossConfig>,
     grid_max_import_kw: f64,
@@ -42,11 +39,9 @@ pub(crate) async fn tick_once(
         &state,
         now,
         weather.as_ref(),
-        weather_pv_params.as_ref(),
+        &asset_feeds,
         pv_measurement.as_ref(),
-        pv_measurement_enabled,
         base_load_measurement.as_ref(),
-        base_load_measurement_enabled,
         comms_loss_config,
         grid_max_import_kw,
         grid_max_export_kw,
@@ -75,16 +70,8 @@ pub(crate) async fn tick_once(
         let pre_snap = sim_guard.to_sim_snapshot();
 
         // `pre_snap` predates this tick's physics; peek_* preview `now` so the arbiter never sees a stale input.
-        let (live_pv_kw, live_pv_released_kw) =
-            super::feeds::live_pv_previews(&sim_guard, &ctx, &pre_snap, now, dt_s);
-        let live_base_load_kw = sim_guard.peek_base_load_kw(
-            now,
-            dt_s,
-            ctx.inject.base_load_kw,
-            ctx.inject.base_load_alpha,
-            ctx.base_load_measured_kw_now,
-            ctx.base_load_heuristic_kw_now,
-        );
+        let (live_kw, live_released_kw) =
+            super::feeds::live_previews(&sim_guard, &ctx, &pre_snap, now, dt_s);
 
         let thermostat_setpoints_kw =
             sim_guard.thermostat_setpoints_kw(ctx.inject.heater_setpoint_c);
@@ -93,7 +80,7 @@ pub(crate) async fn tick_once(
             &pre_snap,
             &thermostat_setpoints_kw,
             now,
-            (live_pv_kw, live_pv_released_kw, live_base_load_kw),
+            (&live_kw, &live_released_kw),
         );
 
         let resolved_pv_generation_limit = crate::controller::comms_loss::pv_generation_limit(
@@ -114,21 +101,16 @@ pub(crate) async fn tick_once(
             pv_tau_s: ctx.inject.pv_tau_s,
             pv_generation_limit_override: resolved_pv_generation_limit.limit_kw,
             pv_curtailment_source: resolved_pv_generation_limit.source,
-            pv_measured_kw: ctx.pv_measured_kw_now,
-            weather_pv_kw: ctx.weather_pv_kw_now,
-            weather_pv_forecast: ctx.weather_pv_forecast.clone(),
             ambient_temp_c_override: ctx.inject.ambient_temp_c,
             heater_temp_min_override: ctx.inject.heater_temp_min_c,
             heater_temp_max_override: ctx.inject.heater_temp_max_c,
             heater_emergency_by_asset,
             base_load_kw_override: ctx.inject.base_load_kw,
             base_load_alpha: ctx.inject.base_load_alpha,
-            base_load_measured_kw: ctx.base_load_measured_kw_now,
-            base_load_heuristic_kw: ctx.base_load_heuristic_kw_now,
-            base_load_heuristic: ctx.base_load_heuristic.clone(),
             ev_plugged_override: ctx.inject.ev_plugged,
             ev_soc_target_override: ctx.inject.ev_soc_target,
             ev_departure_by_asset: ctx.ev_departure_by_asset.clone(),
+            feeds: ctx.feeds.clone(),
             ..crate::simulator::TickInputs::new(dt_s, now, std::mem::take(&mut outcome.setpoints))
         });
 

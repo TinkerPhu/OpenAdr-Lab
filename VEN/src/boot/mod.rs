@@ -18,7 +18,7 @@ use tracing::{error, info, warn};
 use crate::config::Config;
 use crate::domain_params::build_domain_params;
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
-use crate::entities::asset_params::{AssetParams, PvForecastParams};
+use crate::entities::asset_params::{AssetFeedConfig, AssetParams};
 use crate::entities::planner_params::{PlannerObjective, PlannerParams, SimulatorParams};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::profile::{comms_loss::CommsLossConfig, Profile};
@@ -51,9 +51,8 @@ pub struct World {
 
     pub grid_max_import_kw: f64,
     pub grid_max_export_kw: f64,
-    pub weather_pv_params: Option<PvForecastParams>,
-    pub pv_measurement_enabled: bool,
-    pub base_load_measurement_enabled: bool,
+    /// Which asset each external feed belongs to (each PV array's weather, the measured assets).
+    pub asset_feeds: Arc<AssetFeedConfig>,
     pub comms_loss: Option<CommsLossConfig>,
     pub history_retention_days: u32,
     /// Resolved once from the profile for the daily learner job.
@@ -154,9 +153,7 @@ impl World {
             persist_path: cfg.persist_path.clone(),
             grid_max_import_kw: profile.grid.max_import_kw,
             grid_max_export_kw: profile.grid.max_export_kw,
-            weather_pv_params: profile.weather_pv_params(),
-            pv_measurement_enabled: profile.pv_measurement_enabled(),
-            base_load_measurement_enabled: profile.base_load_measurement_enabled(),
+            asset_feeds: Arc::new(profile.asset_feeds()),
             comms_loss: profile.comms_loss,
             history_retention_days: profile.history.retention_days,
             heuristics_config: profile.heuristics_config(),

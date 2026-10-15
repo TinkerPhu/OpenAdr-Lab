@@ -45,12 +45,12 @@ fn app_ctx(w: World) -> AppCtx {
         notifier: w.notifier,
         settings: w.ports.settings,
         weather: w.ports.weather,
-        weather_pv_params: w.weather_pv_params,
+        weather_pv_params: w.asset_feeds.pv_weather.clone(),
         measurements: crate::app_ctx::MeasurementFeeds {
             pv: w.ports.pv_measurement,
-            pv_enabled: w.pv_measurement_enabled,
+            pv_asset: w.asset_feeds.measured_pv.clone(),
             base_load: w.ports.base_load_measurement,
-            base_load_enabled: w.base_load_measurement_enabled,
+            base_load_asset: w.asset_feeds.measured_base_load.clone(),
         },
         comms_loss: crate::app_ctx::CommsLoss {
             debounce_s: w.comms_loss.map(|c| c.debounce_s),

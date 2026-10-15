@@ -230,9 +230,8 @@ fn scenario_a_ev_picked_over_battery_battery_only_bridges_the_charger_lag() {
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
             ev_overlay: test_ticks::ev_on(),
-            live_pv_kw: Some(-6.0),
-            live_pv_released_kw: None,
-            live_base_load_kw: Some(0.5),
+            live_kw: &test_ticks::live(Some(-6.0), Some(0.5)),
+            live_released_kw: None,
             alert_active: false,
             limit_target_kw: None,
             prev_bridge_kw_by_asset: test_ticks::no_bridge(),
@@ -264,9 +263,8 @@ fn scenario_a_ev_picked_over_battery_battery_only_bridges_the_charger_lag() {
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
             ev_overlay: test_ticks::ev_on(),
-            live_pv_kw: Some(-6.0),
-            live_pv_released_kw: None,
-            live_base_load_kw: Some(0.5),
+            live_kw: &test_ticks::live(Some(-6.0), Some(0.5)),
+            live_released_kw: None,
             alert_active: false,
             limit_target_kw: None,
             prev_bridge_kw_by_asset: test_ticks::no_bridge(),
@@ -302,9 +300,8 @@ fn scenario_d_battery_covers_base_load_step_when_ev_at_target() {
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
             ev_overlay: test_ticks::ev_on(),
-            live_pv_kw: Some(0.0),
-            live_pv_released_kw: None,
-            live_base_load_kw: Some(2.5),
+            live_kw: &test_ticks::live(Some(0.0), Some(2.5)),
+            live_released_kw: None,
             alert_active: false,
             limit_target_kw: None,
             prev_bridge_kw_by_asset: test_ticks::no_bridge(),
@@ -399,9 +396,8 @@ fn pv_curtailment_used_only_as_backstop_when_other_levers_exhausted() {
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
             ev_overlay: test_ticks::ev_on(),
-            live_pv_kw: Some(-6.0),
-            live_pv_released_kw: None,
-            live_base_load_kw: None,
+            live_kw: &test_ticks::live(Some(-6.0), None),
+            live_released_kw: None,
             alert_active: false,
             limit_target_kw: None,
             prev_bridge_kw_by_asset: test_ticks::no_bridge(),
@@ -479,7 +475,12 @@ fn opportunistic_ev_charges_when_pv_exceeds_base() {
         ("ev", ev_snap(0.0, 0.4, 0.8, true)),
     ]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
-    apply_ev_lever_opportunistic(&mut sp, &sim, None, None, test_ticks::ev_on());
+    apply_ev_lever_opportunistic(
+        &mut sp,
+        &sim,
+        &test_ticks::live(None, None),
+        test_ticks::ev_on(),
+    );
     let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
     assert!((ev_sp - 2.0).abs() < 1e-6, "expected 2.0 kW, got {ev_sp}");
 }
@@ -492,7 +493,12 @@ fn opportunistic_ev_prefers_live_pv_kw_over_stale_snapshot() {
         ("ev", ev_snap(0.0, 0.4, 0.8, true)),
     ]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
-    apply_ev_lever_opportunistic(&mut sp, &sim, Some(-5.0), None, test_ticks::ev_on());
+    apply_ev_lever_opportunistic(
+        &mut sp,
+        &sim,
+        &test_ticks::live(Some(-5.0), None),
+        test_ticks::ev_on(),
+    );
     let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
     assert!((ev_sp - 4.0).abs() < 1e-6, "expected 4.0 kW, got {ev_sp}");
 }
@@ -505,7 +511,12 @@ fn opportunistic_ev_falls_back_to_stale_snapshot_without_live_pv_kw() {
         ("ev", ev_snap(0.0, 0.4, 0.8, true)),
     ]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
-    apply_ev_lever_opportunistic(&mut sp, &sim, None, None, test_ticks::ev_on());
+    apply_ev_lever_opportunistic(
+        &mut sp,
+        &sim,
+        &test_ticks::live(None, None),
+        test_ticks::ev_on(),
+    );
     assert!(!sp.contains_key("ev"), "0.5 kW deficit must not charge EV");
 }
 
@@ -517,7 +528,12 @@ fn opportunistic_ev_capped_at_max_charge_kw() {
         ("ev", ev_snap(0.0, 0.4, 0.8, true)),
     ]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
-    apply_ev_lever_opportunistic(&mut sp, &sim, None, None, test_ticks::ev_on());
+    apply_ev_lever_opportunistic(
+        &mut sp,
+        &sim,
+        &test_ticks::live(None, None),
+        test_ticks::ev_on(),
+    );
     let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
     assert!(
         (ev_sp - 7.0).abs() < 1e-6,
@@ -536,8 +552,7 @@ fn opportunistic_ev_disabled_suppresses_charging() {
     apply_ev_lever_opportunistic(
         &mut sp,
         &sim,
-        None,
-        None,
+        &test_ticks::live(None, None),
         &EvOverlays::from([("ev".to_string(), EvOverlay::default())]),
     );
     assert!(
@@ -564,7 +579,7 @@ fn heater_pause_commands_a_reachable_step_not_one_the_heater_rounds_back_up() {
 fn projected_net_kw_counts_the_heater_stage_its_setpoint_rounds_to() {
     let sim = make_sim(vec![("heater", heater_snap(20.0, 18.0, 23.0, 23.0))]);
     let sp = StdHashMap::from([("heater".to_string(), 1.03)]);
-    assert!((projected_net_kw(&sim, &sp, None, None) - 1.5).abs() < 1e-9);
+    assert!((projected_net_kw(&sim, &sp, &test_ticks::live(None, None)) - 1.5).abs() < 1e-9);
 }
 
 #[test]
@@ -595,11 +610,11 @@ fn projected_net_kw_asks_every_stepped_asset_not_just_the_heater() {
 
     let sp = StdHashMap::from([("shiftable_load".to_string(), 0.5)]);
     assert!(
-        (projected_net_kw(&sim, &sp, None, None) - 2.0).abs() < 1e-9,
+        (projected_net_kw(&sim, &sp, &test_ticks::live(None, None)) - 2.0).abs() < 1e-9,
         "a part-load command still starts it at full power"
     );
     let off = StdHashMap::from([("shiftable_load".to_string(), 0.0)]);
-    assert!((projected_net_kw(&sim, &off, None, None)).abs() < 1e-9);
+    assert!((projected_net_kw(&sim, &off, &test_ticks::live(None, None))).abs() < 1e-9);
 }
 
 #[test]
@@ -733,9 +748,8 @@ fn reconcile_battery_integrates_from_prev_setpoint_not_plan_allocation() {
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
             ev_overlay: test_ticks::ev_on(),
-            live_pv_kw: None,
-            live_pv_released_kw: None,
-            live_base_load_kw: Some(-8.67),
+            live_kw: &test_ticks::live(None, Some(-8.67)),
+            live_released_kw: None,
             alert_active: false,
             limit_target_kw: None,
             prev_bridge_kw_by_asset: test_ticks::no_bridge(),
@@ -856,9 +870,8 @@ fn reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp
                 plan_slot: Some(&slot),
                 objective: PlannerObjective::MinCost,
                 ev_overlay: test_ticks::ev_on(),
-                live_pv_kw: None,
-                live_pv_released_kw: None,
-                live_base_load_kw: Some(2.0 + STATIONARY_DEVIATION_KW),
+                live_kw: &test_ticks::live(None, Some(2.0 + STATIONARY_DEVIATION_KW)),
+                live_released_kw: None,
                 alert_active: false,
                 limit_target_kw: None,
                 prev_bridge_kw_by_asset: test_ticks::no_bridge(),
@@ -950,9 +963,8 @@ fn release_tick(
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
             ev_overlay: test_ticks::ev_on(),
-            live_pv_kw: None,
-            live_pv_released_kw: None,
-            live_base_load_kw: Some(live_base_load_kw),
+            live_kw: &test_ticks::live(None, Some(live_base_load_kw)),
+            live_released_kw: None,
             alert_active: false,
             limit_target_kw: None,
             prev_bridge_kw_by_asset: test_ticks::no_bridge(),
@@ -1034,9 +1046,8 @@ fn reconcile_keeps_reporting_a_held_lever_when_no_lever_can_act_this_tick() {
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
             ev_overlay: test_ticks::ev_on(),
-            live_pv_kw: None,
-            live_pv_released_kw: None,
-            live_base_load_kw: Some(PLAN_NET_KW + 3.0),
+            live_kw: &test_ticks::live(None, Some(PLAN_NET_KW + 3.0)),
+            live_released_kw: None,
             alert_active: false,
             limit_target_kw: None,
             prev_bridge_kw_by_asset: test_ticks::no_bridge(),
@@ -1075,9 +1086,8 @@ fn deviation_if_released_judges_pv_without_the_arbiters_own_curtailment() {
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
             ev_overlay: test_ticks::ev_on(),
-            live_pv_kw: Some(-2.86),
-            live_pv_released_kw: Some(-4.03),
-            live_base_load_kw: Some(0.5),
+            live_kw: &test_ticks::live(Some(-2.86), Some(0.5)),
+            live_released_kw: Some(&test_ticks::live(Some(-4.03), Some(0.5))),
             alert_active: false,
             limit_target_kw: None,
             prev_bridge_kw_by_asset: test_ticks::no_bridge(),
@@ -1223,9 +1233,8 @@ impl LaggedSite {
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
             ev_overlay: test_ticks::ev_on(),
-            live_pv_kw: Some(self.pv_kw),
-            live_pv_released_kw: None,
-            live_base_load_kw: Some(self.base_kw),
+            live_kw: &test_ticks::live(Some(self.pv_kw), Some(self.base_kw)),
+            live_released_kw: None,
             alert_active: false,
             limit_target_kw: limit::limit_target_kw(
                 self.hard_limit_kw,
@@ -1347,9 +1356,8 @@ fn import_step_outcome(sim: &SimSnapshot, base_kw: f64, alert_active: bool) -> A
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
             ev_overlay: test_ticks::ev_on(),
-            live_pv_kw: Some(0.0),
-            live_pv_released_kw: None,
-            live_base_load_kw: Some(base_kw),
+            live_kw: &test_ticks::live(Some(0.0), Some(base_kw)),
+            live_released_kw: None,
             alert_active,
             limit_target_kw: None,
             prev_bridge_kw_by_asset: test_ticks::no_bridge(),
@@ -1416,7 +1424,7 @@ fn two_evs_share_a_surplus_in_roster_order() {
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
     let on = overlays(&[("ev-a", true), ("ev-b", true)]);
     // 11 kW surplus: the first EV takes its 7 kW, the second the remaining 4 kW.
-    apply_ev_lever_opportunistic(&mut sp, &sim, Some(-12.0), None, &on);
+    apply_ev_lever_opportunistic(&mut sp, &sim, &test_ticks::live(Some(-12.0), None), &on);
     assert!((sp["ev-a"] - 7.0).abs() < 1e-6, "got {:?}", sp);
     assert!((sp["ev-b"] - 4.0).abs() < 1e-6, "got {:?}", sp);
 }
@@ -1431,7 +1439,12 @@ fn one_evs_setting_does_not_affect_another() {
     ]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
     let first_off = overlays(&[("ev-a", false), ("ev-b", true)]);
-    apply_ev_lever_opportunistic(&mut sp, &sim, Some(-6.0), None, &first_off);
+    apply_ev_lever_opportunistic(
+        &mut sp,
+        &sim,
+        &test_ticks::live(Some(-6.0), None),
+        &first_off,
+    );
     assert!(!sp.contains_key("ev-a"), "ev-a's overlay is off");
     assert!((sp["ev-b"] - 5.0).abs() < 1e-6, "got {:?}", sp);
 }

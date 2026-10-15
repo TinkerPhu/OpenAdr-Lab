@@ -422,8 +422,7 @@ pub(super) fn pv_curtailment_lever(
 pub(crate) fn apply_ev_lever_opportunistic(
     setpoints: &mut HashMap<String, f64>,
     sim: &SimSnapshot,
-    live_pv_kw: Option<f64>,
-    live_base_load_kw: Option<f64>,
+    live: &super::LiveKwByAsset,
     ev_overlay: &super::EvOverlays,
 ) {
     use ArbiterLeverKind::{Storage, SurplusCharge};
@@ -436,8 +435,7 @@ pub(crate) fn apply_ev_lever_opportunistic(
         .collect();
     let storage = sim.lever_asset_ids(&[Storage]);
     let except: Vec<&str> = evs.iter().chain(&storage).copied().collect();
-    let net_other_kw =
-        super::projected_net_kw_except(sim, setpoints, live_pv_kw, live_base_load_kw, &except);
+    let net_other_kw = super::projected_net_kw_except(sim, setpoints, live, &except);
     let storage_charge_kw: f64 = storage
         .iter()
         .map(|id| setpoints.get(*id).copied().unwrap_or(0.0).max(0.0))

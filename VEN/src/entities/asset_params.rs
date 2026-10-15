@@ -380,6 +380,20 @@ pub struct PvForecastParams {
     pub snow: PvSnowParams,
 }
 
+/// Each PV array's weather-forecast params, by asset id (W5b): the arrays whose profile entry
+/// has a `weather:` block.
+pub type PvWeatherParams = std::collections::BTreeMap<String, PvForecastParams>;
+
+/// Which asset each external feed belongs to (W5b): each PV array's weather geometry, and the
+/// asset each real-measurement feed measures (the profile-level half of the two-gate design).
+/// Read once from the profile at startup.
+#[derive(Debug, Clone, Default)]
+pub struct AssetFeedConfig {
+    pub pv_weather: PvWeatherParams,
+    pub measured_pv: Option<String>,
+    pub measured_base_load: Option<String>,
+}
+
 // ── BaseLoad ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]

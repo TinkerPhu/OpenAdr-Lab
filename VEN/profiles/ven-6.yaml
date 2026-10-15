@@ -6,6 +6,16 @@ assets:
     id: pv
     rated_kw: 7.5
     inverter_max_kw: 6.8
+    # Weather-sourced PV forecast (docs/architecture/weather_forecast.md).
+    # 7.5 kWp hypothetical array at the same Zunzgen site/geometry as ven-1
+    # (which uses the real 14.4 kWp installation as calibration reference).
+    weather:
+      latitude_deg: 47.4491
+      longitude_deg: 7.8081
+      tilt_deg: 22.0
+      azimuth_deg: 267.0
+      rated_kwp: 7.5
+      performance_ratio: 0.84
   - type: battery
     id: battery
     capacity_kwh: 9.0
@@ -73,14 +83,3 @@ planner:
       slots: 96   # 16 h at 10-min resolution
     - step_s: 900
       slots: 96   # 24 h at 15-min resolution
-
-# Weather-sourced PV forecast (docs/architecture/weather_forecast.md).
-# 7.5 kWp hypothetical array at the same Zunzgen site/geometry as ven-1
-# (which uses the real 14.4 kWp installation as calibration reference).
-weather_pv:
-  latitude_deg: 47.4491
-  longitude_deg: 7.8081
-  tilt_deg: 22.0
-  azimuth_deg: 267.0
-  rated_kwp: 7.5
-  performance_ratio: 0.84

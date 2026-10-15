@@ -7,7 +7,10 @@ function SignalCard({ title, testId, signal }: { title: string; testId: string; 
     <Card data-testid={testId} variant="outlined">
       <CardContent>
         <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-          <Typography variant="subtitle1">{title}</Typography>
+          <Typography variant="subtitle1">
+            {title}
+            {signal.asset_id && <span data-testid={`${testId}-asset`}> · {signal.asset_id}</span>}
+          </Typography>
           <Chip
             size="small"
             data-testid={`${testId}-source-alive`}
@@ -23,7 +26,7 @@ function SignalCard({ title, testId, signal }: { title: string; testId: string; 
         </Stack>
         {signal.status === "disabled" && (
           <Alert severity="info" data-testid={`${testId}-disabled`}>
-            Not enabled for this VEN (profile <code>measurements</code> section).
+            Not enabled for this VEN (an asset's <code>measurement: {"{"}enabled: true{"}"}</code> in the profile).
           </Alert>
         )}
         {signal.status === "not_configured" && (

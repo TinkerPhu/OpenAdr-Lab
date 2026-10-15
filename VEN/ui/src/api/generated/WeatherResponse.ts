@@ -11,7 +11,12 @@ export type WeatherResponse = { status: WeatherStatus, is_fresh: boolean,
  * offline while its last forecast is still within the staleness
  * window, or vice versa.
  */
-source_alive: boolean, raw: WeatherForecast | null, derived: Array<WeatherPvForecastSlot> | null, 
+source_alive: boolean, raw: WeatherForecast | null, 
+/**
+ * Each PV array's derived forecast, by asset id (W5b): one series per array with a
+ * `weather:` block, from its own geometry and rating. Empty without a forecast or config.
+ */
+derived: { [key in string]: Array<WeatherPvForecastSlot> }, 
 /**
  * Whether the PV asset concludes its panels are snow-covered right now (R-55): the state
  * `derived` starts from, so a covered panel is shown covered until the melt condition.

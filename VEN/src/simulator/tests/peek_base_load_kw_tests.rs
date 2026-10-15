@@ -22,11 +22,34 @@ fn noon() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 7, 12, 12, 0, 0).unwrap()
 }
 
+/// This tick's feeds for the base load `base_load`: a measured reading and a flat learned
+/// heuristic, those given.
+fn base_load_feeds(
+    measured_kw: Option<f64>,
+    heuristic_kw: Option<f64>,
+) -> crate::simulator::AssetTickFeeds {
+    let mut feeds = heuristic_kw
+        .map(|kw| crate::simulator::AssetTickFeeds::heuristic_flat_kw("base_load", kw))
+        .unwrap_or_default();
+    feeds.measured_kw = measured_kw
+        .map(|kw| ("base_load".to_string(), kw))
+        .into_iter()
+        .collect();
+    feeds
+}
+
 #[test]
 fn peek_base_load_kw_returns_none_without_base_load_asset() {
     let sim = SimState::from_params(&[], noon());
     assert_eq!(
-        sim.peek_base_load_kw(noon(), 30.0, None, 0.1, None, None),
+        sim.peek_base_load_kw(
+            "base_load",
+            noon(),
+            30.0,
+            None,
+            0.1,
+            &base_load_feeds(None, None)
+        ),
         None
     );
 }
@@ -39,7 +62,14 @@ fn peek_base_load_kw_uses_heuristic_tier_when_measurement_absent() {
     let heuristic_kw = 7.7;
 
     let preview = sim
-        .peek_base_load_kw(noon(), 30.0, None, 0.1, None, Some(heuristic_kw))
+        .peek_base_load_kw(
+            "base_load",
+            noon(),
+            30.0,
+            None,
+            0.1,
+            &base_load_feeds(None, Some(heuristic_kw)),
+        )
         .expect("base_load asset is configured");
     assert!(
         (preview - heuristic_kw).abs() < 1e-9,
@@ -59,12 +89,19 @@ fn peek_base_load_kw_matches_tick_output_for_same_now_with_heuristic_tier() {
     let heuristic_kw = 3.3;
 
     let preview = sim
-        .peek_base_load_kw(now, dt_s, None, base_load_alpha, None, Some(heuristic_kw))
+        .peek_base_load_kw(
+            "base_load",
+            now,
+            dt_s,
+            None,
+            base_load_alpha,
+            &base_load_feeds(None, Some(heuristic_kw)),
+        )
         .expect("base_load asset is configured");
 
     sim.tick(TickInputs {
         base_load_alpha,
-        base_load_heuristic_kw: Some(heuristic_kw),
+        feeds: crate::simulator::AssetTickFeeds::heuristic_flat_kw("base_load", heuristic_kw),
         ..TickInputs::new(dt_s, now, HashMap::new())
     });
 
@@ -86,14 +123,24 @@ fn peek_base_load_kw_matches_tick_output_for_same_now() {
     let mut sim = base_load_state(0.5);
     // A lingering perturbation offset (as if a slider was recently released),
     // so the decay branch is exercised, not just the flat profile.
-    sim.base_load_smoothing.load_offset_kw = 1.2;
+    sim.base_load_smoothing
+        .entry("base_load".into())
+        .or_default()
+        .load_offset_kw = 1.2;
 
     let now = noon();
     let dt_s = 30.0;
     let base_load_alpha = 0.1;
 
     let preview = sim
-        .peek_base_load_kw(now, dt_s, None, base_load_alpha, None, None)
+        .peek_base_load_kw(
+            "base_load",
+            now,
+            dt_s,
+            None,
+            base_load_alpha,
+            &base_load_feeds(None, None),
+        )
         .expect("base_load asset is configured");
 
     sim.tick(TickInputs {
@@ -119,10 +166,20 @@ fn peek_base_load_kw_override_bypasses_decay() {
     let mut sim = base_load_state(0.5);
     // A large lingering offset that would dominate the natural profile if it
     // were applied — the override must win outright, not blend with it.
-    sim.base_load_smoothing.load_offset_kw = 5.0;
+    sim.base_load_smoothing
+        .entry("base_load".into())
+        .or_default()
+        .load_offset_kw = 5.0;
 
     let preview = sim
-        .peek_base_load_kw(noon(), 30.0, Some(2.0), 0.1, None, None)
+        .peek_base_load_kw(
+            "base_load",
+            noon(),
+            30.0,
+            Some(2.0),
+            0.1,
+            &base_load_feeds(None, None),
+        )
         .expect("base_load asset is configured");
     assert!(
         (preview - 2.0).abs() < 1e-9,
@@ -133,10 +190,20 @@ fn peek_base_load_kw_override_bypasses_decay() {
 #[test]
 fn peek_base_load_kw_decays_toward_natural_profile() {
     let mut sim = base_load_state(0.5);
-    sim.base_load_smoothing.load_offset_kw = 2.0;
+    sim.base_load_smoothing
+        .entry("base_load".into())
+        .or_default()
+        .load_offset_kw = 2.0;
 
     let preview = sim
-        .peek_base_load_kw(noon(), 30.0, None, 0.1, None, None)
+        .peek_base_load_kw(
+            "base_load",
+            noon(),
+            30.0,
+            None,
+            0.1,
+            &base_load_feeds(None, None),
+        )
         .expect("base_load asset is configured");
     assert!(
         preview > 0.5 && preview < 2.5,
@@ -148,12 +215,22 @@ fn peek_base_load_kw_decays_toward_natural_profile() {
 #[test]
 fn peek_base_load_kw_matches_tick_output_with_lingering_offset_for_same_now() {
     let mut sim = base_load_state(1.0);
-    sim.base_load_smoothing.load_offset_kw = -0.8; // still decaying from a released override
+    sim.base_load_smoothing
+        .entry("base_load".into())
+        .or_default()
+        .load_offset_kw = -0.8; // still decaying from a released override
     let now = noon();
     let dt_s = 30.0;
 
     let preview = sim
-        .peek_base_load_kw(now, dt_s, None, 0.1, None, None)
+        .peek_base_load_kw(
+            "base_load",
+            now,
+            dt_s,
+            None,
+            0.1,
+            &base_load_feeds(None, None),
+        )
         .expect("base_load asset is configured");
 
     sim.tick(TickInputs::new(dt_s, now, HashMap::new()));

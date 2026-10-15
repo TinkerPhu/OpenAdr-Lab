@@ -14,7 +14,6 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::app_ctx::{Weather, WeatherPvParams};
-use crate::entities::asset_params::PvForecastParams;
 use crate::entities::pv_snow::PvSnowState;
 use crate::entities::solar::{weather_pv_forecast_series, WeatherPvForecastSlot};
 use crate::entities::weather::WeatherForecast;
@@ -45,7 +44,9 @@ pub struct WeatherResponse {
     /// window, or vice versa.
     source_alive: bool,
     raw: Option<WeatherForecast>,
-    derived: Option<Vec<WeatherPvForecastSlot>>,
+    /// Each PV array's derived forecast, by asset id (W5b): one series per array with a
+    /// `weather:` block, from its own geometry and rating. Empty without a forecast or config.
+    derived: std::collections::BTreeMap<String, Vec<WeatherPvForecastSlot>>,
     /// Whether the PV asset concludes its panels are snow-covered right now (R-55): the state
     /// `derived` starts from, so a covered panel is shown covered until the melt condition.
     pv_snow_covered_now: bool,
@@ -55,7 +56,7 @@ pub struct WeatherResponse {
 /// `system::build_health_response`/`build_vtn_status_response`.
 fn build_weather_response(
     forecast: Option<WeatherForecast>,
-    pv_params: Option<&PvForecastParams>,
+    pv_params: &WeatherPvParams,
     source_alive: bool,
     now: chrono::DateTime<chrono::Utc>,
     initial_snow: PvSnowState,
@@ -68,9 +69,17 @@ fn build_weather_response(
         Some(_) if is_fresh => WeatherStatus::Ok,
         Some(_) => WeatherStatus::Stale,
     };
-    let derived = match (&forecast, pv_params) {
-        (Some(f), Some(params)) => Some(weather_pv_forecast_series(params, f, initial_snow)),
-        _ => None,
+    let derived = match &forecast {
+        Some(f) => pv_params
+            .iter()
+            .map(|(id, params)| {
+                (
+                    id.clone(),
+                    weather_pv_forecast_series(params, f, initial_snow),
+                )
+            })
+            .collect(),
+        None => Default::default(),
     };
     WeatherResponse {
         status,
@@ -91,7 +100,7 @@ pub async fn get_weather(
     let source_alive = weather.is_alive();
     Json(build_weather_response(
         forecast,
-        weather_pv_params.as_ref(),
+        &weather_pv_params,
         source_alive,
         chrono::Utc::now(),
         state.pv_snow_state().await,
@@ -101,7 +110,7 @@ pub async fn get_weather(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entities::asset_params::{PvArrayGeometry, PvSnowParams};
+    use crate::entities::asset_params::{PvArrayGeometry, PvForecastParams, PvSnowParams};
     use crate::entities::weather::{GeoPosition, WeatherForecastSample};
     use chrono::{TimeZone, Utc};
 
@@ -125,6 +134,50 @@ mod tests {
                 irradiance_variability: None,
             }],
         }
+    }
+
+    fn arrays(entries: &[(&str, PvForecastParams)]) -> WeatherPvParams {
+        entries.iter().map(|(id, p)| (id.to_string(), *p)).collect()
+    }
+
+    /// W5b: two arrays facing east and west under one forecast derive different power: the
+    /// east array produces more in the morning, the west array more in the afternoon.
+    #[test]
+    fn east_and_west_arrays_derive_their_own_forecasts() {
+        let fetched_at = Utc.with_ymd_and_hms(2026, 6, 21, 4, 0, 0).unwrap();
+        let mut forecast = sample_forecast(fetched_at);
+        forecast.samples = [7, 15]
+            .iter()
+            .map(|&h| WeatherForecastSample {
+                valid_at: Utc.with_ymd_and_hms(2026, 6, 21, h, 0, 0).unwrap(),
+                ghi_w_m2: 600.0,
+                ..forecast.samples[0].clone()
+            })
+            .collect();
+        let facing = |azimuth_deg: f64| PvForecastParams {
+            geometry: PvArrayGeometry {
+                tilt_deg: 40.0,
+                azimuth_deg,
+                ..sample_params().geometry
+            },
+            ..sample_params()
+        };
+        let resp = build_weather_response(
+            Some(forecast),
+            &arrays(&[("pv-east", facing(90.0)), ("pv-west", facing(270.0))]),
+            true,
+            fetched_at,
+            PvSnowState::default(),
+        );
+        let kw = |id: &str, i: usize| resp.derived[id][i].forecast_ac_kw;
+        assert!(
+            kw("pv-east", 0) > kw("pv-west", 0),
+            "morning (05:00 UTC): east > west"
+        );
+        assert!(
+            kw("pv-west", 1) > kw("pv-east", 1),
+            "afternoon (13:00 UTC): west > east"
+        );
     }
 
     fn sample_params() -> PvForecastParams {
@@ -152,7 +205,7 @@ mod tests {
         let fetched_at = Utc.with_ymd_and_hms(2026, 7, 19, 5, 54, 48).unwrap();
         let resp = build_weather_response(
             Some(sample_forecast(fetched_at)),
-            Some(&sample_params()),
+            &arrays(&[("pv", sample_params())]),
             true,
             now,
             PvSnowState::default(),
@@ -160,7 +213,7 @@ mod tests {
         assert_eq!(resp.status, WeatherStatus::Ok);
         assert!(resp.is_fresh);
         assert!(resp.raw.is_some());
-        assert_eq!(resp.derived.as_ref().unwrap().len(), 1);
+        assert_eq!(resp.derived["pv"].len(), 1);
     }
 
     #[test]
@@ -171,13 +224,13 @@ mod tests {
         cold.samples[0].temperature_c = -3.0; // below the melt threshold: a covered panel stays so
         let resp = build_weather_response(
             Some(cold),
-            Some(&sample_params()),
+            &arrays(&[("pv", sample_params())]),
             true,
             now,
             PvSnowState { covered: true },
         );
         assert!(resp.pv_snow_covered_now);
-        assert!(resp.derived.unwrap()[0].snow_covered);
+        assert!(resp.derived["pv"][0].snow_covered);
     }
 
     #[test]
@@ -186,7 +239,7 @@ mod tests {
         let fetched_at = Utc.with_ymd_and_hms(2026, 7, 19, 3, 0, 0).unwrap(); // 3h old
         let resp = build_weather_response(
             Some(sample_forecast(fetched_at)),
-            Some(&sample_params()),
+            &arrays(&[("pv", sample_params())]),
             true,
             now,
             PvSnowState::default(),
@@ -204,14 +257,14 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 7, 19, 6, 0, 0).unwrap();
         let resp = build_weather_response(
             None,
-            Some(&sample_params()),
+            &arrays(&[("pv", sample_params())]),
             false,
             now,
             PvSnowState::default(),
         );
         assert_eq!(resp.status, WeatherStatus::NoForecast);
         assert!(resp.raw.is_none());
-        assert!(resp.derived.is_none());
+        assert!(resp.derived.is_empty());
     }
 
     #[test]
@@ -220,14 +273,14 @@ mod tests {
         let fetched_at = Utc.with_ymd_and_hms(2026, 7, 19, 5, 54, 48).unwrap();
         let resp = build_weather_response(
             Some(sample_forecast(fetched_at)),
-            None,
+            &WeatherPvParams::new(),
             true,
             now,
             PvSnowState::default(),
         );
         assert_eq!(resp.status, WeatherStatus::Ok);
         assert!(resp.raw.is_some());
-        assert!(resp.derived.is_none());
+        assert!(resp.derived.is_empty());
     }
 
     #[test]
@@ -236,7 +289,7 @@ mod tests {
         let fetched_at = Utc.with_ymd_and_hms(2026, 7, 19, 6, 4, 0).unwrap();
         let resp = build_weather_response(
             Some(sample_forecast(fetched_at)),
-            Some(&sample_params()),
+            &arrays(&[("pv", sample_params())]),
             false,
             now,
             PvSnowState::default(),

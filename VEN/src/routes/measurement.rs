@@ -23,6 +23,8 @@ pub enum MeasurementStatus {
 
 #[derive(Serialize, TS)]
 pub struct SignalResponse {
+    /// The asset this feed measures (its profile `measurement.enabled`); `None`: disabled.
+    asset_id: Option<String>,
     status: MeasurementStatus,
     is_fresh: bool,
     /// Transport heartbeat: whether the configured source has been heard
@@ -41,12 +43,14 @@ pub struct MeasurementResponse {
 /// Pure per-signal response builder — testable without `AppCtx`.
 fn build_signal_response(
     latest: Option<(f64, DateTime<Utc>)>,
-    enabled: bool,
+    asset_id: Option<&str>,
     source_alive: bool,
     now: DateTime<Utc>,
 ) -> SignalResponse {
-    if !enabled {
+    let asset_id = asset_id.map(str::to_string);
+    if asset_id.is_none() {
         return SignalResponse {
+            asset_id,
             status: MeasurementStatus::Disabled,
             is_fresh: false,
             source_alive,
@@ -65,6 +69,7 @@ fn build_signal_response(
         None => (None, None),
     };
     SignalResponse {
+        asset_id,
         status,
         is_fresh,
         source_alive,
@@ -80,14 +85,14 @@ pub async fn get_measurement(
     let pv_latest = measurements.pv.latest_kw().await;
     let pv = build_signal_response(
         pv_latest,
-        measurements.pv_enabled,
+        measurements.pv_asset.as_deref(),
         measurements.pv.is_alive(),
         now,
     );
     let base_load_latest = measurements.base_load.latest_kw().await;
     let base_load = build_signal_response(
         base_load_latest,
-        measurements.base_load_enabled,
+        measurements.base_load_asset.as_deref(),
         measurements.base_load.is_alive(),
         now,
     );
@@ -105,20 +110,20 @@ mod tests {
 
     #[test]
     fn disabled_signal_returns_disabled_status_regardless_of_reading() {
-        let resp = build_signal_response(Some((3.5, t(12, 0))), false, true, t(12, 1));
+        let resp = build_signal_response(Some((3.5, t(12, 0))), None, true, t(12, 1));
         assert_eq!(resp.status, MeasurementStatus::Disabled);
         assert!(resp.raw_kw.is_none());
     }
 
     #[test]
     fn enabled_with_no_reading_returns_not_configured() {
-        let resp = build_signal_response(None, true, false, t(12, 0));
+        let resp = build_signal_response(None, Some("pv"), false, t(12, 0));
         assert_eq!(resp.status, MeasurementStatus::NotConfigured);
     }
 
     #[test]
     fn enabled_fresh_reading_returns_ok_with_raw() {
-        let resp = build_signal_response(Some((3.5, t(12, 0))), true, true, t(12, 1));
+        let resp = build_signal_response(Some((3.5, t(12, 0))), Some("pv"), true, t(12, 1));
         assert_eq!(resp.status, MeasurementStatus::Ok);
         assert!(resp.is_fresh);
         assert_eq!(resp.raw_kw, Some(3.5));
@@ -126,7 +131,7 @@ mod tests {
 
     #[test]
     fn enabled_stale_reading_still_shown_but_flagged() {
-        let resp = build_signal_response(Some((3.5, t(12, 0))), true, true, t(12, 10));
+        let resp = build_signal_response(Some((3.5, t(12, 0))), Some("pv"), true, t(12, 10));
         assert_eq!(resp.status, MeasurementStatus::Stale);
         assert!(!resp.is_fresh);
         assert!(resp.raw_kw.is_some(), "stale reading must still be shown");
@@ -134,7 +139,7 @@ mod tests {
 
     #[test]
     fn source_alive_reflects_passed_in_flag_independent_of_freshness() {
-        let resp = build_signal_response(Some((3.5, t(12, 0))), true, false, t(12, 1));
+        let resp = build_signal_response(Some((3.5, t(12, 0))), Some("pv"), false, t(12, 1));
         assert_eq!(resp.status, MeasurementStatus::Ok);
         assert!(!resp.source_alive);
     }

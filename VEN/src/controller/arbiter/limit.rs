@@ -101,7 +101,7 @@ pub fn enforce_import_limit(
     bounds_kw: &SetpointBoundsKw,
 ) -> Option<LimitPassOutcome> {
     let target_kw = tick.limit_target_kw?;
-    let net_kw = projected_net_kw(tick.sim, setpoints, tick.live_pv_kw, tick.live_base_load_kw);
+    let net_kw = projected_net_kw(tick.sim, setpoints, tick.live_kw);
     let excess_kw = net_kw - target_kw;
     let mut outcome = LimitPassOutcome {
         target_kw,

@@ -37,12 +37,19 @@ export function WeatherPage() {
             </Alert>
           )}
           <WeatherRawPanel forecast={data.raw} />
-          {data.derived ? (
-            <WeatherDerivedPanel slots={data.derived} snowCoveredNow={data.pv_snow_covered_now} />
+          {Object.keys(data.derived).length > 0 ? (
+            Object.entries(data.derived).map(([assetId, slots]) => (
+              <WeatherDerivedPanel
+                key={assetId}
+                assetId={assetId}
+                slots={slots ?? []}
+                snowCoveredNow={data.pv_snow_covered_now}
+              />
+            ))
           ) : (
             <Alert severity="info" data-testid="weather-derived-unavailable">
-              No PV array configured for this site (<code>weather_pv</code> profile section) —
-              derived PV forecast unavailable.
+              No PV array with a <code>weather:</code> block in this VEN's profile — derived PV
+              forecast unavailable.
             </Alert>
           )}
         </Stack>

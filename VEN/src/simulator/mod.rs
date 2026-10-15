@@ -29,6 +29,7 @@ use crate::entities::asset_params::AssetParams;
 use energy::EnergyCounter;
 pub use handle::SimHandle;
 pub use pv_smoothing::PvSmoothingState;
+pub use tick_inputs::AssetTickFeeds;
 pub use tick_inputs::TickInputs;
 
 /// Tracks the user-induced base load perturbation between ticks.
@@ -177,12 +178,28 @@ pub struct SimState {
     /// PV irradiance EMA state for Behaviour B smoothing. Ephemeral — resets on restart.
     #[serde(skip, default)]
     pub pv_smoothing: PvSmoothingState,
-    /// Base load EMA state for Behaviour B smoothing. Ephemeral — resets on restart.
+    /// Base load EMA state for Behaviour B smoothing, per base-load asset. Ephemeral — resets
+    /// on restart.
     #[serde(skip, default)]
-    pub base_load_smoothing: BaseLoadSmoothingState,
+    pub base_load_smoothing: HashMap<String, BaseLoadSmoothingState>,
     pub last_tick: DateTime<Utc>,
     #[serde(skip, default = "StdRng::from_entropy")]
     pub rng: StdRng, // R-24: seeds power_model::random_voltage; reseeded fresh on load
+}
+
+/// The sum of every array's AC ceiling [kW] (`Asset::ac_ceiling_kw`), 0 without an array.
+pub(crate) fn total_ac_ceiling_kw(asset_configs: &[Box<dyn Asset>]) -> f64 {
+    asset_configs.iter().filter_map(|c| c.ac_ceiling_kw()).sum()
+}
+
+/// The share of the site's generation limit an asset takes (W5b, design E4): its AC ceiling
+/// over all arrays' together, so the arrays' limits add up to the site's. 1 when no array
+/// declares a ceiling (a lone array takes the whole limit, as before).
+pub(crate) fn generation_limit_share(asset: &dyn Asset, total_ac_ceiling_kw: f64) -> f64 {
+    match asset.ac_ceiling_kw() {
+        Some(ac_kw) if total_ac_ceiling_kw > 0.0 => ac_kw / total_ac_ceiling_kw,
+        _ => 1.0,
+    }
 }
 
 impl SimState {
@@ -274,7 +291,7 @@ impl SimState {
             grid: GridMeter::default(),
             grid_asset: Grid::new(),
             pv_smoothing: PvSmoothingState::default(),
-            base_load_smoothing: BaseLoadSmoothingState::default(),
+            base_load_smoothing: HashMap::new(),
             rng,
             last_tick: now,
         }
@@ -321,21 +338,16 @@ impl SimState {
             pv_tau_s,
             pv_generation_limit_override,
             pv_curtailment_source,
-            pv_measured_kw,
-            weather_pv_kw,
-            weather_pv_forecast,
             ambient_temp_c_override,
             heater_temp_min_override,
             heater_temp_max_override,
             heater_emergency_by_asset,
             base_load_kw_override,
             base_load_alpha,
-            base_load_measured_kw,
-            base_load_heuristic_kw,
-            base_load_heuristic,
             ev_plugged_override,
             ev_soc_target_override,
             ev_departure_by_asset,
+            feeds,
         } = inputs;
         let natural_irradiance = crate::entities::solar::natural_irradiance_at(now);
 
@@ -344,29 +356,8 @@ impl SimState {
             self.pv_smoothing
                 .update(pv_irradiance_override, natural_irradiance, dt_s, pv_tau_s);
 
-        // Behaviour B — base load perturbation overlay. Hoisted out of the
-        // per-asset loop below (Spec A Phase 2b prerequisite for
-        // `TickOverridable`, mirroring how PV's `irradiance` is already
-        // resolved above, before any asset-specific match): needs the
-        // BaseLoad config's own fields (`baseline_kw_profile`,
-        // `appliance_noise_kw`) to compute `natural_base_kw`, so it's found
-        // by a read-only pre-pass rather than known ahead of time like PV's
-        // natural-irradiance curve is. `None` if no BaseLoad asset is
-        // configured, matching today's behavior of the match arm simply
-        // never firing in that case.
-        let base_load_baseline_kw = self
-            .asset_configs
-            .iter()
-            .find_map(|cfg| cfg.as_any().downcast_ref::<BaseLoad>())
-            .map(|bl| bl.natural_base_kw(base_load_measured_kw, base_load_heuristic_kw, now))
-            .map(|natural_base_kw| {
-                self.base_load_smoothing.update(
-                    base_load_kw_override,
-                    natural_base_kw,
-                    dt_s,
-                    base_load_alpha,
-                )
-            });
+        // The site's generation limit is shared over the arrays by their AC ceilings.
+        let total_ac_ceiling_kw = total_ac_ceiling_kw(&self.asset_configs);
 
         // Bundles this tick's override inputs for `TickOverridable`
         // (design.md Decision D5) — pre-resolved where resolution needs
@@ -380,24 +371,24 @@ impl SimState {
             pv_irradiance: irradiance,
             pv_irradiance_offset: self.pv_smoothing.irradiance_offset,
             pv_tau_s,
-            pv_generation_limit_kw: pv_generation_limit_override,
+            pv_generation_limit_kw: None,
             pv_curtailment_source,
             // Weather is never nulled by a manual override anymore — a
             // recently-released override's decaying irradiance_offset blends
             // additively on top of it instead (see `PvInverter::step_inner`).
             // Only a forced override (this exact tick) takes exclusive control.
-            pv_weather_power_kw: weather_pv_kw,
-            pv_weather_forecast: weather_pv_forecast,
-            pv_measured_power_kw: pv_measured_kw,
+            pv_weather_power_kw: None,
+            pv_weather_forecast: None,
+            pv_measured_power_kw: None,
             pv_irradiance_forced: pv_irradiance_override.is_some(),
             heater_ambient_temp_c_override: ambient_temp_c_override,
             heater_temp_min_override,
             heater_temp_max_override,
             heater_emergency_curtail_override: None,
             heater_emergency_absorb_override: None,
-            base_load_measured_kw,
-            base_load_baseline_kw,
-            base_load_heuristic,
+            base_load_measured_kw: None,
+            base_load_baseline_kw: None,
+            base_load_heuristic: None,
             ev_plugged_override,
             ev_soc_target_override,
             ev_departure_time: None,
@@ -416,6 +407,32 @@ impl SimState {
             tick_overrides.heater_emergency_curtail_override = curtail;
             tick_overrides.heater_emergency_absorb_override = absorb;
             tick_overrides.ev_departure_time = ev_departure_by_asset.get(&entry.id).copied();
+            // Its own feeds (W5b): an array's weather and generation-limit share, a measured
+            // asset's reading, a base load's heuristic and its own Behaviour B baseline.
+            let id = entry.id.as_str();
+            let measured_kw = feeds.measured_kw.get(id).copied();
+            tick_overrides.pv_weather_power_kw = feeds.weather_pv_kw.get(id).copied();
+            tick_overrides.pv_weather_forecast = feeds.weather_pv_forecast.get(id).cloned();
+            tick_overrides.pv_measured_power_kw = measured_kw;
+            tick_overrides.pv_generation_limit_kw = pv_generation_limit_override.map(|limit_kw| {
+                limit_kw * generation_limit_share(cfg.as_ref(), total_ac_ceiling_kw)
+            });
+            tick_overrides.base_load_measured_kw = measured_kw;
+            tick_overrides.base_load_heuristic = feeds.heuristic.get(id).cloned();
+            tick_overrides.base_load_baseline_kw =
+                cfg.as_any().downcast_ref::<BaseLoad>().map(|bl| {
+                    let natural_base_kw =
+                        bl.natural_base_kw(measured_kw, feeds.heuristic_kw(id, now), now);
+                    self.base_load_smoothing
+                        .entry(entry.id.clone())
+                        .or_default()
+                        .update(
+                            base_load_kw_override,
+                            natural_base_kw,
+                            dt_s,
+                            base_load_alpha,
+                        )
+                });
             if let Some(overridable) = cfg.as_tick_overridable() {
                 overridable.apply_tick_overrides(&mut entry.state, &tick_overrides);
             }

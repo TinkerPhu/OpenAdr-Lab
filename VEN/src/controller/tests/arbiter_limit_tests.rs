@@ -21,9 +21,8 @@ fn tick<'a>(
         plan_slot,
         objective: PlannerObjective::MinCost,
         ev_overlay: test_ticks::ev_on(),
-        live_pv_kw: None,
-        live_pv_released_kw: None,
-        live_base_load_kw: Some(live_base_load_kw),
+        live_kw: test_ticks::live_static(None, Some(live_base_load_kw)),
+        live_released_kw: None,
         alert_active,
         limit_target_kw,
         prev_bridge_kw_by_asset: test_ticks::no_bridge(),
@@ -35,7 +34,7 @@ fn no_bounds() -> SetpointBoundsKw {
 }
 
 fn projected(t: &ArbiterTick, sp: &StdHashMap<String, f64>) -> f64 {
-    projected_net_kw(t.sim, sp, t.live_pv_kw, t.live_base_load_kw)
+    projected_net_kw(t.sim, sp, t.live_kw)
 }
 
 // ── the shared target ───────────────────────────────────────────────────────

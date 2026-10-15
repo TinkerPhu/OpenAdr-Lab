@@ -16,6 +16,19 @@ assets:
   - type: pv
     id: pv
     rated_kw: 5.0
+    # Weather-sourced PV forecast (weather-forecast-plugin BDD scenarios). Site
+    # coordinates and rated_kwp match the "pv" asset above and the BDD test
+    # fixture's sample message location (Zunzgen, 47.4491/7.8081).
+    weather:
+      latitude_deg: 47.4491
+      longitude_deg: 7.8081
+      tilt_deg: 30.0
+      azimuth_deg: 180.0
+      rated_kwp: 5.0
+    # Real-measurement MQTT feeds (real-measurement-mqtt BDD scenarios) — the
+    # profile-level gate; the env-var/transport gate is set on the VEN-1 test
+    # container in tests/docker-compose.test.yml.
+    measurement: {enabled: true}
   - type: battery
     id: battery
     capacity_kwh: 10.0
@@ -27,6 +40,7 @@ assets:
   - type: base_load
     id: base_load
     baseline_kw: 0.5
+    measurement: {enabled: true}
 
 simulator:
   tick_s: 1
@@ -38,23 +52,6 @@ planner:
       slots: 24
   replan_interval_s: 300
   # c_ctrl_imp_malus_eur_kwh: 0.22  # default
-
-# Weather-sourced PV forecast (weather-forecast-plugin BDD scenarios). Site
-# coordinates and rated_kwp match the "pv" asset above and the BDD test
-# fixture's sample message location (Zunzgen, 47.4491/7.8081).
-weather_pv:
-  latitude_deg: 47.4491
-  longitude_deg: 7.8081
-  tilt_deg: 30.0
-  azimuth_deg: 180.0
-  rated_kwp: 5.0
-
-# Real-measurement MQTT feeds (real-measurement-mqtt BDD scenarios) — the
-# profile-level gate; the env-var/transport gate is set on the VEN-1 test
-# container in tests/docker-compose.test.yml.
-measurements:
-  pv_enabled: true
-  base_load_enabled: true
 
 # VTN-communication-loss power curtailment (R-59). Short debounce (10s) so
 # the resilience @resilience scenarios' VTN-outage windows (already 30s+)

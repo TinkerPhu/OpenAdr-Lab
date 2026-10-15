@@ -10,7 +10,7 @@ use tracing::info;
 
 use crate::controller::{HistoryPort, SolverPort, WeatherForecastPort};
 use crate::entities::asset::PlanTriggerSignal;
-use crate::entities::asset_params::{AssetParams, PvForecastParams};
+use crate::entities::asset_params::AssetParams;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::simulator::plan_context::{apply_pending_pv_inject, clone_sim_snapshot};
@@ -37,7 +37,7 @@ pub(super) async fn run_plan_cycle(
     event_tx: &PlannerEventTx,
     notifier: &crate::services::notify::Notifier,
     weather: &Arc<dyn WeatherForecastPort>,
-    weather_pv_params: Option<&PvForecastParams>,
+    weather_pv_params: &crate::entities::asset_params::PvWeatherParams,
     // The kind and its cause together: two parameters for one fact invited
     // them to disagree, and the reason string is derived rather than passed.
     signal: &PlanTriggerSignal,

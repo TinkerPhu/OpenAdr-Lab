@@ -110,7 +110,7 @@ fn tick_uses_heuristic_tier_when_measurement_absent_but_heuristic_present() {
     let heuristic_kw = 9.9; // deliberately far from both synthetic and 0
 
     sim.tick(TickInputs {
-        base_load_heuristic_kw: Some(heuristic_kw),
+        feeds: crate::simulator::AssetTickFeeds::heuristic_flat_kw("base_load", heuristic_kw),
         ..TickInputs::new(30.0, coffee_time, HashMap::new())
     });
 

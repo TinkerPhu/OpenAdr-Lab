@@ -12,19 +12,21 @@ import {
 } from "@mui/material";
 import type { WeatherPvForecastSlot } from "../../api/types";
 
-/** Weather-sourced PV forecast derived from the raw forecast — read-only
- * diagnostic (not yet the planner's own PV input, see R-50). */
+/** One PV array's weather-sourced forecast, derived from the raw forecast with that array's own
+ * geometry and rating — read-only diagnostic. */
 export function WeatherDerivedPanel({
+  assetId,
   slots,
   snowCoveredNow,
 }: {
+  assetId: string;
   slots: WeatherPvForecastSlot[];
   snowCoveredNow: boolean;
 }) {
   return (
-    <Paper variant="outlined" sx={{ p: 2 }} data-testid="weather-derived-panel">
+    <Paper variant="outlined" sx={{ p: 2 }} data-testid="weather-derived-panel" data-asset-id={assetId}>
       <Typography variant="subtitle1" sx={{ mb: 1 }}>
-        Derived PV forecast
+        Derived PV forecast · {assetId}
       </Typography>
       {snowCoveredNow && (
         <Alert severity="info" sx={{ mb: 1 }} data-testid="weather-pv-snow-now">

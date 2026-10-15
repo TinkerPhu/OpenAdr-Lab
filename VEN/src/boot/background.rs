@@ -77,7 +77,7 @@ fn spawn_vtn_polls(w: &World) {
 }
 
 fn spawn_sim_tick(w: &World) {
-    let (s, sim, sp, vn, tx, dd, etx, wp, wpp, pvm, pvme, blm, blme, nf, cl, tp) = (
+    let (s, sim, sp, vn, tx, dd, etx, wp, feeds, pvm, blm, nf, cl, tp) = (
         w.state.clone(),
         w.sim.clone(),
         w.sim_params.clone(),
@@ -86,11 +86,9 @@ fn spawn_sim_tick(w: &World) {
         w.data_dir.clone(),
         w.planner_event_tx.clone(),
         w.ports.weather.clone(),
-        w.weather_pv_params,
+        w.asset_feeds.clone(),
         w.ports.pv_measurement.clone(),
-        w.pv_measurement_enabled,
         w.ports.base_load_measurement.clone(),
-        w.base_load_measurement_enabled,
         w.notifier.clone(),
         w.comms_loss,
         w.ports.telemetry.clone(),
@@ -106,11 +104,9 @@ fn spawn_sim_tick(w: &World) {
             dd.clone(),
             etx.clone(),
             wp.clone(),
-            wpp,
+            feeds.clone(),
             pvm.clone(),
-            pvme,
             blm.clone(),
-            blme,
             nf.clone(),
             cl,
             (gi, ge),
@@ -156,7 +152,7 @@ fn spawn_planning(w: &World, trigger_rx: watch::Receiver<PlanTriggerSignal>) {
         w.planner_event_tx.clone(),
         w.notifier.clone(),
         w.ports.weather.clone(),
-        w.weather_pv_params,
+        w.asset_feeds.pv_weather.clone(),
         w.ports.history.clone(),
     );
     let (gi, ge) = (w.grid_max_import_kw, w.grid_max_export_kw);
@@ -175,7 +171,7 @@ fn spawn_planning(w: &World, trigger_rx: watch::Receiver<PlanTriggerSignal>) {
             nf.clone(),
             chrono::Utc::now,
             wp.clone(),
-            wpp,
+            wpp.clone(),
             hp.clone(),
             replan_offset_s,
         )

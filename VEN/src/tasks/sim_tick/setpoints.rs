@@ -37,7 +37,10 @@ pub(crate) fn build_tick_setpoints(
     sim_snap: &SimSnapshot,
     thermostat_setpoints_kw: &HashMap<String, f64>,
     now: DateTime<Utc>,
-    (live_pv_kw, live_pv_released_kw, live_base_load_kw): (Option<f64>, Option<f64>, Option<f64>),
+    (live_kw, live_released_kw): (
+        &controller::arbiter::LiveKwByAsset,
+        &controller::arbiter::LiveKwByAsset,
+    ),
 ) -> controller::arbiter::ArbiterOutcome {
     use crate::entities::planner_params::PlannerObjective;
     use controller::arbiter::limit;
@@ -67,9 +70,8 @@ pub(crate) fn build_tick_setpoints(
         plan_slot: plan_snap.and_then(|p| p.current_slot(now)),
         objective: plan_snap.map_or(PlannerObjective::MinCost, |p| p.objective),
         ev_overlay: &ev_overlay,
-        live_pv_kw,
-        live_pv_released_kw,
-        live_base_load_kw,
+        live_kw,
+        live_released_kw: Some(live_released_kw),
         alert_active,
         limit_target_kw: limit::limit_target_kw(
             hard_limit_kw,
@@ -82,12 +84,7 @@ pub(crate) fn build_tick_setpoints(
         controller::arbiter::reconcile(&tick, &base_sp, ctx.incumbent_lever.as_deref())
     } else {
         let mut sp = base_sp;
-        controller::dispatcher::apply_surplus_ev_overlay(
-            &mut sp,
-            sim_snap,
-            &ev_overlay,
-            live_pv_kw,
-        );
+        controller::dispatcher::apply_surplus_ev_overlay(&mut sp, sim_snap, &ev_overlay, live_kw);
         controller::arbiter::ArbiterOutcome {
             setpoints: sp,
             ..Default::default()
@@ -102,8 +99,9 @@ pub(crate) fn build_tick_setpoints(
     // A deviation-pass PV curtailment lowers generation, so the limit pass
     // projects PV after it.
     let pv_tighten_kw = outcome.pv_generation_limit_tighten_kw.unwrap_or(0.0);
+    let tightened = controller::arbiter::tighten_generation(live_kw, sim_snap, pv_tighten_kw);
     let limit_tick = controller::arbiter::ArbiterTick {
-        live_pv_kw: live_pv_kw.map(|pv_kw| (pv_kw + pv_tighten_kw).min(0.0)),
+        live_kw: &tightened,
         ..tick
     };
     let incumbent = ctx.limit_incumbent_lever.as_deref();

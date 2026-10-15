@@ -6,7 +6,6 @@
 
 use crate::controller::comms_loss::CommsLossState;
 use crate::controller::{MeasurementPort, WeatherForecastPort};
-use crate::entities::asset_params::PvForecastParams;
 use crate::entities::sim_inject::SimInjectState;
 use crate::profile::comms_loss::CommsLossConfig;
 use crate::state::AppState;
@@ -19,27 +18,10 @@ pub(crate) struct TickContext {
     /// the lock block.
     pub pv_clear: bool,
     pub base_clear: bool,
-    pub weather_pv_kw_now: Option<f64>,
-    /// The raw weather-forecast series behind `weather_pv_kw_now`
-    /// (`pv-competence-consolidation`) — threaded onto `PvInverter` each tick
-    /// (`TickOverrides.pv_weather_forecast`) so the asset's own
-    /// `max_effort_schedule`/`forecast()` can sample it at whatever future timestamps
-    /// they need, rather than a site-level caller pre-sampling it.
-    pub weather_pv_forecast: Option<Vec<crate::entities::solar::WeatherPvForecastSlot>>,
-    pub pv_measured_kw_now: Option<f64>,
-    pub base_load_measured_kw_now: Option<f64>,
-    /// BL-40: the site's learned base-load heuristic, sampled at this tick's
-    /// `now`, when one has been learned for `ids::ASSET_BASE_LOAD` (cold
-    /// start / never-learned yet is `None`). Resolved once here so both
-    /// `peek_base_load_kw` (pre-lock) and `SimState::tick` (in-lock) receive
-    /// the identical value — see design.md D1.
-    pub base_load_heuristic_kw_now: Option<f64>,
-    /// The full learned heuristic behind `base_load_heuristic_kw_now`
-    /// (`base-load-competence-consolidation`) — threaded onto `BaseLoad` each
-    /// tick (`TickOverrides.base_load_heuristic`) so the asset's own
-    /// `forecast()` can sample it at whatever future timestamps it needs,
-    /// rather than a site-level caller pre-sampling it.
-    pub base_load_heuristic: Option<crate::entities::design_vocabulary::AssetHeuristics>,
+    /// This tick's external feeds per asset (W5b): each array's weather estimate and series,
+    /// the measured asset's reading, each base load's learned heuristic. Resolved once here so
+    /// the previews (pre-lock) and `SimState::tick` (in-lock) receive the identical values.
+    pub feeds: crate::simulator::AssetTickFeeds,
     /// site-capacity-seam-unification / R-72: the site's genuine physical/
     /// interconnection rating (`profile.grid.max_import_kw`/`max_export_kw`),
     /// resolved once at startup and threaded down alongside every other
@@ -76,11 +58,9 @@ pub(crate) async fn resolve_tick_context(
     state: &AppState,
     now: chrono::DateTime<chrono::Utc>,
     weather: &dyn WeatherForecastPort,
-    weather_pv_params: Option<&PvForecastParams>,
+    asset_feeds: &crate::entities::asset_params::AssetFeedConfig,
     pv_measurement: &dyn MeasurementPort,
-    pv_measurement_enabled: bool,
     base_load_measurement: &dyn MeasurementPort,
-    base_load_measurement_enabled: bool,
     comms_loss_config: Option<CommsLossConfig>,
     grid_max_import_kw: f64,
     grid_max_export_kw: f64,
@@ -100,27 +80,25 @@ pub(crate) async fn resolve_tick_context(
     };
 
     let plan_snap = state.active_plan().await;
-    let (weather_pv_kw_now, weather_pv_forecast) = super::feeds::resolve_weather_pv_kw_for_tick(
-        weather,
-        weather_pv_params,
-        state.pv_snow_state().await,
+    let snow = state.pv_snow_state().await;
+    let (weather_pv_kw, weather_pv_forecast) =
+        super::feeds::resolve_weather_pv_for_tick(weather, &asset_feeds.pv_weather, snow, now)
+            .await;
+    let measured_kw = super::feeds::resolve_measurements_now(
+        (pv_measurement, asset_feeds.measured_pv.as_deref()),
+        (
+            base_load_measurement,
+            asset_feeds.measured_base_load.as_deref(),
+        ),
         now,
     )
     .await;
-    let (pv_measured_kw_now, base_load_measured_kw_now) = super::feeds::resolve_measurements_now(
-        pv_measurement,
-        pv_measurement_enabled,
-        base_load_measurement,
-        base_load_measurement_enabled,
-        now,
-    )
-    .await;
-    let base_load_heuristic = state
-        .asset_heuristics()
-        .await
-        .get(crate::ids::ASSET_BASE_LOAD)
-        .cloned();
-    let base_load_heuristic_kw_now = base_load_heuristic.as_ref().map(|h| h.sample_kw(now));
+    let feeds = crate::simulator::AssetTickFeeds {
+        weather_pv_kw,
+        weather_pv_forecast,
+        measured_kw,
+        heuristic: state.asset_heuristics().await,
+    };
     let (overlay_enabled, ev_sessions_now) =
         super::arbiter_glue::resolve_overlay_enabled(state, now).await;
 
@@ -128,12 +106,7 @@ pub(crate) async fn resolve_tick_context(
         inject,
         pv_clear,
         base_clear,
-        weather_pv_kw_now,
-        weather_pv_forecast,
-        pv_measured_kw_now,
-        base_load_measured_kw_now,
-        base_load_heuristic_kw_now,
-        base_load_heuristic,
+        feeds,
         grid_max_import_kw,
         grid_max_export_kw,
         plan_snap,
@@ -172,11 +145,9 @@ mod tests {
             state,
             now(),
             &crate::controller::NoopWeatherPort,
-            None,
+            &Default::default(),
             &crate::controller::NoopMeasurementPort,
-            false,
             &crate::controller::NoopMeasurementPort,
-            false,
             None,
             100.0,
             100.0,
@@ -202,11 +173,9 @@ mod tests {
             &state,
             now(),
             &crate::controller::NoopWeatherPort,
-            None,
+            &Default::default(),
             &crate::controller::NoopMeasurementPort,
-            false,
             &crate::controller::NoopMeasurementPort,
-            false,
             Some(cfg),
             100.0,
             100.0,
@@ -239,11 +208,9 @@ mod tests {
             &state,
             later,
             &crate::controller::NoopWeatherPort,
-            None,
+            &Default::default(),
             &crate::controller::NoopMeasurementPort,
-            false,
             &crate::controller::NoopMeasurementPort,
-            false,
             Some(cfg),
             100.0,
             100.0,
@@ -259,7 +226,10 @@ mod tests {
     async fn base_load_heuristic_kw_now_is_none_without_a_learned_heuristic() {
         let state = AppState::new();
         let ctx = resolve(&state).await;
-        assert_eq!(ctx.base_load_heuristic_kw_now, None);
+        assert_eq!(
+            ctx.feeds.heuristic_kw(crate::ids::ASSET_BASE_LOAD, now()),
+            None
+        );
     }
 
     #[tokio::test]
@@ -278,7 +248,7 @@ mod tests {
 
         let ctx = resolve(&state).await;
         assert_eq!(
-            ctx.base_load_heuristic_kw_now,
+            ctx.feeds.heuristic_kw(crate::ids::ASSET_BASE_LOAD, now()),
             Some(heuristic.sample_kw(now()))
         );
     }
