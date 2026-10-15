@@ -3432,3 +3432,13 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
   columns and rows; plans: numeric noise only) instead of loosening the whole comparison.
 - A test fixture that derives the same fact twice (the PV pin in the inputs and in the context)
   will disagree as soon as one path changes; derive both from one function.
+
+## A lock acquire guards only what `&&` chains to it (2026-10-15)
+
+- `bash scripts/wsl_lock.sh acquire ...; wsl cargo ...` runs the build whether or not the acquire
+  succeeded: `acquire` gives up after ~9 minutes with exit 2, and `;` ignores it. Chain every
+  locked command with `&&`, and re-check `status` before assuming a lock someone just released is
+  still free (another session took it within the same minute).
+- When a value becomes per-key with a fallback (`map.get(id).unwrap_or_default()`), check that
+  `Default` is the same value every other "initial" path produces: here the derived `Default` had
+  the opportunistic overlay off while serde's default and the app's start state had it on.

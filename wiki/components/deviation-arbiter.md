@@ -2,7 +2,7 @@
 title: Deviation Arbiter
 type: component
 created: 2026-07-28
-updated: 2026-10-14
+updated: 2026-10-15
 synced_commit: dfdb62b
 sources: [VEN/src/controller/arbiter.rs, VEN/src/controller/arbiter/arbiter_levers.rs, VEN/src/entities/arbiter_residual.rs, VEN/src/tasks/sim_tick/arbiter_glue.rs, VEN/src/tasks/sim_tick/tick.rs, VEN/src/state/arbiter.rs, VEN/src/routes/hems/arbiter.rs, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_milp_planner.md, docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md, docs/reference/KEY_LEARNINGS.md, docs/history/project_journal.md]
 tags: [arbiter, deviation, real-time, marginal-cost, ven]
@@ -82,7 +82,7 @@ stale marginal-cost numbers.
 
 `deviation_arbiter_enabled` (default `false` in every profile) gates the whole mechanism —
 exposed via `GET/PUT /arbiter-settings` (`routes/hems/arbiter.rs`), mirroring the pre-existing
-`/ev-settings` pattern, and surfaced in the VEN UI's `ArbiterSettingsCard` on the Devices page.
+`/assets/{asset_id}/ev-settings` pattern (per EV since W4), and surfaced in the VEN UI's `ArbiterSettingsCard` on the Devices page.
 `GET /arbiter-diagnostics` (backed by `AppState.arbiter_diagnostics`, updated every tick alongside
 the preemption-margin hysteresis state) reports the last tick's projected net site power, residual
 deviation, and active lever — the `ArbiterSettingsCard` renders this readout while the arbiter is
