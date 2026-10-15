@@ -331,21 +331,6 @@ fn bench_ven1_spikes() {
     }
 }
 
-/// Load a real fleet profile through the same translation `main.rs` uses.
-fn fleet_profile(name: &str) -> Profile {
-    let yaml = std::fs::read_to_string(format!("profiles/{name}.yaml")).expect("profile");
-    let real: crate::profile::Profile = serde_yaml::from_str(&yaml).expect("parse");
-    let (_, planner, assets) = crate::domain_params::build_domain_params(&real);
-    Profile {
-        assets,
-        planner,
-        grid: GridConfig {
-            max_import_kw: real.grid.max_import_kw,
-            max_export_kw: real.grid.max_export_kw,
-        },
-    }
-}
-
 /// Is a 10x phase-2 startup penalty (0.10 EUR) safe and useful for every VEN, or
 /// only for some asset mixes? Each real profile, ven-1's live tariffs, the
 /// production 15 s phase-2 budget, default 0.01 vs 0.10 on both battery and EV.

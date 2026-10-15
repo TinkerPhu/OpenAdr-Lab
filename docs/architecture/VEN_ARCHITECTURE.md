@@ -16,11 +16,15 @@ via the OpenADR 3 REST API. Internally it has two major subsystems: the **HEMS C
 Each VEN instance loads a per-VEN YAML profile (`profile.rs`) declaring its assets and their
 physical parameters. The profile is validated on startup, before any task is spawned: an invalid
 profile (out-of-range numeric fields, an absorber referencing an undeclared asset, an empty asset
-list, more than one asset of a kind) exits with every violation listed at once, rather than starting
-into an inconsistent state or failing piecemeal later. A VEN has at most one EV, heater, PV, battery
-and base load: the planner has one slot per kind, and several assets of one kind are outside this
-project's scope (`docs/reference/architectural_smells.md`); shiftable loads are created by requests
-and are not limited.
+list, an asset id used twice) exits with every violation listed at once, rather than starting
+into an inconsistent state or failing piecemeal later. A VEN may hold several assets of one kind —
+two EVs, an east and a west PV array — each planned, controlled, forecast and shown under its own
+id (W1-W7); the profile only requires every asset id to be unique, and at most one PV and one base
+load to enable a real measurement (one MQTT topic each). Shiftable loads are created by requests.
+Tests: `profile/validate.rs` (`validate_accepts_two_assets_of_one_kind_with_their_own_ids`,
+`validate_rejects_an_id_used_twice`), `controller/milp_planner/tests/multi_instance.rs`
+(`the_multi_asset_profile_plans_every_asset_under_its_own_id`), `tests/features/ven_multi_asset.feature`
+(the `test-ven-multi` E2E VEN, `VEN/profiles/multi_asset_test.yaml`).
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐

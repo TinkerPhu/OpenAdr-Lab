@@ -18,7 +18,6 @@
   "VEN/src/routes/timeline.rs": 9,
   "VEN/src/simulator/tests.rs": 1,
   "VEN/src/tasks/poll_programs.rs|VEN/src/tasks/poll_reports.rs": 5,
-  "VEN/src/tasks/sim_tick/mod.rs|VEN/src/tasks/sim_tick/tick.rs": 1,
   "VEN/ui/src/App.tsx|VTN/ui/src/App.tsx": 5,
   "VEN/ui/src/components/NotificationsBell.tsx|VEN/ui/src/pages/Notifications.tsx": 2,
   "VEN/ui/src/components/charts/StackedTimeSeriesChart.tsx": 1,
@@ -62,11 +61,11 @@
   "VEN/src/tasks/planning/mod.rs::spawn_planning": 110,
   "VEN/src/tasks/poll_events/detect.rs::detect_event_changes": 107,
   "VEN/src/tasks/poll_events/mod.rs::spawn_event_poll": 158,
-  "VEN/src/tasks/sim_tick/tick.rs::tick_once": 174,
+  "VEN/src/tasks/sim_tick/tick.rs::tick_once": 157,
   "VEN/src/vtn_reports.rs::upsert_report": 102,
   "VTN/bff/src/main.rs::main": 134
  },
  "test_duplicated_windows": {
-  "VEN/src/controller/milp_planner/tests": 158
+  "VEN/src/controller/milp_planner/tests": 156
  }
 }

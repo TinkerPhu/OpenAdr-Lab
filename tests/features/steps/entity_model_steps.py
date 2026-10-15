@@ -33,6 +33,7 @@ def step_ven_running_with_profile(context, profile):
     """Route subsequent VEN calls to the container running the requested profile."""
     profile_urls = {
         "no_pv_test": api_client.VEN_NO_PV_BASE_URL,
+        "multi_asset_test": api_client.VEN_MULTI_ASSET_TEST_BASE_URL,
         "penalty_test": api_client.VEN_PENALTY_TEST_BASE_URL,
         "usage_sim_test": api_client.VEN_USAGE_SIM_TEST_BASE_URL,
         "usage_forecast_test": api_client.VEN_USAGE_FORECAST_TEST_BASE_URL,

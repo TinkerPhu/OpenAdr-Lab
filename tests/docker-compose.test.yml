@@ -224,6 +224,42 @@ services:
       - test-net
 
   # ---------------------------------------------------------------------------
+  # VEN-multi (W7) — several assets of one kind: two EVs and an east and a west PV
+  # array, for ven_multi_asset.feature.
+  # ---------------------------------------------------------------------------
+  test-ven-multi:
+    build:
+      context: ..
+      dockerfile: VEN/Dockerfile
+      args:
+        CARGO_PROFILE: ci
+    environment:
+      LISTEN_ADDR: "0.0.0.0:8080"
+      VTN_BASE_URL: "http://test-vtn:3000"
+      CLIENT_ID: "ven-1"
+      CLIENT_SECRET: "ven-1"
+      VEN_NAME: "ven-1"
+      POLL_EVENTS_SECS: "2"
+      POLL_PROGRAMS_SECS: "2"
+      POLL_REPORTS_SECS: "2"
+      PROFILE_PATH: "/config/profile.yaml"
+      RUST_LOG: "info"
+    volumes:
+      - ../VEN/profiles/multi_asset_test.yaml:/config/profile.yaml:ro
+    healthcheck:
+      test: curl --fail http://127.0.0.1:8080/health || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+      start_interval: 1s
+    depends_on:
+      test-vtn:
+        condition: service_healthy
+    networks:
+      - test-net
+
+  # ---------------------------------------------------------------------------
   # VEN-penalty — fifth instance with an active peak-demand penalty rule
   # (WP6.3, BL-09) for the penalty-threshold BDD scenario.
   # ---------------------------------------------------------------------------
@@ -430,6 +466,7 @@ services:
       VEN_BASE_URL: "http://test-ven-1:8080"
       VEN2_BASE_URL: "http://test-ven-2:8080"
       VEN_NO_PV_BASE_URL: "http://test-ven-no-pv:8080"
+      VEN_MULTI_ASSET_TEST_BASE_URL: "http://test-ven-multi:8080"
       VEN_PENALTY_TEST_BASE_URL: "http://test-ven-penalty:8080"
       VEN_USAGE_SIM_TEST_BASE_URL: "http://test-ven-usage-sim:8080"
       VEN_USAGE_FORECAST_TEST_BASE_URL: "http://test-ven-usage-forecast:8080"
@@ -448,6 +485,8 @@ services:
       test-ven-2:
         condition: service_healthy
       test-ven-no-pv:
+        condition: service_healthy
+      test-ven-multi:
         condition: service_healthy
       test-ven-penalty:
         condition: service_healthy
