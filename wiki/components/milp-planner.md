@@ -33,8 +33,8 @@ phase 2 from its own phase-1 solution, and reads its part back as an `AssetSolut
 allocations, planned state, warnings and session flexibility come from what each asset declares.
 This replaced one pool slot per kind, `Phase2Weights`, the `c_startup_eur == 0.0` phase signal and
 the planner-side parameter copy `AssetScalars`, and it is what lets two batteries or two EVs be
-planned together (`VEN/src/controller/milp_planner/tests/multi_instance.rs`); a profile still
-holds one asset per kind ([[asset-layer]]). Proof of identical plans: `tests/plans_golden.rs` plus
+planned together (`VEN/src/controller/milp_planner/tests/multi_instance.rs`); since W7 a profile
+may hold several assets of one kind, each with its own id ([[asset-layer]]). Proof of identical plans: `tests/plans_golden.rs` plus
 the model fingerprint's sorted digests. Details: `docs/architecture/ven_milp_planner.md` "How
 assets take part"; the ring rule it enforces is in [[ven-hexagonal-architecture]] (audit rules 16
 and 17).

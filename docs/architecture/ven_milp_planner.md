@@ -90,9 +90,9 @@ when a kind is named in `controller/milp_planner/` or `controller/milp_interacti
   named for one kind can return to the plan.
 
 Several assets of one kind are therefore planned like any other assets
-(`tests/multi_instance.rs`: two batteries, two EVs, coexistence pairs). A VEN profile still holds
-one asset per kind (`validate_asset_roster`); that limit, sessions, the arbiter and the UI are the
-rest of the way to several assets of a kind on a real VEN. `tests/plans_golden.rs` records the
+(`tests/multi_instance.rs`: two batteries, two EVs, coexistence pairs, and the multi-asset test
+profile planned through the production context builder). A VEN profile may hold several assets of
+one kind, each with its own id (`validate_asset_roster`, W7). `tests/plans_golden.rs` records the
 whole translated `Plan` of every scenario, so a change to how the plan is assembled shows field by
 field.
 

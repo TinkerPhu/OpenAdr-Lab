@@ -141,15 +141,12 @@ not `experiments/run_experiment.py`'s scenario YAMLs).
   choice* is an experiment variable.
 - **Capacity negotiation (`OadrCapacityRequest`)** — no driving experiment yet (S-7
   placeholder above).
-- **Several assets of one kind in a VEN** (two PV arrays, two batteries, two EV chargers) — out of
-  scope: it does not fit into this project (decision 2026-10-10; R-127 closed on it). A VEN has at
-  most one asset of each kind, shiftable loads excepted; see `docs/reference/architectural_smells.md`.
 - **The EV as a vehicle-to-grid battery in the planner (GB-43)** — closed for now, probably too far
   for the lab (decision 2026-10-10). Today the EV only charges; V2G would need a cycle-cost model
   (degradation, round-trip loss) and a discharge leg in `ev_milp.rs`.
 - **One batched endpoint for per-asset capabilities and forecasts (R-48)** — closed for now, too
-  much for the lab (decision 2026-10-10). The VEN UI fires one request per asset, which is fine with
-  at most one asset of each kind.
+  much for the lab (decision 2026-10-10). The VEN UI fires one request per asset, which is fine for
+  a lab VEN's handful of assets.
 - **VEN self-registration via `POST /vens` (GB-51)** — closed for now, deferred for later (decision
   2026-10-10). `scripts/seed_vtn.py` provisions every VEN with its own `clientID`; self-registration
   would need a rule for which side wins.
