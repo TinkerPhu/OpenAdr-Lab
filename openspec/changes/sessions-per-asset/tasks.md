@@ -31,5 +31,5 @@ Branch: `refactor/asset-sessions-per-asset`.
 ## 5. Checks, docs, merge
 
 - [ ] 5.1 All checks and suites on Node2.
-- [ ] 5.2 Docs (VEN_ARCHITECTURE, INTERFACES/API, use case), journal, wiki.
+- [x] 5.2 Docs (VEN_ARCHITECTURE, INTERFACES/API, use case), journal, wiki.
 - [ ] 5.3 Delete this change; merge; clean up.

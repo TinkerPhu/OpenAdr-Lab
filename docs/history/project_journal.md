@@ -15726,3 +15726,29 @@ the balance as two sums, their objective parts last.
 until both read the pin (found by the fingerprint classification). Hand-built test contexts lost the
 profile's base load, which the deleted site path had supplied; the test wrapper now adds the
 profile's participants. The heredoc backslash trap struck once more, hence rule 18.
+
+## W4: sessions, targets and EV settings belong to their asset (refactor/asset-sessions-per-asset)
+
+**What.** `EvSession` and `HeaterTarget` carry the `asset_id` of the request that created them, and
+`AppState` keeps each EV's session queue, each heater's target and each EV's settings by asset id.
+An EV's queue conflicts only with its own sessions; cancel removes a session by its unique id. The
+planner hands each asset only its own sessions or target. The simulated usage schedule is installed
+for every asset that predicts one, under its own roster id (no `find_asset(ASSET_EV)`).
+`/ev-settings` became `/assets/{asset_id}/ev-settings` (404 for an asset that takes no charge
+sessions, by its own `RequestKind`), with the UI and two new BDD scenarios. The arbiter's EV lever
+and the tick still read the profile's EV by id (W5).
+
+**Why.** The request already named its asset and the asset already declared its request kind;
+the session then forgot which asset it was for, so every EV context saw every EV session and the
+usage schedule worked only for an asset called `"ev"`.
+
+**How it was proven.** Test first per spec scenario (two EVs' sessions, cancel, planner hand-over,
+usage under another id, settings route); goldens unchanged; 1799 Rust and 766 UI tests.
+
+**Issues.** `EvSettings` had two "initial" values (derived `Default` with the overlay off, serde
+default and `AppState::new` with it on); with per-EV records the derived one would have turned the
+overlay off for an EV without a record, so `Default` is now the one rule. The route tables in
+`INTERFACES.md` and `VEN_ARCHITECTURE.md` still listed routes BL-41 removed. Four copies of one
+heater-target test literal became one fixture. A `cargo check` was chained with `;` after a WSL lock
+acquire that timed out, so it ran for two minutes beside another session's clippy; builds since are
+gated with `&&`.
