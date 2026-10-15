@@ -78,7 +78,7 @@ pub(crate) fn spawn_planning(
             // Hard triggers (user action, state change) must not be constrained by the anchor
             // from a previous Periodic cycle — clear it so the next solve is fully free.
             if !matches!(trigger, PlanTrigger::Periodic) {
-                state.set_anchor_until(None).await;
+                state.set_anchor_until(Default::default()).await;
             }
 
             info!(trigger = %trigger_reason, "planner loop: starting plan cycle");

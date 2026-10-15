@@ -166,7 +166,7 @@ impl ArbiterOutcome {
             let has_soc = sim
                 .assets
                 .get(asset_id)
-                .is_some_and(|a| a.history.soc_frac.is_some());
+                .is_some_and(|a| a.has_state_of_charge());
             if has_soc {
                 *residual_kwh.entry(asset_id.clone()).or_insert(0.0) +=
                     crate::entities::units::energy_kwh(adjusted_kw.abs(), dt_h);

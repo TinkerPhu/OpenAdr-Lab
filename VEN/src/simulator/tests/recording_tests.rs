@@ -54,20 +54,29 @@ fn record_history_appends_on_every_call() {
 }
 
 #[test]
-fn set_base_load_observed_window_shows_up_in_the_base_loads_key_features() {
+fn set_observed_window_shows_up_in_the_base_loads_key_features() {
     let mut sim = sim();
-    sim.set_base_load_observed_window(LoadWindowStats::from_power_kw([0.2, 0.4]));
+    sim.set_observed_window(
+        crate::ids::ASSET_BASE_LOAD,
+        LoadWindowStats::from_power_kw([0.2, 0.4]),
+    );
     let (entry, cfg) = sim.find_asset(crate::ids::ASSET_BASE_LOAD).unwrap();
     let features = cfg.key_features(&entry.state);
     assert_eq!(features.len(), 2, "avg and max");
 }
 
 #[test]
-fn set_base_load_observed_window_is_a_no_op_without_a_base_load() {
-    let mut sim = SimState::from_params(
-        &[AssetParams::Battery(BatteryParams::default())],
+fn only_a_base_load_keeps_an_observed_window_whatever_its_id() {
+    let house = BaseLoadParams {
+        id: "house".to_string(),
+        ..BaseLoadParams::default()
+    };
+    let sim = SimState::from_params(
+        &[
+            AssetParams::Battery(BatteryParams::default()),
+            AssetParams::BaseLoad(house),
+        ],
         Utc::now(),
     );
-    sim.set_base_load_observed_window(LoadWindowStats::from_power_kw([1.0]));
-    assert_eq!(sim.assets.len(), 1);
+    assert_eq!(sim.observed_window_asset_ids(), vec!["house".to_string()]);
 }

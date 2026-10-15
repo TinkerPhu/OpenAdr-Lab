@@ -170,6 +170,13 @@ impl AssetSnapshot {
         )
     }
 
+    /// Whether this asset has a state of charge to protect (battery, EV): its snapshot
+    /// carries one (`AssetHistoryView::soc_frac`). The arbiter's residual tracker reads this,
+    /// never an id list (R-128).
+    pub fn has_state_of_charge(&self) -> bool {
+        self.history.soc_frac.is_some()
+    }
+
     /// The setpoint to command so this asset draws no more than `kw`.
     pub fn setpoint_for_power_at_or_below_kw(&self, kw: f64) -> f64 {
         self.response.setpoint_for_power_at_or_below_kw(

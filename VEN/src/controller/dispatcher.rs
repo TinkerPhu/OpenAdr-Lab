@@ -430,6 +430,7 @@ mod tests {
             export_flexibility_kw: 0.0,
             planned_kw_by_asset: HashMap::from([("battery".to_string(), battery_kw)]),
             planned_state_by_asset: HashMap::new(),
+            forecast_by_asset: Default::default(),
         };
 
         Plan {
@@ -596,6 +597,7 @@ mod tests {
             export_flexibility_kw: 0.0,
             planned_kw_by_asset: HashMap::new(),
             planned_state_by_asset: HashMap::new(),
+            forecast_by_asset: Default::default(),
         };
 
         Plan {

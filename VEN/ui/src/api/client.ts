@@ -515,8 +515,8 @@ export class VenApi {
   }
 
   /** null when the EV has no usage-sim configured (the common case — opt-in). */
-  async evUsageSim(): Promise<EvUsageSimState | null> {
-    const r = await this.getReq("/ev-usage-sim");
+  async evUsageSim(assetId: string): Promise<EvUsageSimState | null> {
+    const r = await this.getReq(`/assets/${encodeURIComponent(assetId)}/ev-usage-sim`);
     if (r.status === 204) return null;
     if (!r.ok) throw new Error(`ev-usage-sim ${r.status}`);
     return r.json();

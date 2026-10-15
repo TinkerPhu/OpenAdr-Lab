@@ -77,7 +77,8 @@ pub fn build_asset_contexts(
     // params. Looked up, not branched on: which kinds have one is declared
     // in `AssetParams::terminal_value_eur_kwh`, not decided here.
     c_terminal_eur_kwh_by_asset: &std::collections::HashMap<String, f64>,
-    heater_anchor: &[Option<f64>],
+    // Each heater's anchor, by asset id (`services::planning::build_heater_anchor`).
+    heater_anchor: &std::collections::BTreeMap<String, Vec<Option<f64>>>,
     // User comfort-curve overrides, by asset id (`AppState::comfort_overrides_map`).
     // Each asset is priced by its override when it has one, its built-in default
     // otherwise — the same resolution the API and session creation use.
@@ -111,7 +112,7 @@ pub fn build_asset_contexts(
                     .copied()
                     .unwrap_or(0.0),
                 heater_anchor: if cfg.accepts_dispatch_anchor() {
-                    heater_anchor.to_vec()
+                    heater_anchor.get(&entry.id).cloned().unwrap_or_default()
                 } else {
                     vec![]
                 },
@@ -236,7 +237,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &PlannerParams::default(),
             &terminal_values(),
-            &[],
+            &std::collections::BTreeMap::new(),
             &std::collections::HashMap::new(),
             pv_forecast_override,
         )
@@ -408,7 +409,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &planner,
             &terminal_values(),
-            &[],
+            &std::collections::BTreeMap::new(),
             &std::collections::HashMap::new(),
             None,
         );
@@ -474,7 +475,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &PlannerParams::default(),
             &terminal_values(),
-            &[],
+            &std::collections::BTreeMap::new(),
             &std::collections::HashMap::new(),
             None,
         );
@@ -540,7 +541,7 @@ mod tests {
                 &std::collections::BTreeMap::new(),
                 &planner,
                 &terminal_values(),
-                &[],
+                &std::collections::BTreeMap::new(),
                 overrides,
                 None,
             );
@@ -614,7 +615,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &planner,
             &terminal_values(),
-            &[],
+            &std::collections::BTreeMap::new(),
             &std::collections::HashMap::new(),
             None,
         );
@@ -657,7 +658,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &planner,
             &std::collections::HashMap::new(),
-            &[],
+            &std::collections::BTreeMap::new(),
             &std::collections::HashMap::new(),
             None,
         );
@@ -690,7 +691,7 @@ mod tests {
             &std::collections::BTreeMap::new(),
             &planner,
             &std::collections::HashMap::new(),
-            &[],
+            &std::collections::BTreeMap::new(),
             &std::collections::HashMap::new(),
             None,
         );

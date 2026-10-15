@@ -420,7 +420,7 @@ impl Asset for PvInverter {
     }
 
     fn asset_type_str(&self) -> &'static str {
-        crate::ids::ASSET_PV
+        "pv"
     }
 
     /// PV output tracks irradiance, not dispatch: walking it forward through

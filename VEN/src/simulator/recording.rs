@@ -8,7 +8,6 @@ use chrono::{DateTime, Utc};
 
 use super::SimState;
 use crate::assets::{HistoryPoint, LoadWindowStats};
-use crate::ids::ASSET_BASE_LOAD;
 
 impl SimState {
     /// Record this tick: one `HistoryPoint` per asset into its ring buffer, and the grid
@@ -36,10 +35,19 @@ impl SimState {
         );
     }
 
-    /// Hand the base-load asset the summary of its trailing window of recorded power (`None`
-    /// while the history holds no record). A no-op when the roster has no base load.
-    pub fn set_base_load_observed_window(&mut self, window: Option<LoadWindowStats>) {
-        if let Some((_, asset)) = self.find_asset_mut(ASSET_BASE_LOAD) {
+    /// The assets that keep a trailing-window summary (`Asset::learns_observed_window`), in
+    /// roster order.
+    pub fn observed_window_asset_ids(&self) -> Vec<String> {
+        self.iter_assets()
+            .filter(|(_, cfg)| cfg.learns_observed_window())
+            .map(|(entry, _)| entry.id.clone())
+            .collect()
+    }
+
+    /// Hand `asset_id` the summary of its trailing window of recorded power (`None` while the
+    /// history holds no record). A no-op for an asset not in the roster.
+    pub fn set_observed_window(&mut self, asset_id: &str, window: Option<LoadWindowStats>) {
+        if let Some((_, asset)) = self.find_asset_mut(asset_id) {
             asset.set_observed_window(window);
         }
     }

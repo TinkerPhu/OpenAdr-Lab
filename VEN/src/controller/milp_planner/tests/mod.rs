@@ -621,7 +621,7 @@ fn live_forecast_contexts(
         &std::collections::BTreeMap::new(),
         &profile.planner,
         &std::collections::HashMap::new(),
-        &[],
+        &std::collections::BTreeMap::new(),
         &std::collections::HashMap::new(),
         None,
     )

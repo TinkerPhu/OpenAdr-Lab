@@ -82,13 +82,19 @@ pub async fn put_ev_settings(
     Json(updated).into_response()
 }
 
-/// GET /ev-usage-sim — read-only diagnostics for `ev-usage-simulation` and
+/// GET /assets/{asset_id}/ev-usage-sim — read-only diagnostics for `ev-usage-simulation` and
 /// `ev-usage-forecast` (`ui-transparency`): which usage class the profile
 /// declared, whether charge planning is engaged, and the next scheduled
-/// leave/return, or `204 No Content` when the EV has no usage schedule
+/// leave/return of that EV, or `204 No Content` when it has no usage schedule
 /// configured at all, matching `/ev-session`'s existing convention.
-pub async fn get_ev_usage_sim(State(sim_read): State<SimRead>) -> impl IntoResponse {
-    match sim_read.usage_schedule_view(chrono::Utc::now()).await {
+pub async fn get_ev_usage_sim(
+    Path(asset_id): Path<String>,
+    State(sim_read): State<SimRead>,
+) -> impl IntoResponse {
+    match sim_read
+        .usage_schedule_view(&asset_id, chrono::Utc::now())
+        .await
+    {
         Some(view) => Json(view).into_response(),
         None => StatusCode::NO_CONTENT.into_response(),
     }

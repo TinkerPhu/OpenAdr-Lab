@@ -2,7 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
 use crate::controller::milp_planner::{
-    AllocationBasis, AssetMilpContext, AssetSolution, ForecastRole, Participation,
+    AllocationBasis, AssetMilpContext, AssetSolution, Participation,
 };
 use crate::entities::asset::PlanTrigger;
 use crate::entities::plan::{
@@ -11,6 +11,7 @@ use crate::entities::plan::{
 };
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
+use super::forecast_readback::{forecast_by_asset, generation_used_kw};
 use super::session_flexibility::build_session_flexibility;
 use super::types::*;
 
@@ -54,31 +55,7 @@ pub(crate) fn fallback_plan(
         Some(inp) => {
             let surplus_kw = inp.forecast_surplus_kw();
             (0..inp.n)
-                .map(|t| PlanTimeSlot {
-                    slot_index: t,
-                    start: now + Duration::seconds(inp.cum_s[t]),
-                    end: now + Duration::seconds(inp.cum_s[t + 1]),
-                    import_tariff_eur_kwh: inp.c_imp_eur_kwh[t],
-                    export_tariff_eur_kwh: inp.c_exp_eur_kwh[t],
-                    co2_g_kwh: inp.g_imp_kgco2_kwh[t] * 1000.0,
-                    grid_effective_cost: inp.c_imp_eur_kwh[t],
-                    rate_estimated: inp.rate_stale[t],
-                    import_cap_kw: inp.p_imp_max_cont_kw[t],
-                    export_cap_kw: inp.p_exp_max_cont_kw[t],
-                    baseline_kw: inp.load_forecast_kw[t],
-                    pv_forecast_kw: inp.generation_forecast_kw[t],
-                    pv_used_kw: inp.generation_forecast_kw[t],
-                    surplus_available_kw: surplus_kw[t].max(0.0),
-                    marginal_cost_import_eur_per_kwh: 0.0,
-                    marginal_cost_export_eur_per_kwh: 0.0,
-                    allocations: vec![],
-                    net_import_kw: 0.0,
-                    net_export_kw: 0.0,
-                    import_flexibility_kw: 0.0,
-                    export_flexibility_kw: 0.0,
-                    planned_kw_by_asset: std::collections::HashMap::new(),
-                    planned_state_by_asset: std::collections::HashMap::new(),
-                })
+                .map(|t| fallback_slot(inp, &surplus_kw, asset_contexts, now, t))
                 .collect()
         }
         None => vec![],
@@ -119,6 +96,44 @@ pub(crate) fn fallback_plan(
     }
 }
 
+/// One slot of the fallback plan: the inputs' prices, caps and forecasts, no allocation.
+fn fallback_slot(
+    inp: &MilpInputs,
+    surplus_kw: &[f64],
+    asset_contexts: &[Box<dyn AssetMilpContext>],
+    now: DateTime<Utc>,
+    t: usize,
+) -> PlanTimeSlot {
+    PlanTimeSlot {
+        slot_index: t,
+        start: now + Duration::seconds(inp.cum_s[t]),
+        end: now + Duration::seconds(inp.cum_s[t + 1]),
+        import_tariff_eur_kwh: inp.c_imp_eur_kwh[t],
+        export_tariff_eur_kwh: inp.c_exp_eur_kwh[t],
+        co2_g_kwh: inp.g_imp_kgco2_kwh[t] * 1000.0,
+        grid_effective_cost: inp.c_imp_eur_kwh[t],
+        rate_estimated: inp.rate_stale[t],
+        import_cap_kw: inp.p_imp_max_cont_kw[t],
+        export_cap_kw: inp.p_exp_max_cont_kw[t],
+        baseline_kw: inp.load_forecast_kw[t],
+        pv_forecast_kw: inp.generation_forecast_kw[t],
+        pv_used_kw: inp.generation_forecast_kw[t],
+        surplus_available_kw: surplus_kw[t].max(0.0),
+        marginal_cost_import_eur_per_kwh: 0.0,
+        marginal_cost_export_eur_per_kwh: 0.0,
+        allocations: vec![],
+        net_import_kw: 0.0,
+        net_export_kw: 0.0,
+        import_flexibility_kw: 0.0,
+        export_flexibility_kw: 0.0,
+        planned_kw_by_asset: std::collections::HashMap::new(),
+        planned_state_by_asset: std::collections::HashMap::new(),
+        forecast_by_asset: forecast_by_asset(asset_contexts, None, t)
+            .into_iter()
+            .collect(),
+    }
+}
+
 /// Whether the plan dispatches an asset (forecast participants are planned around, not
 /// dispatched: no allocation, no planned power, not among the planned assets).
 fn dispatched(ctx: &dyn AssetMilpContext) -> bool {
@@ -153,35 +168,6 @@ fn surplus_claim_order(
         .collect();
     order.sort_by_key(|&i| asset_contexts[i].surplus_claim_rank());
     order
-}
-
-/// The generation the plan uses per slot [kW]: every generating forecast participant's own
-/// used generation (minus its net power), summed. A single participant's value passes through
-/// unchanged; 0 kW without one.
-fn generation_used_kw(
-    sol: &SolveOutput,
-    asset_contexts: &[Box<dyn AssetMilpContext>],
-    n: usize,
-) -> Vec<f64> {
-    (0..n)
-        .map(|t| {
-            asset_contexts
-                .iter()
-                .zip(&sol.assets)
-                .filter(|(c, _)| {
-                    matches!(
-                        c.participation(),
-                        Participation::Forecast {
-                            role: ForecastRole::Generation,
-                            ..
-                        }
-                    )
-                })
-                .map(|(_, a)| -a.net_power_kw[t])
-                .reduce(|a, b| a + b)
-                .unwrap_or(0.0)
-        })
-        .collect()
 }
 
 /// One asset's allocation in slot `t`, priced by the basis the asset declares, claiming the
@@ -289,7 +275,6 @@ pub(crate) fn translate_to_plan(
     let storage_throughput_kw = storage_throughput_kw(sol, n);
 
     let forecast_surplus_kw = inputs.forecast_surplus_kw();
-    let generation_used_kw = generation_used_kw(sol, asset_contexts, n);
     let mut slots = Vec::with_capacity(n);
     let mut violation_count: usize = 0;
 
@@ -298,6 +283,7 @@ pub(crate) fn translate_to_plan(
         let slot_end = now + Duration::seconds(cum_s[t + 1]);
         let surplus_available_kw = forecast_surplus_kw[t].max(0.0);
         let mut surplus_remaining_kw = surplus_available_kw;
+        let forecasts = forecast_by_asset(asset_contexts, Some(sol), t);
 
         let allocations: Vec<AssetAllocation> = claim_order
             .iter()
@@ -333,7 +319,7 @@ pub(crate) fn translate_to_plan(
             export_cap_kw: inputs.p_exp_max_cont_kw[t],
             baseline_kw: inputs.load_forecast_kw[t],
             pv_forecast_kw: inputs.generation_forecast_kw[t],
-            pv_used_kw: generation_used_kw[t],
+            pv_used_kw: generation_used_kw(&forecasts),
             surplus_available_kw,
             planned_kw_by_asset: allocations
                 .iter()
@@ -350,6 +336,7 @@ pub(crate) fn translate_to_plan(
                 .iter()
                 .filter_map(|a| Some((a.asset_id.clone(), a.planned_state.get(t)?.clone())))
                 .collect(),
+            forecast_by_asset: forecasts.into_iter().collect(),
         });
     }
 

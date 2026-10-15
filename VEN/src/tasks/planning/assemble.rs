@@ -83,7 +83,7 @@ pub(super) async fn assemble_solve_request(a: SolveAssembly<'_>, st: CycleState)
         a.planner,
         a.asset_params,
         a.current_plan,
-        anchor_until,
+        &anchor_until,
         a.now,
     );
 

@@ -225,7 +225,6 @@ graph LR
   M_app_ctx --> M_state
   M_assets --> M_controller_milp_planner
   M_assets --> M_entities
-  M_assets --> M_ids
   M_assets --> M_simulator
   M_boot --> M_app_ctx
   M_boot --> M_config
@@ -263,7 +262,6 @@ graph LR
   M_routes --> M_app_ctx
   M_routes --> M_controller
   M_routes --> M_entities
-  M_routes --> M_ids
   M_routes --> M_lab_core
   M_routes --> M_planner_events
   M_routes --> M_services

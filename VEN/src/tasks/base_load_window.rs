@@ -1,4 +1,4 @@
-//! Hourly refresh of the base load's trailing-window summary (the key features on the
+//! Hourly refresh of each base load's trailing-window summary (the key features on the
 //! Controller's "Flexibility & Forecast" panel). Acquisition only: this reads the recorded
 //! 1-minute rows through `HistoryPort` and hands them to the asset, which owns what they
 //! mean (`assets::load_window`). Reading the whole window each time is also the seeding:
@@ -13,7 +13,6 @@ use tracing::warn;
 
 use crate::assets::load_window::{LoadWindowStats, LOAD_WINDOW_DAYS};
 use crate::controller::HistoryPort;
-use crate::ids::ASSET_BASE_LOAD;
 use crate::simulator::SimState;
 
 /// The window only needs to move once an hour; precision is not the point.
@@ -22,18 +21,36 @@ const REFRESH_INTERVAL_S: u64 = 3600;
 /// first sample does not wait an hour to show.
 const RETRY_INTERVAL_S: u64 = 60;
 
-/// Re-read the window ending at `now` and inject it into the base-load asset. Returns the
-/// stats found, `None` when the history holds no record (or could not be read). A failed
-/// read leaves the previous summary in place. Best-effort: log and continue.
-pub(crate) async fn refresh_base_load_window(
+/// Re-read the window ending at `now` for every asset that keeps one
+/// (`SimState::observed_window_asset_ids`) and hand each its own. Returns whether any of them
+/// found a record. Best-effort: log and continue.
+pub(crate) async fn refresh_base_load_windows(
     history: Arc<dyn HistoryPort>,
     sim: &Mutex<SimState>,
     now: DateTime<Utc>,
+) -> bool {
+    let ids = sim.lock().await.observed_window_asset_ids();
+    let mut found = false;
+    for asset_id in ids {
+        found |= refresh_window(history.clone(), sim, &asset_id, now)
+            .await
+            .is_some();
+    }
+    found
+}
+
+/// Re-read `asset_id`'s window ending at `now` and inject it. Returns the stats found, `None`
+/// when the history holds no record (or could not be read). A failed read leaves the previous
+/// summary in place.
+async fn refresh_window(
+    history: Arc<dyn HistoryPort>,
+    sim: &Mutex<SimState>,
+    asset_id: &str,
+    now: DateTime<Utc>,
 ) -> Option<LoadWindowStats> {
     let from = now - Duration::days(LOAD_WINDOW_DAYS);
-    let rows =
-        tokio::task::spawn_blocking(move || history.query_ticks(from, now, Some(ASSET_BASE_LOAD)))
-            .await;
+    let id = asset_id.to_string();
+    let rows = tokio::task::spawn_blocking(move || history.query_ticks(from, now, Some(&id))).await;
     let rows = match rows {
         Ok(Ok(rows)) => rows,
         Ok(Err(e)) => {
@@ -46,7 +63,7 @@ pub(crate) async fn refresh_base_load_window(
         }
     };
     let stats = LoadWindowStats::from_power_kw(rows.iter().map(|r| r.power_kw));
-    sim.lock().await.set_base_load_observed_window(stats);
+    sim.lock().await.set_observed_window(asset_id, stats);
     stats
 }
 
@@ -56,9 +73,7 @@ pub(crate) fn spawn_base_load_window(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
-            let found = refresh_base_load_window(history.clone(), &sim, Utc::now())
-                .await
-                .is_some();
+            let found = refresh_base_load_windows(history.clone(), &sim, Utc::now()).await;
             let wait_s = if found {
                 REFRESH_INTERVAL_S
             } else {
@@ -84,7 +99,7 @@ mod tests {
     fn row(age: Duration, power_kw: f64) -> TickSample {
         TickSample {
             ts: now() - age,
-            asset_id: ASSET_BASE_LOAD.to_string(),
+            asset_id: crate::ids::ASSET_BASE_LOAD.to_string(),
             power_kw,
             soc_pct: None,
             temperature_c: None,
@@ -103,7 +118,7 @@ mod tests {
 
     async fn base_load_features(sim: &Mutex<SimState>) -> Vec<(String, String)> {
         let sim = sim.lock().await;
-        let (entry, asset) = sim.find_asset(ASSET_BASE_LOAD).unwrap();
+        let (entry, asset) = sim.find_asset(crate::ids::ASSET_BASE_LOAD).unwrap();
         asset
             .key_features(&entry.state)
             .into_iter()
@@ -124,9 +139,9 @@ mod tests {
             .unwrap();
         let sim = sim();
 
-        let stats = refresh_base_load_window(Arc::new(history), &sim, now()).await;
+        let found = refresh_base_load_windows(Arc::new(history), &sim, now()).await;
 
-        assert_eq!(stats, LoadWindowStats::from_power_kw([0.2, 0.4]));
+        assert!(found);
         assert_eq!(
             base_load_features(&sim).await,
             vec![
@@ -140,9 +155,9 @@ mod tests {
     async fn refresh_without_records_leaves_dashes() {
         let sim = sim();
 
-        let stats = refresh_base_load_window(Arc::new(MockHistoryPort::new()), &sim, now()).await;
+        let found = refresh_base_load_windows(Arc::new(MockHistoryPort::new()), &sim, now()).await;
 
-        assert_eq!(stats, None);
+        assert!(!found);
         assert_eq!(
             base_load_features(&sim).await,
             vec![

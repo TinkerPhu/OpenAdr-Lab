@@ -8,7 +8,7 @@ Feature: EV usage simulation with plan-ahead (ev-usage-simulation)
     Given the VEN is running with profile "usage_sim_test"
 
   Scenario: Plan-ahead surfaces the next simulated trip as read-only diagnostics
-    When I GET /ev-usage-sim from the VEN
+    When I GET /assets/ev/ev-usage-sim from the VEN
     Then the response status is 200
     And the response JSON field "engage_charge_planning" is true
     And the response JSON has field "next_trip.leave_at"

@@ -1,4 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::info;
 
@@ -137,7 +138,8 @@ pub struct PlanCycleInputs {
     /// scalar per storage kind: the consumer looks its asset up, so adding a
     /// storage kind touches neither this struct nor that lookup.
     pub c_terminal_eur_kwh_by_asset: std::collections::HashMap<String, f64>,
-    pub heater_anchor: Vec<Option<f64>>,
+    /// Each heater's anchor vector, by asset id (`build_heater_anchor`).
+    pub heater_anchor: BTreeMap<String, Vec<Option<f64>>>,
 }
 
 pub fn build_plan_cycle_inputs(
@@ -145,7 +147,7 @@ pub fn build_plan_cycle_inputs(
     planner: &PlannerParams,
     asset_params: &[AssetParams],
     current_plan: Option<&Plan>,
-    anchor_until: Option<DateTime<Utc>>,
+    anchor_until: &BTreeMap<String, DateTime<Utc>>,
     now: DateTime<Utc>,
 ) -> PlanCycleInputs {
     let tariff_ts = TariffTimeSeries::from_snapshots(rates);
@@ -199,23 +201,36 @@ pub fn build_plan_cycle_inputs(
 /// per-call-site tolerance would let them disagree about the same plan.
 pub const HEATER_KW_EPS: f64 = 0.1;
 
-/// Planned heater power in one slot [kW]. Absent heater data — a fallback plan,
-/// or a site with no heater at all — reads as off.
-fn heater_kw(slot: &crate::entities::plan::PlanTimeSlot) -> f64 {
+/// Planned power of heater `heater_id` in one slot [kW]. Absent heater data — a fallback
+/// plan, or a site without that heater — reads as off.
+fn heater_kw(slot: &crate::entities::plan::PlanTimeSlot, heater_id: &str) -> f64 {
     slot.planned_kw_by_asset
-        .get(crate::ids::ASSET_HEATER)
+        .get(heater_id)
         .copied()
         .unwrap_or(0.0)
 }
 
-/// Returns the end time of the consecutive heater block containing `now` in `plan`.
+/// Each heater's block end (`heater_block_end`), by heater id; heaters without an active
+/// block are absent.
+pub fn heater_block_ends<'a>(
+    plan: &Plan,
+    now: DateTime<Utc>,
+    heater_ids: impl IntoIterator<Item = &'a String>,
+) -> BTreeMap<String, DateTime<Utc>> {
+    heater_ids
+        .into_iter()
+        .filter_map(|id| Some((id.clone(), heater_block_end(plan, id, now)?)))
+        .collect()
+}
+
+/// Returns the end time of heater `heater_id`'s consecutive block containing `now` in `plan`.
 ///
 /// Reads the heater power in the first future slot (start of block), then walks forward
 /// while heater power stays within `HEATER_KW_EPS` of that value. Returns the `end` of
 /// the last slot in the run, or `None` when no future slots exist.
-pub fn heater_block_end(plan: &Plan, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+pub fn heater_block_end(plan: &Plan, heater_id: &str, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     let mut iter = plan.all_slots().filter(|s| s.end > now).peekable();
-    let kw0 = heater_kw(iter.peek()?);
+    let kw0 = heater_kw(iter.peek()?, heater_id);
     // Only anchor an active heating block. When the heater is off in the first future slot
     // (kw0 ≈ 0 — including fallback plans that have no heater data at all), anchoring all
     // subsequent slots to "off" forces the dynamics to drain the tank below its domain lower
@@ -224,27 +239,41 @@ pub fn heater_block_end(plan: &Plan, now: DateTime<Utc>) -> Option<DateTime<Utc>
     if kw0 < HEATER_KW_EPS {
         return None;
     }
-    iter.take_while(|s| (heater_kw(s) - kw0).abs() < HEATER_KW_EPS)
+    iter.take_while(|s| (heater_kw(s, heater_id) - kw0).abs() < HEATER_KW_EPS)
         .last()
         .map(|s| s.end)
 }
 
-/// Build a per-slot heater anchor vector for the next planning cycle.
+/// Build each heater's per-slot anchor vector for the next planning cycle, by heater id.
 ///
-/// Each entry is `Some(kw)` for slots whose start is strictly before `anchor_until`
-/// (pinning the heater tier binaries to the current plan's values) and `None` for slots
-/// beyond the anchor window (left free for the optimizer).
-/// Returns all-None when `plan` or `anchor_until` is absent.
+/// Each entry is `Some(kw)` for slots whose start is strictly before that heater's
+/// `anchor_until` (pinning its tier binaries to the current plan's values) and `None` for
+/// slots beyond its anchor window (left free for the optimizer). A heater without an anchor
+/// end gets none; nothing without `plan`.
 pub fn build_heater_anchor(
     plan: Option<&Plan>,
-    anchor_until: Option<DateTime<Utc>>,
+    anchor_until: &BTreeMap<String, DateTime<Utc>>,
+    now: DateTime<Utc>,
+    n_slots: usize,
+) -> BTreeMap<String, Vec<Option<f64>>> {
+    let Some(plan) = plan else {
+        return BTreeMap::new();
+    };
+    anchor_until
+        .iter()
+        .map(|(id, until)| (id.clone(), heater_anchor(plan, id, *until, now, n_slots)))
+        .collect()
+}
+
+/// One heater's anchor vector: its planned power in each slot before `until`.
+fn heater_anchor(
+    plan: &Plan,
+    heater_id: &str,
+    until: DateTime<Utc>,
     now: DateTime<Utc>,
     n_slots: usize,
 ) -> Vec<Option<f64>> {
     let mut out = vec![None; n_slots];
-    let (Some(plan), Some(until)) = (plan, anchor_until) else {
-        return out;
-    };
     for (i, slot) in plan
         .all_slots()
         .filter(|s| s.end > now)
@@ -254,7 +283,7 @@ pub fn build_heater_anchor(
         if slot.start >= until {
             break;
         }
-        out[i] = Some(heater_kw(slot));
+        out[i] = Some(heater_kw(slot, heater_id));
     }
     out
 }
@@ -265,18 +294,18 @@ pub struct PlanCycleResult {
     pub plan: Plan,
 }
 
-/// Power per switchable heater stage [kW] for this VEN, or 0.0 when it has no
-/// heater. This is what turns a planned-kW delta into a relay-operation count in
+/// Power per switchable stage [kW] of each heater, by heater id (empty without a heater).
+/// This is what turns a planned-kW delta into a relay-operation count in
 /// `count_heater_switches`, so the adoption gate and the MILP's own `sw` cost
 /// agree on what a two-stage jump is worth.
-pub fn heater_stage_size_kw(asset_params: &[AssetParams]) -> f64 {
+pub fn heater_stage_sizes_kw(asset_params: &[AssetParams]) -> BTreeMap<String, f64> {
     asset_params
         .iter()
-        .find_map(|p| match p {
-            AssetParams::Heater(h) => Some(h.max_kw / h.power_stages.max(1) as f64),
+        .filter_map(|p| match p {
+            AssetParams::Heater(h) => Some((h.id.clone(), h.max_kw / h.power_stages.max(1) as f64)),
             _ => None,
         })
-        .unwrap_or(0.0)
+        .collect()
 }
 
 /// Count heater relay operations in `plan` for all slots starting at or after `now`.
@@ -288,7 +317,25 @@ pub fn heater_stage_size_kw(asset_params: &[AssetParams]) -> f64 {
 /// undercharged the two-relay transitions. `p_step_kw <= 0.0` (no heater, or a
 /// degenerate config) falls back to counting transitions.
 /// Past slots are excluded so this reflects the remaining switching burden from now on.
-pub fn count_heater_switches(plan: &Plan, now: DateTime<Utc>, p_step_kw: f64) -> f64 {
+/// Summed over every heater, each at its own stage size (`stage_sizes_kw`, by heater id).
+pub fn count_heater_switches(
+    plan: &Plan,
+    now: DateTime<Utc>,
+    stage_sizes_kw: &BTreeMap<String, f64>,
+) -> f64 {
+    stage_sizes_kw
+        .iter()
+        .map(|(id, p_step_kw)| count_one_heater_switches(plan, now, id, *p_step_kw))
+        .sum()
+}
+
+/// `count_heater_switches` for one heater.
+fn count_one_heater_switches(
+    plan: &Plan,
+    now: DateTime<Utc>,
+    heater_id: &str,
+    p_step_kw: f64,
+) -> f64 {
     // zone_a_step_s is the reference slot width for switch weighting.
     // Falls back to horizon.step_size_s when no zones are present (legacy/test plans),
     // which keeps the per-switch weight at 1.0 for uniform-step plans.
@@ -301,7 +348,7 @@ pub fn count_heater_switches(plan: &Plan, now: DateTime<Utc>, p_step_kw: f64) ->
     let mut count = 0.0f64;
     let mut prev: Option<f64> = None;
     for slot in plan.all_slots().filter(|s| s.start >= now) {
-        let kw = heater_kw(slot);
+        let kw = heater_kw(slot, heater_id);
         if let Some(p) = prev {
             let delta_kw = (p - kw).abs();
             if delta_kw > HEATER_KW_EPS {
@@ -335,7 +382,7 @@ pub fn evaluate_acceptance_gate(
     threshold_eur: f64,
     decay_s: f64,
     gate_switch_penalty_eur: f64,
-    heater_p_step_kw: f64,
+    heater_stage_sizes_kw: &BTreeMap<String, f64>,
     now: DateTime<Utc>,
 ) -> bool {
     // A failed solve has nothing to dispatch and reports objective 0: whatever the trigger,
@@ -391,8 +438,8 @@ pub fn evaluate_acceptance_gate(
     // Switch surcharge: extra heater relay operations in the new plan raise the bar.
     // fully_decayed still bypasses — decay is an escape hatch for stale plans regardless.
     let switch_surcharge = if gate_switch_penalty_eur > 0.0 {
-        let extra = (count_heater_switches(new_plan, now, heater_p_step_kw)
-            - count_heater_switches(current, now, heater_p_step_kw))
+        let extra = (count_heater_switches(new_plan, now, heater_stage_sizes_kw)
+            - count_heater_switches(current, now, heater_stage_sizes_kw))
         .max(0.0);
         extra * gate_switch_penalty_eur
     } else {
@@ -604,7 +651,7 @@ mod tests {
                 0.2,
                 1500.0,
                 0.0,
-                2.0,
+                &stages(2.0),
                 Utc::now(),
             );
             assert!(
@@ -625,7 +672,7 @@ mod tests {
             0.2,
             1500.0,
             0.0,
-            2.0,
+            &stages(2.0),
             Utc::now(),
         );
         assert!(
@@ -645,7 +692,7 @@ mod tests {
             1.0,
             3600.0,
             0.0,
-            2.0, // heater stage size [kW]
+            &stages(2.0), // heater stage size [kW]
             Utc::now(),
         );
         assert!(
@@ -664,7 +711,7 @@ mod tests {
             5.0,
             3600.0,
             0.0,
-            2.0, // heater stage size [kW]
+            &stages(2.0), // heater stage size [kW]
             Utc::now(),
         );
         assert!(adopt, "no existing plan must always adopt");
@@ -682,7 +729,7 @@ mod tests {
             1.0,
             3600.0,
             0.0,
-            2.0, // heater stage size [kW]
+            &stages(2.0), // heater stage size [kW]
             Utc::now(),
         );
         assert!(
@@ -702,7 +749,7 @@ mod tests {
             1.0,
             3600.0,
             0.0,
-            2.0, // heater stage size [kW]
+            &stages(2.0), // heater stage size [kW]
             Utc::now(),
         );
         assert!(adopt, "improvement exceeding threshold must be accepted");
@@ -722,7 +769,7 @@ mod tests {
             5.0, // high threshold that would normally block adoption
             0.0, // no decay
             0.0,
-            2.0, // heater stage size [kW]
+            &stages(2.0), // heater stage size [kW]
             Utc::now(),
         );
         assert!(
@@ -735,6 +782,40 @@ mod tests {
 
     fn fixed_now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 4, 11, 6, 0, 0).unwrap()
+    }
+
+    /// One heater `heater` with stage size `kw`.
+    fn stages(kw: f64) -> BTreeMap<String, f64> {
+        BTreeMap::from([("heater".to_string(), kw)])
+    }
+
+    /// The anchor end `t` for the heater `heater`.
+    fn until(t: DateTime<Utc>) -> BTreeMap<String, DateTime<Utc>> {
+        BTreeMap::from([("heater".to_string(), t)])
+    }
+
+    /// W5b: two heaters each get their own anchor and their switches add up.
+    #[test]
+    fn two_heaters_each_get_their_own_anchor_and_switch_count() {
+        let now = fixed_now();
+        let mut plan = make_plan_with_heater_slots(now, 1200, &[2.0, 2.0, 0.0, 0.0]);
+        for (i, slot) in plan.slots.iter_mut().enumerate() {
+            let boiler_kw = [3.0, 0.0, 3.0, 0.0][i];
+            slot.planned_kw_by_asset
+                .insert("boiler".to_string(), boiler_kw);
+        }
+        let sizes = BTreeMap::from([("heater".to_string(), 2.0), ("boiler".to_string(), 3.0)]);
+
+        let ends = heater_block_ends(&plan, now, sizes.keys());
+        assert_eq!(ends["heater"], now + Duration::seconds(2 * 1200));
+        assert_eq!(ends["boiler"], now + Duration::seconds(1200));
+
+        let anchors = build_heater_anchor(Some(&plan), &ends, now, 4);
+        assert_eq!(anchors["heater"], vec![Some(2.0), Some(2.0), None, None]);
+        assert_eq!(anchors["boiler"], vec![Some(3.0), None, None, None]);
+
+        // heater: one switch; boiler: three.
+        assert_eq!(count_heater_switches(&plan, now, &sizes), 4.0);
     }
 
     fn make_plan_with_heater_slots(start: DateTime<Utc>, step_s: i64, kws: &[f64]) -> Plan {
@@ -808,24 +889,24 @@ mod tests {
 
         let below = make_plan_with_heater_slots(now, step_s, &[on, on + HEATER_KW_EPS * 0.9]);
         assert_eq!(
-            heater_block_end(&below, now),
+            heater_block_end(&below, "heater", now),
             Some(now + Duration::seconds(2 * step_s)),
             "a sub-epsilon delta must not break the block"
         );
         assert_eq!(
-            count_heater_switches(&below, now, on),
+            count_heater_switches(&below, now, &stages(on)),
             0.0,
             "the same sub-epsilon delta must not count as a switch"
         );
 
         let above = make_plan_with_heater_slots(now, step_s, &[on, on + HEATER_KW_EPS * 1.1]);
         assert_eq!(
-            heater_block_end(&above, now),
+            heater_block_end(&above, "heater", now),
             Some(now + Duration::seconds(step_s)),
             "a supra-epsilon delta must end the block at the first slot"
         );
         assert!(
-            count_heater_switches(&above, now, on) > 0.0,
+            count_heater_switches(&above, now, &stages(on)) > 0.0,
             "the same supra-epsilon delta must count as a switch"
         );
     }
@@ -836,7 +917,7 @@ mod tests {
         let step_s = 1200i64; // 20 min
                               // 4 slots: [on, on, on, off]
         let plan = make_plan_with_heater_slots(now, step_s, &[2.0, 2.0, 2.0, 0.0]);
-        let result = heater_block_end(&plan, now);
+        let result = heater_block_end(&plan, "heater", now);
         let expected = now + Duration::seconds(3 * step_s); // end of slot 2
         assert_eq!(
             result,
@@ -853,7 +934,7 @@ mod tests {
         // When heater is off in the first slot, return None — anchoring heater-off
         // state causes the MILP to fail (forced off + dynamics → tank below domain lb).
         let plan = make_plan_with_heater_slots(now, step_s, &[0.0, 0.0, 2.0, 2.0]);
-        let result = heater_block_end(&plan, now);
+        let result = heater_block_end(&plan, "heater", now);
         assert_eq!(result, None, "off-block must not produce an anchor");
     }
 
@@ -864,7 +945,7 @@ mod tests {
         // Must return None; returning Some(horizon_end) would anchor all 288 slots to
         // heater-off, forcing e_tank below its domain lower bound → MILP infeasible.
         let plan = make_plan_with_heater_slots(now, 300, &[0.0; 288]);
-        let result = heater_block_end(&plan, now);
+        let result = heater_block_end(&plan, "heater", now);
         assert_eq!(
             result, None,
             "fallback (all-zero) plan must not produce an anchor"
@@ -878,7 +959,7 @@ mod tests {
         // Plan ended before now (4 slots starting 80 min ago)
         let past = now - Duration::seconds(4 * step_s);
         let plan = make_plan_with_heater_slots(past, step_s, &[2.0, 2.0]);
-        let result = heater_block_end(&plan, now);
+        let result = heater_block_end(&plan, "heater", now);
         assert_eq!(result, None, "no future slots must return None");
     }
 
@@ -888,7 +969,8 @@ mod tests {
         let n_slots = 6;
         let anchor_until = now + Duration::minutes(60); // 3 × 20-min slots
         let plan = make_plan_with_heater_slots(now, 1200, &[2.0; 6]);
-        let anchor = build_heater_anchor(Some(&plan), Some(anchor_until), now, n_slots);
+        let anchors = build_heater_anchor(Some(&plan), &until(anchor_until), now, n_slots);
+        let anchor = &anchors["heater"];
         assert_eq!(anchor[0], Some(2.0), "slot 0 should be pinned");
         assert_eq!(anchor[1], Some(2.0), "slot 1 should be pinned");
         assert_eq!(anchor[2], Some(2.0), "slot 2 should be pinned");
@@ -900,22 +982,16 @@ mod tests {
     #[test]
     fn test_build_heater_anchor_no_plan_returns_all_none() {
         let now = fixed_now();
-        let anchor = build_heater_anchor(None, Some(now + Duration::hours(1)), now, 4);
-        assert!(
-            anchor.iter().all(|v| v.is_none()),
-            "no plan → all-None anchor"
-        );
+        let anchor = build_heater_anchor(None, &until(now + Duration::hours(1)), now, 4);
+        assert!(anchor.is_empty(), "no plan → no anchor");
     }
 
     #[test]
     fn test_build_heater_anchor_no_until_returns_all_none() {
         let now = fixed_now();
         let plan = make_plan_with_heater_slots(now, 1200, &[2.0; 4]);
-        let anchor = build_heater_anchor(Some(&plan), None, now, 4);
-        assert!(
-            anchor.iter().all(|v| v.is_none()),
-            "no anchor_until → all-None anchor"
-        );
+        let anchor = build_heater_anchor(Some(&plan), &BTreeMap::new(), now, 4);
+        assert!(anchor.is_empty(), "no anchor_until → no anchor");
     }
 
     // ── count_heater_switches tests ───────────────────────────────────────────
@@ -982,7 +1058,7 @@ mod tests {
         let now = fixed_now();
         let past = now - Duration::seconds(4 * 1200);
         let plan = make_plan_with_heater_slots(past, 1200, &[2.0, 0.0, 2.0, 0.0]);
-        assert_eq!(count_heater_switches(&plan, now, 2.0), 0.0);
+        assert_eq!(count_heater_switches(&plan, now, &stages(2.0)), 0.0);
     }
 
     #[test]
@@ -990,7 +1066,7 @@ mod tests {
         // All future slots at the same kW → no tier changes → 0 switches.
         let now = fixed_now();
         let plan = make_plan_with_heater_slots(now, 1200, &[2.0, 2.0, 2.0, 2.0]);
-        assert_eq!(count_heater_switches(&plan, now, 2.0), 0.0);
+        assert_eq!(count_heater_switches(&plan, now, &stages(2.0)), 0.0);
     }
 
     #[test]
@@ -1000,7 +1076,7 @@ mod tests {
         let now = fixed_now();
         let start = now - Duration::seconds(2 * 1200);
         let plan = make_plan_with_heater_slots(start, 1200, &[0.0, 0.0, 0.0, 2.0, 0.0, 2.0]);
-        assert_eq!(count_heater_switches(&plan, now, 2.0), 3.0);
+        assert_eq!(count_heater_switches(&plan, now, &stages(2.0)), 3.0);
     }
 
     #[test]
@@ -1011,11 +1087,11 @@ mod tests {
         // transition is two operations, not one.
         let now = fixed_now();
         let plan = make_plan_with_heater_slots(now, 1200, &[0.0, 4.0]);
-        assert_eq!(count_heater_switches(&plan, now, 2.0), 2.0);
+        assert_eq!(count_heater_switches(&plan, now, &stages(2.0)), 2.0);
 
         // ...while a single-stage move over the same span stays at one.
         let plan_mid = make_plan_with_heater_slots(now, 1200, &[0.0, 2.0]);
-        assert_eq!(count_heater_switches(&plan_mid, now, 2.0), 1.0);
+        assert_eq!(count_heater_switches(&plan_mid, now, &stages(2.0)), 1.0);
     }
 
     // ── gate switch-count guard tests ─────────────────────────────────────────
@@ -1034,7 +1110,7 @@ mod tests {
             0.0,
             0.0,
             0.50,
-            2.0, // heater stage size [kW]
+            &stages(2.0), // heater stage size [kW]
             now,
         );
         assert!(
@@ -1056,7 +1132,7 @@ mod tests {
             0.0,
             0.0,
             0.50,
-            2.0, // heater stage size [kW]
+            &stages(2.0), // heater stage size [kW]
             now,
         );
         assert!(
@@ -1080,8 +1156,8 @@ mod tests {
             &PlanTrigger::Periodic,
             1.0, // active threshold: forces gate to evaluate rather than short-circuit
             0.0,
-            0.0, // switch guard disabled
-            2.0, // heater stage size [kW]
+            0.0,          // switch guard disabled
+            &stages(2.0), // heater stage size [kW]
             now,
         );
         assert!(
@@ -1103,7 +1179,7 @@ mod tests {
             0.0,
             0.0,
             0.50,
-            2.0, // heater stage size [kW]
+            &stages(2.0), // heater stage size [kW]
             now,
         );
         assert!(adopt, "hard trigger must bypass switch surcharge");
@@ -1127,7 +1203,7 @@ mod tests {
             1.0,
             3600.0,
             0.50,
-            2.0, // heater stage size [kW]
+            &stages(2.0), // heater stage size [kW]
             now,
         );
         assert!(
@@ -1181,7 +1257,7 @@ mod tests {
             ],
             ..PlannerParams::default()
         };
-        let inputs = build_plan_cycle_inputs(&[], &planner, &[], None, None, now);
+        let inputs = build_plan_cycle_inputs(&[], &planner, &[], None, &BTreeMap::new(), now);
 
         assert_eq!(inputs.n_slots, 6, "4 zone-A slots + 2 zone-B slots");
         assert_eq!(
@@ -1218,7 +1294,8 @@ mod tests {
                 ..BatteryParams::default()
             }),
         ];
-        let inputs = build_plan_cycle_inputs(&rates, &planner, &asset_params, None, None, now);
+        let inputs =
+            build_plan_cycle_inputs(&rates, &planner, &asset_params, None, &BTreeMap::new(), now);
 
         // avg_imp_eur_kwh = (0.20 + 0.30) / 2 = 0.25
         let expected_heater = 0.25 + 0.10; // avg + c_ctrl_imp_malus_eur_kwh
@@ -1256,7 +1333,8 @@ mod tests {
                 ..BatteryParams::default()
             }),
         ];
-        let inputs = build_plan_cycle_inputs(&rates, &planner, &asset_params, None, None, now);
+        let inputs =
+            build_plan_cycle_inputs(&rates, &planner, &asset_params, None, &BTreeMap::new(), now);
 
         assert_eq!(
             terminal_of(&inputs, &HeaterParams::default().id),
@@ -1273,7 +1351,7 @@ mod tests {
     fn test_build_plan_cycle_inputs_no_battery_or_heater_defaults_to_zero() {
         let now = fixed_now();
         let planner = PlannerParams::default();
-        let inputs = build_plan_cycle_inputs(&[], &planner, &[], None, None, now);
+        let inputs = build_plan_cycle_inputs(&[], &planner, &[], None, &BTreeMap::new(), now);
         assert!(
             inputs.c_terminal_eur_kwh_by_asset.is_empty(),
             "no assets means no terminal values, and the lookup's own default is 0.0"
@@ -1292,9 +1370,8 @@ mod tests {
             }],
             ..PlannerParams::default()
         };
-        let inputs = build_plan_cycle_inputs(&[], &planner, &[], None, None, now);
-        assert_eq!(inputs.heater_anchor.len(), 4);
-        assert!(inputs.heater_anchor.iter().all(|v| v.is_none()));
+        let inputs = build_plan_cycle_inputs(&[], &planner, &[], None, &BTreeMap::new(), now);
+        assert!(inputs.heater_anchor.is_empty());
     }
 
     // WP-T2 (docs/history/project_journal.md, search "WP-T"): the PlanReady SSE event must
@@ -1318,7 +1395,7 @@ mod tests {
             0.0,
             300.0,
             0.0,
-            2.0, // heater stage size [kW]
+            &stages(2.0), // heater stage size [kW]
             10,
             PlannerObjective::MinCost,
             &state,
@@ -1365,7 +1442,7 @@ mod tests {
             0.0,
             300.0,
             0.0,
-            2.0, // heater stage size [kW]
+            &stages(2.0), // heater stage size [kW]
             42,
             PlannerObjective::MinCost,
             &state,

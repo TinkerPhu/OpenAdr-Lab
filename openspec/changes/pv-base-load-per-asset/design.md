@@ -10,8 +10,8 @@
 | Base-load learning | `tasks/base_load_window.rs`, `simulator/recording.rs`, `tasks/sim_tick/context.rs` heuristic, `simulator/capacity_headroom.rs` events: `ASSET_BASE_LOAD` | every base-load asset under its own id |
 | Residual baseline | `services/planning/service.rs`: `[ASSET_BATTERY, ASSET_EV]` | assets whose snapshot carries a SoC (`history.soc_frac`, as `residual_kwh_by_asset`) |
 | Heater anchor | `services/planning/mod.rs::heater_kw` on `ASSET_HEATER` | per thermostat asset |
-| EV usage view | `SimHandle::usage_schedule_view` on `ASSET_EV` | takes the asset id (route path) |
-| Sim inject / config | `simulator/inject.rs` table on fixed ids; `PUT /sim/config/battery` | inject state fields name their asset; `/sim/config/{asset_id}/battery` |
+| EV usage view | `SimHandle::usage_schedule_view` on `ASSET_EV`; `GET /ev-usage-sim` | takes the asset id: `GET /assets/{asset_id}/ev-usage-sim` |
+| Sim inject / config | `simulator/inject.rs` table on fixed ids; `PUT /sim/config/battery` | injections by asset type; `/sim/config/battery/{asset_id}` |
 | PV comms-loss ceiling | `CommsLossState::pv_ceiling_kw` reads `ASSET_PV` | sum of every array's `ac_ceiling_kw` |
 | Weather geometry | top-level `weather_pv:` → `Profile::weather_pv_params` → `AppCtx`, tick context, `/weather`, forecast publishing | `PvParams::weather`; one derived series per array |
 | Measured feeds | top-level `measurements:` → `pv_measurement_enabled` / `base_load_measurement_enabled` | `PvParams::measured`, `BaseLoadParams::measured`; the reading reaches only that asset |
@@ -34,7 +34,9 @@ pattern.
   one topic each. Several topics are a later change.
 - **E3.** Irradiance smoothing stays site-level (sunlight); base-load smoothing is per asset.
 - **E4.** A site generation limit is split over the arrays in proportion to their `ac_ceiling_kw`.
-- **E5.** A sim inject that targets an asset names it; with one asset of the kind the name may be
-  omitted, with several it is refused (400).
+- **E5.** The sim inject is a developer tool: a field for a kind of asset (battery SoC, EV
+  plug, heater temperature, ...) reaches every asset of that type, as its tick overrides already
+  did; the one-shot state injections match by asset type, not id. `/sim/config/battery/{asset_id}`
+  names its battery.
 - **E6.** Two merges: part 1 (per-asset loops, no profile change), part 2 (profile, feeds,
   previews, generation limit).

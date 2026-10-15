@@ -290,6 +290,10 @@ impl Asset for BaseLoad {
         Some(self)
     }
 
+    fn learns_observed_window(&self) -> bool {
+        true
+    }
+
     fn set_observed_window(&mut self, window: Option<LoadWindowStats>) {
         BaseLoad::set_observed_window(self, window);
     }

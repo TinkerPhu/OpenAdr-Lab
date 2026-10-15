@@ -119,8 +119,10 @@ fn build_plan_history_sample(plan: &Plan) -> PlanHistorySample {
 }
 
 /// forecast-accuracy-tracking: build the plan's near (`slots[1]`) and far (`slots.last()`)
-/// forecast samples for PV and base_load. No-op for plans with fewer than two
-/// slots — `slots[1]` wouldn't exist yet. See design.md Decisions 1-3.
+/// forecast samples for every forecast asset of the plan: each PV array's own forecast
+/// (`PlanTimeSlot::forecast_by_asset`, signed like its actual power) and each base load's
+/// learned heuristic. No-op for plans with fewer than two slots — `slots[1]` wouldn't exist
+/// yet. See design.md Decisions 1-3.
 pub fn record_forecast_accuracy_samples(
     plan: &Plan,
     heuristics: &HashMap<String, AssetHeuristics>,
@@ -139,30 +141,26 @@ pub fn record_forecast_accuracy_samples(
         (ForecastLeadKind::Near, near_slot),
         (ForecastLeadKind::Far, far_slot),
     ] {
-        out.push(ForecastAccuracySample {
-            asset_id: crate::ids::ASSET_PV.to_string(),
-            lead_kind,
-            target_ts: slot.start,
-            // Sign convention: slot.pv_forecast_kw (from the solver's p_pv_kw input, see
-            // milp_planner/results.rs) is a non-negative generation magnitude, but the
-            // asset's actual/tick power_kw is negative-for-export (assets/pv.rs) — negate
-            // so predicted_kw and actual_kw share one sign convention, same reasoning as
-            // build_weather_pv_forecast below.
-            predicted_kw: -slot.pv_forecast_kw,
-            predicted_at: now,
-            actual_kw: None,
-            actual_at: None,
-        });
-        if let Some(h) = heuristics.get(crate::ids::ASSET_BASE_LOAD) {
-            out.push(ForecastAccuracySample {
-                asset_id: crate::ids::ASSET_BASE_LOAD.to_string(),
-                lead_kind,
-                target_ts: slot.start,
-                predicted_kw: h.sample_kw(slot.start),
-                predicted_at: now,
-                actual_kw: None,
-                actual_at: None,
-            });
+        let mut forecast_assets: Vec<_> = slot.forecast_by_asset.iter().collect();
+        forecast_assets.sort_by(|a, b| a.0.cmp(b.0));
+        for (asset_id, power) in forecast_assets {
+            // A generation forecast is the plan's own; a load's is its learned heuristic.
+            let predicted_kw = if power.generation {
+                Some(power.forecast_kw)
+            } else {
+                heuristics.get(asset_id).map(|h| h.sample_kw(slot.start))
+            };
+            if let Some(predicted_kw) = predicted_kw {
+                out.push(ForecastAccuracySample {
+                    asset_id: asset_id.clone(),
+                    lead_kind,
+                    target_ts: slot.start,
+                    predicted_kw,
+                    predicted_at: now,
+                    actual_kw: None,
+                    actual_at: None,
+                });
+            }
         }
     }
     out
@@ -431,6 +429,7 @@ mod tests {
                     (k.to_string(), m)
                 })
                 .collect(),
+            forecast_by_asset: Default::default(),
         }
     }
 
@@ -754,10 +753,54 @@ mod tests {
 
     // ── record_forecast_accuracy_samples (forecast-accuracy-tracking, task 3.3) ────
 
+    /// A slot as the planner writes it for a PV array `pv` and a base load `base_load`.
     fn slot_with_pv(idx: usize, pv_forecast_kw: f64) -> PlanTimeSlot {
+        slot_with_forecasts(
+            idx,
+            &[("pv", -pv_forecast_kw, true), ("base_load", 0.7, false)],
+        )
+    }
+
+    fn slot_with_forecasts(idx: usize, forecasts: &[(&str, f64, bool)]) -> PlanTimeSlot {
         let mut s = slot(idx, &[], &[]);
-        s.pv_forecast_kw = pv_forecast_kw;
+        for &(id, forecast_kw, generation) in forecasts {
+            let power = crate::entities::plan::ForecastSlotPower {
+                forecast_kw,
+                used_kw: forecast_kw,
+                generation,
+            };
+            s.forecast_by_asset.insert(id.to_string(), power);
+        }
         s
+    }
+
+    /// W5b: each array is sampled under its own id; a base load under its own name.
+    #[test]
+    fn record_forecast_accuracy_samples_per_forecast_asset() {
+        let forecasts = [
+            ("pv-east", -1.5, true),
+            ("pv-west", -0.5, true),
+            ("house", 0.6, false),
+        ];
+        let plan = make_plan_with_slots(vec![
+            slot_with_forecasts(0, &forecasts),
+            slot_with_forecasts(1, &forecasts),
+        ]);
+        let mut heuristics = HashMap::new();
+        heuristics.insert("house".to_string(), base_load_heuristic());
+
+        let samples = record_forecast_accuracy_samples(&plan, &heuristics, ts(0));
+
+        let near = |id: &str| {
+            samples
+                .iter()
+                .find(|s| s.asset_id == id && s.lead_kind == ForecastLeadKind::Near)
+                .map(|s| s.predicted_kw)
+        };
+        assert_eq!(near("pv-east"), Some(-1.5));
+        assert_eq!(near("pv-west"), Some(-0.5));
+        assert_eq!(near("house"), Some(0.7), "a load's sample is its heuristic");
+        assert_eq!(samples.len(), 6);
     }
 
     fn base_load_heuristic() -> AssetHeuristics {

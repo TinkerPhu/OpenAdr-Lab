@@ -43,7 +43,7 @@ No authentication. CORS: any origin.
 | GET | `/sim` | Full simulation state snapshot |
 | GET | `/sim/schema` | JSON schema for sim state |
 | POST | `/sim/reset/:asset_id` | Reset one asset to initial state |
-| PUT | `/sim/config/battery` | Update battery physics config |
+| PUT | `/sim/config/battery/{asset_id}` | Update that battery's physics config |
 | GET | `/sim/inject` | Current override injection state |
 | POST | `/sim/inject` | Inject override values |
 | POST | `/sim/inject/reset` | Clear all injections |

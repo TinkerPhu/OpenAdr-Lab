@@ -9,7 +9,7 @@ Feature: EV usage forecast fed to the planner (ev-usage-forecast)
     Given the VEN is running with profile "usage_forecast_test"
 
   Scenario: The forecast usage class is visible as read-only diagnostics
-    When I GET /ev-usage-sim from the VEN
+    When I GET /assets/ev/ev-usage-sim from the VEN
     Then the response status is 200
     And the response JSON field "mode" equals "forecast"
     And the response JSON field "engage_charge_planning" is true

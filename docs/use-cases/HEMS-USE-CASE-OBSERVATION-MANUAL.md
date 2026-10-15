@@ -950,7 +950,7 @@ regression this use case exists to catch: it means later departures are not bind
   no `EV_CORE_ENERGY_UNMET`: the shortfall warning only reports what the window could not
   deliver below the limit.
 
-**Raw check:** `GET /ev-usage-sim` → `{mode: "forecast", engage_charge_planning, next_trip}`.
+**Raw check:** `GET /assets/{asset_id}/ev-usage-sim` → `{mode: "forecast", engage_charge_planning, next_trip}`.
 `GET /ev-session` returns an **empty queue**: under this class the planner is told directly and
 no session is invented to carry a predicted deadline.
 

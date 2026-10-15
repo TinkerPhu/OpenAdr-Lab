@@ -28,6 +28,7 @@ export function makeSlot(overrides: Partial<PlanTimeSlot> = {}): PlanTimeSlot {
     export_flexibility_kw: 0,
     planned_kw_by_asset: {},
     planned_state_by_asset: {},
+    forecast_by_asset: {},
     ...overrides,
   };
 }

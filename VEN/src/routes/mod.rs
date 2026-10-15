@@ -52,7 +52,10 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/sim", get(sim::get_sim))
         .route("/sim/schema", get(sim::get_sim_schema))
         .route("/sim/reset/:asset_id", post(sim::post_sim_reset))
-        .route("/sim/config/battery", put(sim::put_sim_config_battery))
+        .route(
+            "/sim/config/battery/:asset_id",
+            put(sim::put_sim_config_battery),
+        )
         .route(
             "/sim/inject",
             get(sim::get_sim_inject).post(sim::post_sim_inject),
@@ -113,7 +116,10 @@ pub fn build_router(ctx: AppCtx) -> Router {
         )
         .route("/user-requests/:id", delete(hems::delete_request))
         .route("/ev-session", get(hems::get_ev_session))
-        .route("/ev-usage-sim", get(hems::get_ev_usage_sim))
+        .route(
+            "/assets/:asset_id/ev-usage-sim",
+            get(hems::get_ev_usage_sim),
+        )
         .route("/flexibility", get(hems::get_flexibility))
         .route("/flexibility/history", get(hems::get_flexibility_history))
         .route("/flexibility/forecast", get(hems::get_flexibility_forecast))

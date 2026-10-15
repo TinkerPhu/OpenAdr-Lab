@@ -27,7 +27,7 @@ RESETS = [
     (re.compile(r"^/user-requests(/|$)"), "user_requests"),
     (re.compile(r"^/sim/inject(/|$)"), "injects"),
     (re.compile(r"^/sim/reset/[^/]+$"), "soc"),
-    (re.compile(r"^/sim/config/battery$"), "battery_config"),
+    (re.compile(r"^/sim/config/battery/[^/]+$"), "battery_config"),
     (re.compile(r"^/assets/[^/]+/comfort_curve$"), "comfort"),
     (re.compile(r"^/baseline-override$"), "baseline_override"),
     (re.compile(r"^/arbiter-settings$"), "arbiter"),
@@ -162,7 +162,7 @@ def _restore_battery_config(base_url, _paths):
         print(f"[cleanup] LEAK: {base_url} battery config changed, no snapshot to restore it from")
         return
     body = {"capacity_kwh": battery["capacity_kwh"], "min_soc": battery.get("min_soc")}
-    _expect(requests.put(f"{base_url}/sim/config/battery", json=body, timeout=HTTP_TIMEOUT),
+    _expect(requests.put(f"{base_url}/sim/config/battery/battery", json=body, timeout=HTTP_TIMEOUT),
             f"battery config restore on {base_url}")
     _wait_for_sim(base_url, "battery", "capacity_kwh", battery["capacity_kwh"])
 

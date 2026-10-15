@@ -54,6 +54,17 @@ pub struct AssetAllocation {
 }
 
 /// A single time slot in the plan (§6.2).
+/// One forecast asset's power in a plan slot (kW, signed like `planned_kw_by_asset`:
+/// generation negative): what it was forecast to do and what the plan uses of it. They differ
+/// only for generation the plan curtails.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
+pub struct ForecastSlotPower {
+    pub forecast_kw: f64,
+    pub used_kw: f64,
+    /// The asset generates (a PV array) rather than consumes (a base load).
+    pub generation: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct PlanTimeSlot {
     pub slot_index: usize,
@@ -127,6 +138,11 @@ pub struct PlanTimeSlot {
     /// Empty for non-storage assets and when no plan state is available.
     #[serde(default)]
     pub planned_state_by_asset: HashMap<String, HashMap<String, f64>>,
+    /// Each forecast asset's own power in this slot (PV arrays, base loads), by asset id:
+    /// the asset is planned around, not dispatched, so it has no allocation. The site totals
+    /// `pv_forecast_kw`, `pv_used_kw` and `baseline_kw` are the sums of these.
+    #[serde(default)]
+    pub forecast_by_asset: HashMap<String, ForecastSlotPower>,
 }
 
 /// Per-device schedulability metadata snapshot (§6.9).

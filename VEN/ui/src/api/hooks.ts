@@ -563,11 +563,11 @@ export function useEvSettings(assetId: string) {
   });
 }
 
-export function useEvUsageSim() {
+export function useEvUsageSim(assetId: string) {
   const { api } = useVenContext();
   return useQuery({
-    queryKey: ["ev_usage_sim", api.baseUrl],
-    queryFn: () => api.evUsageSim(),
+    queryKey: ["ev_usage_sim", api.baseUrl, assetId],
+    queryFn: () => api.evUsageSim(assetId),
     refetchInterval: 30_000,
   });
 }
