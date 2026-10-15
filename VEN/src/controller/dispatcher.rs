@@ -155,13 +155,13 @@ pub fn resolve_pv_generation_limit_kw(
 /// regardless of any future change to the arbiter's version", which is exactly
 /// the divergence one-concept-one-function forbids (R-81).
 ///
-/// When generation exceeds all other active loads, offer the surplus to the EV
-/// (up to its max charge rate). All non-EV, non-battery assets are included in
-/// the surplus calculation so the EV charge targets zero net grid power.
+/// When generation exceeds all other active loads, offer the surplus to the EVs in roster
+/// order (each up to its max charge rate). Every asset but the offered EVs and storage is
+/// included in the surplus calculation so the EV charge targets zero net grid power.
 ///
-/// Does nothing when:
-/// - `overlay_enabled` is false (user disabled or auto-paused by active EvSession)
-/// - `plan_has_ev_allocation` is true (plan-level commitment takes priority)
+/// Skips an EV when:
+/// - its overlay is off (`EvOverlay::enabled`: user disabled or auto-paused by its session)
+/// - the plan allocates it charging now (plan-level commitment takes priority)
 /// - EV is unplugged
 /// - EV SoC has reached its target
 /// - Surplus is below the 100 W noise floor
@@ -173,17 +173,11 @@ pub fn resolve_pv_generation_limit_kw(
 pub fn apply_surplus_ev_overlay(
     setpoints: &mut HashMap<String, f64>,
     sim: &SimSnapshot,
-    plan_has_ev_allocation: bool,
-    overlay_enabled: bool,
+    ev_overlay: &crate::controller::arbiter::EvOverlays,
     live_pv_kw: Option<f64>,
 ) {
     crate::controller::arbiter::arbiter_levers::apply_ev_lever_opportunistic(
-        setpoints,
-        sim,
-        live_pv_kw,
-        None,
-        plan_has_ev_allocation,
-        overlay_enabled,
+        setpoints, sim, live_pv_kw, None, ev_overlay,
     );
 }
 
@@ -192,8 +186,14 @@ pub fn apply_surplus_ev_overlay(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::controller::arbiter::test_ticks;
     use crate::controller::{AssetSnapshot, GridSnapshot, SimSnapshot};
     use crate::services::test_support::asset_snapshots::snapshot_from_asset;
+
+    /// The EV `ev` with its opportunistic charging switched off.
+    fn overlay_off() -> crate::controller::arbiter::EvOverlays {
+        HashMap::from([("ev".to_string(), Default::default())])
+    }
 
     fn battery_entry(soc_frac: f64) -> (String, AssetSnapshot) {
         use crate::assets::battery::{Battery, BatteryState};
@@ -324,7 +324,7 @@ mod tests {
     fn surplus_charges_ev_when_pv_exceeds_base() {
         let sim = build_sim_snap(-3.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
+        apply_surplus_ev_overlay(&mut sp, &sim, test_ticks::ev_on(), None);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!((ev_sp - 2.0).abs() < 1e-6, "expected 2.0 kW, got {ev_sp}");
     }
@@ -333,7 +333,7 @@ mod tests {
     fn surplus_overlay_prefers_live_pv_kw_over_stale_snapshot() {
         let sim = build_sim_snap(-0.5, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true, Some(-5.0));
+        apply_surplus_ev_overlay(&mut sp, &sim, test_ticks::ev_on(), Some(-5.0));
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!((ev_sp - 4.0).abs() < 1e-6, "expected 4.0 kW, got {ev_sp}");
     }
@@ -342,7 +342,7 @@ mod tests {
     fn surplus_capped_at_ev_max_charge_kw() {
         let sim = build_sim_snap(-10.0, 0.0, 0.1, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, true, None);
+        apply_surplus_ev_overlay(&mut sp, &sim, test_ticks::ev_on(), None);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 7.4).abs() < 1e-6,
@@ -355,7 +355,7 @@ mod tests {
         let sim = build_sim_snap(-3.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
         sp.insert("ev".to_string(), 5.0);
-        apply_surplus_ev_overlay(&mut sp, &sim, true, true, None);
+        apply_surplus_ev_overlay(&mut sp, &sim, test_ticks::ev_plan_allocated(), None);
         let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
         assert!(
             (ev_sp - 5.0).abs() < 1e-6,
@@ -367,7 +367,7 @@ mod tests {
     fn overlay_disabled_suppresses_ev_even_with_surplus() {
         let sim = build_sim_snap(-3.0, 1.0, 0.4, true, 0.8);
         let mut sp: HashMap<String, f64> = HashMap::new();
-        apply_surplus_ev_overlay(&mut sp, &sim, false, false, None);
+        apply_surplus_ev_overlay(&mut sp, &sim, &overlay_off(), None);
         assert!(
             !sp.contains_key("ev"),
             "overlay must not fire when disabled"

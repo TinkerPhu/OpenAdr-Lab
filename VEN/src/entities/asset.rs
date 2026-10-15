@@ -380,6 +380,28 @@ pub struct AssetHistoryView {
     pub curtailment_source: Option<crate::entities::asset_params::PvCurtailmentSource>,
 }
 
+/// The kind of lever an asset offers the deviation arbiter. The asset declares it
+/// (`Asset::arbiter_lever`); the arbiter builds one lever per declaring asset and never asks
+/// which asset id is the battery or the EV.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArbiterLeverKind {
+    /// Charges and discharges within its state of charge (battery).
+    Storage,
+    /// Charges from a surplus while its own settings allow it (EV).
+    SurplusCharge,
+    /// Can drop a stage while its comfort band allows it (heater).
+    PausableLoad,
+}
+
+/// An asset's arbiter lever: its kind and the rated power range the comms-loss fail-safe
+/// takes its percentage of (kW, magnitudes; `rated_export_kw` is 0 for a load).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArbiterLever {
+    pub kind: ArbiterLeverKind,
+    pub rated_import_kw: f64,
+    pub rated_export_kw: f64,
+}
+
 /// A heater's own answers to the deviation arbiter's emergency-mode what-ifs (its thermostat rule
 /// evaluated under hypothetical modes), so the arbiter never re-derives them from temperatures.
 #[derive(Debug, Clone, Copy, PartialEq)]

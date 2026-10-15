@@ -228,14 +228,13 @@ fn scenario_a_ev_picked_over_battery_battery_only_bridges_the_charger_lag() {
             sim: &sim,
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
-            plan_has_ev_allocation: false,
-            overlay_enabled: true,
+            ev_overlay: test_ticks::ev_on(),
             live_pv_kw: Some(-6.0),
             live_pv_released_kw: None,
             live_base_load_kw: Some(0.5),
             alert_active: false,
             limit_target_kw: None,
-            prev_battery_bridge_kw: 0.0,
+            prev_bridge_kw_by_asset: test_ticks::no_bridge(),
         },
         &base_setpoints,
         None,
@@ -263,17 +262,16 @@ fn scenario_a_ev_picked_over_battery_battery_only_bridges_the_charger_lag() {
             sim: &settled,
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
-            plan_has_ev_allocation: false,
-            overlay_enabled: true,
+            ev_overlay: test_ticks::ev_on(),
             live_pv_kw: Some(-6.0),
             live_pv_released_kw: None,
             live_base_load_kw: Some(0.5),
             alert_active: false,
             limit_target_kw: None,
-            prev_battery_bridge_kw: 0.0,
+            prev_bridge_kw_by_asset: test_ticks::no_bridge(),
         },
         &base_setpoints,
-        outcome.active_lever,
+        outcome.active_lever.as_deref(),
     );
     assert_eq!(
         outcome.setpoints.get("battery").copied().unwrap_or(0.0),
@@ -302,21 +300,20 @@ fn scenario_d_battery_covers_base_load_step_when_ev_at_target() {
             sim: &sim,
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
-            plan_has_ev_allocation: false,
-            overlay_enabled: true,
+            ev_overlay: test_ticks::ev_on(),
             live_pv_kw: Some(0.0),
             live_pv_released_kw: None,
             live_base_load_kw: Some(2.5),
             alert_active: false,
             limit_target_kw: None,
-            prev_battery_bridge_kw: 0.0,
+            prev_bridge_kw_by_asset: test_ticks::no_bridge(),
         },
         &base_setpoints,
         None,
     );
     assert_eq!(
-        outcome.active_lever,
-        Some("battery"),
+        outcome.active_lever.as_deref(),
+        Some("battery:battery"),
         "EV at target SoC must be excluded outright, battery must cover the step"
     );
     assert!(!outcome.setpoints.contains_key("ev") || outcome.setpoints["ev"] == 0.0);
@@ -329,7 +326,7 @@ fn scenario_d_battery_covers_base_load_step_when_ev_at_target() {
 fn heater_emergency_curtail_not_offered_outside_an_alert() {
     let sim = make_sim(vec![("heater", heater_snap(17.0, 18.0, 23.0, 23.0))]);
     let slot = test_slot(0.30, 0.30, 5.0, 0.0, 0.0, 0.08);
-    let lever = heater_emergency_lever(&sim, Some(&slot), 1.0, false, false);
+    let lever = heater_emergency_lever(&sim, "heater", Some(&slot), 1.0, false, false);
     assert!(
         lever.is_none(),
         "outside an alert, forced emergency heat is the heater's own safety"
@@ -340,7 +337,7 @@ fn heater_emergency_curtail_not_offered_outside_an_alert() {
 fn heater_emergency_curtail_offered_during_an_alert() {
     let sim = make_sim(vec![("heater", heater_snap(17.0, 18.0, 23.0, 23.0))]);
     let slot = test_slot(0.90, 0.90, 5.0, 0.0, 0.0, 0.08);
-    let lever = heater_emergency_lever(&sim, Some(&slot), 1.0, false, true);
+    let lever = heater_emergency_lever(&sim, "heater", Some(&slot), 1.0, false, true);
     assert!(lever.is_some(), "an alert may curtail emergency heat");
 }
 
@@ -359,7 +356,7 @@ fn heater_emergency_offered_while_the_heater_is_held_on_by_its_own_hysteresis() 
     );
     let sim = make_sim(vec![("heater", heater)]);
     let slot = test_slot(0.90, 0.90, 5.0, 0.0, 0.0, 0.08);
-    let lever = heater_emergency_lever(&sim, Some(&slot), 1.0, false, true);
+    let lever = heater_emergency_lever(&sim, "heater", Some(&slot), 1.0, false, true);
     assert_eq!(lever.map(|l| l.available_capacity_kw), Some(3.0));
 }
 
@@ -377,7 +374,7 @@ fn heater_emergency_stays_offered_while_its_own_curtail_is_active() {
     );
     let sim = make_sim(vec![("heater", heater)]);
     let slot = test_slot(0.90, 0.90, 5.0, 0.0, 0.0, 0.08);
-    assert!(heater_emergency_lever(&sim, Some(&slot), 1.0, true, true).is_some());
+    assert!(heater_emergency_lever(&sim, "heater", Some(&slot), 1.0, true, true).is_some());
 }
 
 // ── PV curtailment backstop ─────────────────────────────────────────────────
@@ -400,19 +397,18 @@ fn pv_curtailment_used_only_as_backstop_when_other_levers_exhausted() {
             sim: &sim,
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
-            plan_has_ev_allocation: false,
-            overlay_enabled: true,
+            ev_overlay: test_ticks::ev_on(),
             live_pv_kw: Some(-6.0),
             live_pv_released_kw: None,
             live_base_load_kw: None,
             alert_active: false,
             limit_target_kw: None,
-            prev_battery_bridge_kw: 0.0,
+            prev_bridge_kw_by_asset: test_ticks::no_bridge(),
         },
         &base_setpoints,
         None,
     );
-    assert_eq!(outcome.active_lever, Some("pv_curtail"));
+    assert_eq!(outcome.active_lever.as_deref(), Some("pv_curtail"));
     assert!(outcome.pv_generation_limit_tighten_kw.unwrap_or(0.0) > 0.0);
 }
 
@@ -422,28 +418,29 @@ fn pv_curtailment_used_only_as_backstop_when_other_levers_exhausted() {
 fn near_equal_cost_levers_do_not_switch_every_tick() {
     let levers = vec![
         Lever {
-            id: "battery",
+            id: LeverId::of_asset("battery", "battery"),
             available_capacity_kw: 5.0,
             marginal_cost_eur_per_kwh: 0.200,
         },
         Lever {
-            id: "heater_emergency",
+            id: LeverId::of_asset("heater_emergency", "heater"),
             available_capacity_kw: 3.0,
             marginal_cost_eur_per_kwh: 0.205, // within the preemption margin (0.02)
         },
     ];
     // battery is cheapest and starts as incumbent — heater_emergency must not
     // preempt it despite being nominally close in cost.
-    let ranked = rank_levers(levers.clone(), Some("battery"));
-    assert_eq!(ranked[0].id, "battery");
+    let ranked = rank_levers(levers.clone(), Some("battery:battery"));
+    assert_eq!(ranked[0].id.key(), "battery:battery");
 
     // Now flip incumbency to heater_emergency, with battery nominally cheaper
     // by less than the margin — heater_emergency (incumbent) must stay first.
     let mut levers2 = levers;
     levers2[1].marginal_cost_eur_per_kwh = 0.195; // heater_emergency now cheapest, by < margin
-    let ranked2 = rank_levers(levers2, Some("heater_emergency"));
+    let ranked2 = rank_levers(levers2, Some("heater_emergency:heater"));
     assert_eq!(
-        ranked2[0].id, "heater_emergency",
+        ranked2[0].id.key(),
+        "heater_emergency:heater",
         "incumbent must not be preempted by a challenger within the margin"
     );
 }
@@ -452,19 +449,20 @@ fn near_equal_cost_levers_do_not_switch_every_tick() {
 fn challenger_beyond_margin_does_preempt_incumbent() {
     let levers = vec![
         Lever {
-            id: "battery",
+            id: LeverId::of_asset("battery", "battery"),
             available_capacity_kw: 5.0,
             marginal_cost_eur_per_kwh: 0.200,
         },
         Lever {
-            id: "ev",
+            id: LeverId::of_asset("ev", "ev"),
             available_capacity_kw: 3.0,
             marginal_cost_eur_per_kwh: 0.0, // far cheaper, beyond the margin
         },
     ];
-    let ranked = rank_levers(levers, Some("battery"));
+    let ranked = rank_levers(levers, Some("battery:battery"));
     assert_eq!(
-        ranked[0].id, "ev",
+        ranked[0].id.key(),
+        "ev:ev",
         "a challenger cheaper by more than the margin must preempt the incumbent"
     );
 }
@@ -480,7 +478,7 @@ fn opportunistic_ev_charges_when_pv_exceeds_base() {
         ("ev", ev_snap(0.0, 0.4, 0.8, true)),
     ]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
-    apply_ev_lever_opportunistic(&mut sp, &sim, None, None, false, true);
+    apply_ev_lever_opportunistic(&mut sp, &sim, None, None, test_ticks::ev_on());
     let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
     assert!((ev_sp - 2.0).abs() < 1e-6, "expected 2.0 kW, got {ev_sp}");
 }
@@ -493,7 +491,7 @@ fn opportunistic_ev_prefers_live_pv_kw_over_stale_snapshot() {
         ("ev", ev_snap(0.0, 0.4, 0.8, true)),
     ]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
-    apply_ev_lever_opportunistic(&mut sp, &sim, Some(-5.0), None, false, true);
+    apply_ev_lever_opportunistic(&mut sp, &sim, Some(-5.0), None, test_ticks::ev_on());
     let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
     assert!((ev_sp - 4.0).abs() < 1e-6, "expected 4.0 kW, got {ev_sp}");
 }
@@ -506,7 +504,7 @@ fn opportunistic_ev_falls_back_to_stale_snapshot_without_live_pv_kw() {
         ("ev", ev_snap(0.0, 0.4, 0.8, true)),
     ]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
-    apply_ev_lever_opportunistic(&mut sp, &sim, None, None, false, true);
+    apply_ev_lever_opportunistic(&mut sp, &sim, None, None, test_ticks::ev_on());
     assert!(!sp.contains_key("ev"), "0.5 kW deficit must not charge EV");
 }
 
@@ -518,7 +516,7 @@ fn opportunistic_ev_capped_at_max_charge_kw() {
         ("ev", ev_snap(0.0, 0.4, 0.8, true)),
     ]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
-    apply_ev_lever_opportunistic(&mut sp, &sim, None, None, false, true);
+    apply_ev_lever_opportunistic(&mut sp, &sim, None, None, test_ticks::ev_on());
     let ev_sp = sp.get("ev").copied().unwrap_or(0.0);
     assert!(
         (ev_sp - 7.0).abs() < 1e-6,
@@ -534,7 +532,13 @@ fn opportunistic_ev_disabled_suppresses_charging() {
         ("ev", ev_snap(0.0, 0.4, 0.8, true)),
     ]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
-    apply_ev_lever_opportunistic(&mut sp, &sim, None, None, false, false);
+    apply_ev_lever_opportunistic(
+        &mut sp,
+        &sim,
+        None,
+        None,
+        &EvOverlays::from([("ev".to_string(), EvOverlay::default())]),
+    );
     assert!(
         !sp.contains_key("ev"),
         "overlay_enabled=false must suppress"
@@ -550,7 +554,7 @@ fn heater_pause_commands_a_reachable_step_not_one_the_heater_rounds_back_up() {
     let mut sp = StdHashMap::from([("heater".to_string(), 1.5)]);
     // 1.5 − 0.6 = 0.9 kW: the heater would round 0.9 up to 1.5, so the lever
     // must command the highest step at or below it — 0.
-    let achieved = apply_heater_pause_lever(&mut sp, &sim, 0.6);
+    let achieved = apply_heater_pause_lever(&mut sp, &sim, "heater", 0.6);
     assert_eq!(sp["heater"], 0.0);
     assert_eq!(achieved, 1.5);
 }
@@ -603,7 +607,7 @@ fn heater_pause_offers_no_capacity_while_the_thermostat_forces_power() {
     // the setpoint frees nothing and must not be claimed.
     let sim = make_sim(vec![("heater", heater_snap(17.0, 18.0, 23.0, 23.0))]);
     let sp = StdHashMap::from([("heater".to_string(), 1.5)]);
-    assert!(heater_pause_lever(&sp, &sim, 1.0).is_none());
+    assert!(heater_pause_lever(&sp, &sim, "heater", 1.0).is_none());
 }
 
 // ── Ported regression tests: apply_battery_lever (adapted from the former
@@ -614,7 +618,14 @@ fn battery_lever_discharges_on_shortfall() {
     let sim = make_sim(vec![("battery", battery_snap(0.0, 0.5))]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
     sp.insert("battery".to_string(), 0.0);
-    let delta = apply_battery_lever(&mut sp, &sim, 3.0, PlannerObjective::MinCost, None);
+    let delta = apply_battery_lever(
+        &mut sp,
+        &sim,
+        "battery",
+        3.0,
+        PlannerObjective::MinCost,
+        None,
+    );
     assert!(
         delta > 0.0,
         "expected non-zero correction magnitude, got {delta}"
@@ -631,7 +642,14 @@ fn battery_lever_suppressed_when_at_min_soc() {
     let sim = make_sim(vec![("battery", battery_snap(0.0, 0.105))]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
     sp.insert("battery".to_string(), 0.0);
-    let delta = apply_battery_lever(&mut sp, &sim, 3.0, PlannerObjective::MinCost, None);
+    let delta = apply_battery_lever(
+        &mut sp,
+        &sim,
+        "battery",
+        3.0,
+        PlannerObjective::MinCost,
+        None,
+    );
     assert_eq!(delta, 0.0, "discharge must be suppressed near min_soc");
 }
 
@@ -640,7 +658,14 @@ fn battery_lever_suppressed_for_maxrevenue_discharge() {
     let sim = make_sim(vec![("battery", battery_snap(0.0, 0.5))]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
     sp.insert("battery".to_string(), 0.0);
-    let delta = apply_battery_lever(&mut sp, &sim, 3.0, PlannerObjective::MaxRevenue, None);
+    let delta = apply_battery_lever(
+        &mut sp,
+        &sim,
+        "battery",
+        3.0,
+        PlannerObjective::MaxRevenue,
+        None,
+    );
     assert_eq!(delta, 0.0, "MaxRevenue must suppress discharge corrections");
 }
 
@@ -649,7 +674,14 @@ fn battery_lever_allows_maxrevenue_on_export_excess() {
     let sim = make_sim(vec![("battery", battery_snap(0.0, 0.5))]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
     sp.insert("battery".to_string(), 0.0);
-    let delta = apply_battery_lever(&mut sp, &sim, -3.0, PlannerObjective::MaxRevenue, None);
+    let delta = apply_battery_lever(
+        &mut sp,
+        &sim,
+        "battery",
+        -3.0,
+        PlannerObjective::MaxRevenue,
+        None,
+    );
     assert!(
         delta > 0.0,
         "MaxRevenue must allow charge corrections, got {delta}"
@@ -663,7 +695,14 @@ fn battery_lever_clamped_to_max_discharge_kw() {
     let sim = make_sim(vec![("battery", battery_snap(0.0, 0.5))]);
     let mut sp: StdHashMap<String, f64> = StdHashMap::new();
     sp.insert("battery".to_string(), 0.0);
-    let _delta = apply_battery_lever(&mut sp, &sim, 20.0, PlannerObjective::MinCost, None);
+    let _delta = apply_battery_lever(
+        &mut sp,
+        &sim,
+        "battery",
+        20.0,
+        PlannerObjective::MinCost,
+        None,
+    );
     let bat_sp = sp.get("battery").copied().unwrap();
     assert!(
         bat_sp >= -5.0,
@@ -692,14 +731,13 @@ fn reconcile_battery_integrates_from_prev_setpoint_not_plan_allocation() {
             sim: &sim,
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
-            plan_has_ev_allocation: false,
-            overlay_enabled: true,
+            ev_overlay: test_ticks::ev_on(),
             live_pv_kw: None,
             live_pv_released_kw: None,
             live_base_load_kw: Some(-8.67),
             alert_active: false,
             limit_target_kw: None,
-            prev_battery_bridge_kw: 0.0,
+            prev_bridge_kw_by_asset: test_ticks::no_bridge(),
         },
         &base_setpoints,
         None,
@@ -740,8 +778,14 @@ fn battery_lever_converges_under_stationary_disturbance_across_multiple_ticks() 
         // — NOT a constant reapplied every tick, which would double-count the
         // battery's own correction and never converge.
         let assigned_kw = STATIONARY_DEVIATION_KW + setpoint_kw;
-        let _delta =
-            apply_battery_lever(&mut sp, &sim, assigned_kw, PlannerObjective::MinCost, None);
+        let _delta = apply_battery_lever(
+            &mut sp,
+            &sim,
+            "battery",
+            assigned_kw,
+            PlannerObjective::MinCost,
+            None,
+        );
         setpoint_kw = sp.get("battery").copied().unwrap_or(setpoint_kw);
         // Physics: setpoint_kw negative = discharge, drains SoC.
         soc_frac = (soc_frac - (-setpoint_kw).max(0.0) * DT_H / CAPACITY_KWH).clamp(0.0, 1.0);
@@ -799,7 +843,7 @@ fn reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp
     base_setpoints.insert("battery".to_string(), 0.0); // static plan target, never changes
 
     let mut history = Vec::new();
-    let mut incumbent: Option<&'static str> = None;
+    let mut incumbent: Option<String> = None;
     for _ in 0..6 {
         let sim = make_sim(vec![
             ("battery", battery_snap(setpoint_kw, soc_frac)),
@@ -810,18 +854,17 @@ fn reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp
                 sim: &sim,
                 plan_slot: Some(&slot),
                 objective: PlannerObjective::MinCost,
-                plan_has_ev_allocation: false,
-                overlay_enabled: true,
+                ev_overlay: test_ticks::ev_on(),
                 live_pv_kw: None,
                 live_pv_released_kw: None,
                 live_base_load_kw: Some(2.0 + STATIONARY_DEVIATION_KW),
                 alert_active: false,
                 limit_target_kw: None,
-                prev_battery_bridge_kw: 0.0,
+                prev_bridge_kw_by_asset: test_ticks::no_bridge(),
             },
             &base_setpoints,
             // live base load: 2.0 planned + 2.0 kW step
-            incumbent,
+            incumbent.as_deref(),
         );
         incumbent = outcome.active_lever;
         setpoint_kw = outcome
@@ -862,8 +905,8 @@ fn heater_emergency_absorb_hysteresis_stays_active_within_margin_of_threshold() 
     // it — as incumbent, the lever must still be offered (sticky exit).
     let cost = HEATER_COMFORT_OVERRIDE_EUR_PER_KWH - (LEVER_PREEMPTION_MARGIN_EUR_PER_KWH / 2.0);
     let slot = test_slot(cost, cost, 0.0, 5.0, 0.0, 0.08);
-    let as_incumbent = heater_emergency_lever(&sim, Some(&slot), -1.0, true, false);
-    let as_challenger = heater_emergency_lever(&sim, Some(&slot), -1.0, false, false);
+    let as_incumbent = heater_emergency_lever(&sim, "heater", Some(&slot), -1.0, true, false);
+    let as_challenger = heater_emergency_lever(&sim, "heater", Some(&slot), -1.0, false, false);
     assert!(
         as_incumbent.is_some(),
         "incumbent heater emergency mode must not exit within the margin band"
@@ -905,14 +948,13 @@ fn release_tick(
             sim: &sim,
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
-            plan_has_ev_allocation: false,
-            overlay_enabled: true,
+            ev_overlay: test_ticks::ev_on(),
             live_pv_kw: None,
             live_pv_released_kw: None,
             live_base_load_kw: Some(live_base_load_kw),
             alert_active: false,
             limit_target_kw: None,
-            prev_battery_bridge_kw: 0.0,
+            prev_bridge_kw_by_asset: test_ticks::no_bridge(),
         },
         &base_setpoints,
         incumbent,
@@ -924,18 +966,19 @@ fn reconcile_releases_the_battery_to_plan_once_the_disturbance_is_gone() {
     // Tick 0: a +2 kW base-load step. The battery discharges 2 kW to cancel it.
     let engaged = release_tick(0.0, None, PLAN_NET_KW + 2.0, None);
     assert!((engaged.setpoints["battery"] - -2.0).abs() < 1e-6);
-    assert_eq!(engaged.active_lever, Some("battery"));
+    assert_eq!(engaged.active_lever.as_deref(), Some("battery:battery"));
 
     // Tick 1: the step is gone. With the battery back at plan there would be no deviation,
     // so the correction is released to plan in one tick instead of being undone stepwise.
-    let released = release_tick(-2.0, None, PLAN_NET_KW, Some("battery"));
+    let released = release_tick(-2.0, None, PLAN_NET_KW, Some("battery:battery"));
     assert!(
         released.setpoints["battery"].abs() < 1e-6,
         "the battery must return to its plan allocation, got {}",
         released.setpoints["battery"]
     );
     assert_eq!(
-        released.active_lever, None,
+        released.active_lever.as_deref(),
+        None,
         "release is the one true 'cleared'"
     );
 }
@@ -944,31 +987,31 @@ fn reconcile_releases_the_battery_to_plan_once_the_disturbance_is_gone() {
 fn reconcile_keeps_reporting_the_lever_while_its_correction_holds() {
     // The step persists and the correction has settled: nothing moves this tick, but the
     // battery is still held off-plan, so the correction is active — not "cleared".
-    let held = release_tick(-2.0, None, PLAN_NET_KW + 2.0, Some("battery"));
+    let held = release_tick(-2.0, None, PLAN_NET_KW + 2.0, Some("battery:battery"));
     assert!((held.setpoints["battery"] - -2.0).abs() < 1e-6);
-    assert_eq!(held.active_lever, Some("battery"));
+    assert_eq!(held.active_lever.as_deref(), Some("battery:battery"));
 }
 
 #[test]
 fn reconcile_keeps_correcting_while_a_deviation_without_its_correction_remains() {
     // A 3 kW step shrinks to 1 kW: the cause is not gone, so no release — the dead-beat
     // corrector tracks it down from its carried value instead.
-    let tracked = release_tick(-3.0, None, PLAN_NET_KW + 1.0, Some("battery"));
+    let tracked = release_tick(-3.0, None, PLAN_NET_KW + 1.0, Some("battery:battery"));
     assert!(
         (tracked.setpoints["battery"] - -1.0).abs() < 1e-6,
         "expected the correction to shrink to -1 kW, got {}",
         tracked.setpoints["battery"]
     );
-    assert_eq!(tracked.active_lever, Some("battery"));
+    assert_eq!(tracked.active_lever.as_deref(), Some("battery:battery"));
 }
 
 #[test]
 fn reconcile_releases_battery_and_ev_together() {
     // Both carried levers are off-plan and the disturbance is gone: both return to plan.
-    let released = release_tick(-1.0, Some(1.4), PLAN_NET_KW, Some("battery"));
+    let released = release_tick(-1.0, Some(1.4), PLAN_NET_KW, Some("battery:battery"));
     assert!(released.setpoints["battery"].abs() < 1e-6);
     assert!(released.setpoints["ev"].abs() < 1e-6);
-    assert_eq!(released.active_lever, None);
+    assert_eq!(released.active_lever.as_deref(), None);
 }
 
 #[test]
@@ -989,14 +1032,13 @@ fn reconcile_keeps_reporting_a_held_lever_when_no_lever_can_act_this_tick() {
             sim: &sim,
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
-            plan_has_ev_allocation: false,
-            overlay_enabled: true,
+            ev_overlay: test_ticks::ev_on(),
             live_pv_kw: None,
             live_pv_released_kw: None,
             live_base_load_kw: Some(PLAN_NET_KW + 3.0),
             alert_active: false,
             limit_target_kw: None,
-            prev_battery_bridge_kw: 0.0,
+            prev_bridge_kw_by_asset: test_ticks::no_bridge(),
         },
         &base_setpoints,
         Some("battery"),
@@ -1006,7 +1048,7 @@ fn reconcile_keeps_reporting_a_held_lever_when_no_lever_can_act_this_tick() {
         "the extra 1 kW has no lever: {}",
         outcome.unresolved_kw
     );
-    assert_eq!(outcome.active_lever, Some("battery"));
+    assert_eq!(outcome.active_lever.as_deref(), Some("battery:battery"));
 }
 
 #[test]
@@ -1031,14 +1073,13 @@ fn deviation_if_released_judges_pv_without_the_arbiters_own_curtailment() {
             sim: &sim,
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
-            plan_has_ev_allocation: false,
-            overlay_enabled: true,
+            ev_overlay: test_ticks::ev_on(),
             live_pv_kw: Some(-2.86),
             live_pv_released_kw: Some(-4.03),
             live_base_load_kw: Some(0.5),
             alert_active: false,
             limit_target_kw: None,
-            prev_battery_bridge_kw: 0.0,
+            prev_bridge_kw_by_asset: test_ticks::no_bridge(),
         },
         &base_setpoints,
         Some("pv_curtail"),
@@ -1055,7 +1096,7 @@ fn deviation_if_released_judges_pv_without_the_arbiters_own_curtailment() {
 #[test]
 fn reconcile_reports_the_deviation_without_its_correction() {
     // What decides the release is visible: with the battery at plan the step would show.
-    let held = release_tick(-2.0, None, PLAN_NET_KW + 2.0, Some("battery"));
+    let held = release_tick(-2.0, None, PLAN_NET_KW + 2.0, Some("battery:battery"));
     let without = held
         .dev_without_correction_kw
         .expect("reported whenever there is a plan slot");
@@ -1066,7 +1107,7 @@ fn reconcile_reports_the_deviation_without_its_correction() {
 fn a_held_correction_feeds_the_replan_backstop_as_energy() {
     // The backstop must hear a correction that is held, not only one that is moving: a
     // settled -2 kW battery is 2 kW off-plan for the whole tick.
-    let held = release_tick(-2.0, None, PLAN_NET_KW + 2.0, Some("battery"));
+    let held = release_tick(-2.0, None, PLAN_NET_KW + 2.0, Some("battery:battery"));
     let dt_h = 1.0 / 3600.0;
     let residual =
         held.residual_kwh_by_asset(1.0, &make_sim(vec![("battery", battery_snap(-2.0, 0.5))]));
@@ -1079,7 +1120,7 @@ fn a_held_correction_feeds_the_replan_backstop_as_energy() {
 
 #[test]
 fn a_released_correction_feeds_the_backstop_nothing() {
-    let released = release_tick(-2.0, None, PLAN_NET_KW, Some("battery"));
+    let released = release_tick(-2.0, None, PLAN_NET_KW, Some("battery:battery"));
     let residual =
         released.residual_kwh_by_asset(1.0, &make_sim(vec![("battery", battery_snap(-2.0, 0.5))]));
     assert!(
@@ -1102,10 +1143,10 @@ struct LaggedSite {
     ev_state: crate::assets::ev::EvState,
     ev_cmd_kw: f64,
     battery_kw: f64,
-    incumbent: Option<&'static str>,
-    limit_incumbent: Option<&'static str>,
+    incumbent: Option<String>,
+    limit_incumbent: Option<String>,
     /// Last tick's battery bridge of both passes, fed back as production's tick does.
-    bridge_kw: f64,
+    bridge_kw: StdHashMap<String, f64>,
     pv_kw: f64,
     base_kw: f64,
     /// Planned site net (kW, + = import).
@@ -1150,7 +1191,7 @@ impl LaggedSite {
             battery_kw: 0.0,
             incumbent: None,
             limit_incumbent: None,
-            bridge_kw: 0.0,
+            bridge_kw: StdHashMap::new(),
             pv_kw,
             base_kw,
             plan_net_kw,
@@ -1180,26 +1221,32 @@ impl LaggedSite {
             sim: &sim,
             plan_slot: Some(&slot),
             objective: PlannerObjective::MinCost,
-            plan_has_ev_allocation: false,
-            overlay_enabled: true,
+            ev_overlay: test_ticks::ev_on(),
             live_pv_kw: Some(self.pv_kw),
             live_pv_released_kw: None,
             live_base_load_kw: Some(self.base_kw),
             alert_active: false,
-            limit_target_kw: limit::limit_target_kw(self.hard_limit_kw, self.limit_incumbent),
-            prev_battery_bridge_kw: self.bridge_kw,
+            limit_target_kw: limit::limit_target_kw(
+                self.hard_limit_kw,
+                self.limit_incumbent.as_deref(),
+            ),
+            prev_bridge_kw_by_asset: &self.bridge_kw,
         };
-        let mut outcome = reconcile(&tick, &StdHashMap::new(), self.incumbent);
+        let mut outcome = reconcile(&tick, &StdHashMap::new(), self.incumbent.as_deref());
         let limit_pass = limit::enforce_import_limit(
             &tick,
             &mut outcome.setpoints,
-            self.limit_incumbent,
+            self.limit_incumbent.as_deref(),
             &limit::SetpointBoundsKw::new(),
         );
-        self.incumbent = outcome.active_lever;
-        self.limit_incumbent = limit_pass.as_ref().and_then(|l| l.active_lever);
-        self.bridge_kw =
-            outcome.battery_bridge_kw + limit_pass.as_ref().map_or(0.0, |l| l.battery_bridge_kw);
+        self.incumbent = outcome.active_lever.clone();
+        self.limit_incumbent = limit_pass.as_ref().and_then(|l| l.active_lever.clone());
+        let limit_bridges = limit_pass.iter().flat_map(|l| &l.bridge_kw_by_asset);
+        let mut bridge_kw = StdHashMap::new();
+        for (id, kw) in outcome.bridge_kw_by_asset.iter().chain(limit_bridges) {
+            *bridge_kw.entry(id.clone()).or_insert(0.0) += kw;
+        }
+        self.bridge_kw = bridge_kw;
         if let Some(&kw) = outcome.setpoints.get("ev") {
             self.ev_cmd_kw = kw;
         }
@@ -1281,4 +1328,128 @@ fn both_passes_settle_under_a_hard_limit_with_the_real_charger_lag() {
         "the charger holds the cut; the battery only bridged its lag, got {:.2} kW",
         site.battery_kw
     );
+}
+
+// ── W5a: a lever per declaring asset, whatever its id ───────────────────────
+
+fn in_roster(mut snap: AssetSnapshot, roster_index: usize) -> AssetSnapshot {
+    snap.roster_index = roster_index;
+    snap
+}
+
+/// An import step: the plan imports 0.5 kW, the base load now draws `base_kw`.
+fn import_step_outcome(sim: &SimSnapshot, base_kw: f64, alert_active: bool) -> ArbiterOutcome {
+    let slot = test_slot(0.18, 0.18, 0.5, 0.0, 0.0, 0.08);
+    reconcile(
+        &ArbiterTick {
+            sim,
+            plan_slot: Some(&slot),
+            objective: PlannerObjective::MinCost,
+            ev_overlay: test_ticks::ev_on(),
+            live_pv_kw: Some(0.0),
+            live_pv_released_kw: None,
+            live_base_load_kw: Some(base_kw),
+            alert_active,
+            limit_target_kw: None,
+            prev_bridge_kw_by_asset: test_ticks::no_bridge(),
+        },
+        &StdHashMap::new(),
+        None,
+    )
+}
+
+#[test]
+fn a_battery_with_another_id_is_the_lever() {
+    let sim = make_sim(vec![
+        ("home-battery", battery_snap(0.0, 0.5)),
+        ("base_load", base_snap(2.5)),
+    ]);
+    let outcome = import_step_outcome(&sim, 2.5, false);
+    assert_eq!(
+        outcome.active_lever.as_deref(),
+        Some("battery:home-battery")
+    );
+    assert!((outcome.setpoints["home-battery"] - (-2.0)).abs() < 1e-6);
+}
+
+#[test]
+fn two_batteries_of_equal_cost_are_used_in_roster_order() {
+    let sim = make_sim(vec![
+        ("bat-b", in_roster(battery_snap(0.0, 0.5), 2)),
+        ("bat-a", in_roster(battery_snap(0.0, 0.5), 1)),
+        ("base_load", in_roster(base_snap(8.5), 0)),
+    ]);
+    // 8 kW over plan: the first battery in the roster gives its 5 kW, the second the rest.
+    let outcome = import_step_outcome(&sim, 8.5, false);
+    assert_eq!(outcome.active_lever.as_deref(), Some("battery:bat-a"));
+    assert!((outcome.setpoints["bat-a"] - (-5.0)).abs() < 1e-6);
+    assert!((outcome.setpoints["bat-b"] - (-3.0)).abs() < 1e-6);
+
+    // 3 kW over plan: the first takes all of it, the second stays where it was.
+    let outcome = import_step_outcome(&sim, 3.5, false);
+    assert!((outcome.setpoints["bat-a"] - (-3.0)).abs() < 1e-6);
+    assert_eq!(outcome.setpoints["bat-b"], 0.0);
+}
+
+fn overlays(entries: &[(&str, bool)]) -> EvOverlays {
+    entries
+        .iter()
+        .map(|(id, enabled)| {
+            let overlay = EvOverlay {
+                plan_allocates: false,
+                enabled: *enabled,
+            };
+            (id.to_string(), overlay)
+        })
+        .collect()
+}
+
+#[test]
+fn two_evs_share_a_surplus_in_roster_order() {
+    let sim = make_sim(vec![
+        ("pv", in_roster(base_snap(0.0), 0)),
+        ("base_load", in_roster(base_snap(1.0), 1)),
+        ("ev-b", in_roster(ev_snap(0.0, 0.4, 0.8, true), 3)),
+        ("ev-a", in_roster(ev_snap(0.0, 0.4, 0.8, true), 2)),
+    ]);
+    let mut sp: StdHashMap<String, f64> = StdHashMap::new();
+    let on = overlays(&[("ev-a", true), ("ev-b", true)]);
+    // 11 kW surplus: the first EV takes its 7 kW, the second the remaining 4 kW.
+    apply_ev_lever_opportunistic(&mut sp, &sim, Some(-12.0), None, &on);
+    assert!((sp["ev-a"] - 7.0).abs() < 1e-6, "got {:?}", sp);
+    assert!((sp["ev-b"] - 4.0).abs() < 1e-6, "got {:?}", sp);
+}
+
+#[test]
+fn one_evs_setting_does_not_affect_another() {
+    let sim = make_sim(vec![
+        ("pv", in_roster(base_snap(0.0), 0)),
+        ("base_load", in_roster(base_snap(1.0), 1)),
+        ("ev-a", in_roster(ev_snap(0.0, 0.4, 0.8, true), 2)),
+        ("ev-b", in_roster(ev_snap(0.0, 0.4, 0.8, true), 3)),
+    ]);
+    let mut sp: StdHashMap<String, f64> = StdHashMap::new();
+    let first_off = overlays(&[("ev-a", false), ("ev-b", true)]);
+    apply_ev_lever_opportunistic(&mut sp, &sim, Some(-6.0), None, &first_off);
+    assert!(!sp.contains_key("ev-a"), "ev-a's overlay is off");
+    assert!((sp["ev-b"] - 5.0).abs() < 1e-6, "got {:?}", sp);
+}
+
+#[test]
+fn two_heaters_during_an_alert_only_the_one_forcing_emergency_heat_is_curtailed() {
+    let sim = make_sim(vec![
+        (
+            "heater-a",
+            in_roster(heater_snap(17.0, 18.0, 23.0, 23.0), 0),
+        ),
+        (
+            "heater-b",
+            in_roster(heater_snap(20.0, 18.0, 23.0, 23.0), 1),
+        ),
+        ("base_load", in_roster(base_snap(2.5), 2)),
+    ]);
+    let outcome = import_step_outcome(&sim, 2.5, true);
+    let curtailed: Vec<&String> = outcome.heater_emergency_mode.keys().collect();
+    assert_eq!(curtailed, vec!["heater-a"]);
+    assert_eq!(outcome.heater_emergency_mode["heater-a"], (true, false));
 }

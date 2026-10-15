@@ -20,14 +20,13 @@ fn tick<'a>(
         sim,
         plan_slot,
         objective: PlannerObjective::MinCost,
-        plan_has_ev_allocation: false,
-        overlay_enabled: true,
+        ev_overlay: test_ticks::ev_on(),
         live_pv_kw: None,
         live_pv_released_kw: None,
         live_base_load_kw: Some(live_base_load_kw),
         alert_active,
         limit_target_kw,
-        prev_battery_bridge_kw: 0.0,
+        prev_bridge_kw_by_asset: test_ticks::no_bridge(),
     }
 }
 
@@ -92,7 +91,7 @@ fn enforce_import_limit_sheds_a_planned_heater_stage_inside_the_cap() {
     let mut sp = StdHashMap::from([("heater".to_string(), 1.5)]);
     let out = enforce_import_limit(&t, &mut sp, None, &no_bounds()).unwrap();
     assert_eq!(sp["heater"], 0.0);
-    assert_eq!(out.active_lever, Some("heater_pause"));
+    assert_eq!(out.active_lever.as_deref(), Some("heater_pause:heater"));
     assert!(out.excess_kw > 0.5);
     assert_eq!(out.unresolved_kw, 0.0);
     assert!(projected(&t, &sp) <= 1.5);
@@ -115,7 +114,7 @@ fn enforce_import_limit_discharges_the_battery_for_an_unforecast_base_load() {
     );
     let mut sp = StdHashMap::from([("battery".to_string(), 0.0)]);
     let out = enforce_import_limit(&t, &mut sp, None, &no_bounds()).unwrap();
-    assert_eq!(out.active_lever, Some("battery"));
+    assert_eq!(out.active_lever.as_deref(), Some("battery:battery"));
     assert!((sp["battery"] - -(2.3 - (1.0 - LIMIT_MARGIN_KW))).abs() < 1e-6);
     assert!(projected(&t, &sp) <= 1.0);
     assert!((out.adjusted_kw_by_asset["battery"] - sp["battery"]).abs() < 1e-9);
@@ -136,8 +135,7 @@ fn enforce_import_limit_reduces_charging_the_plan_itself_scheduled() {
         limit_target_kw(Some(3.0), None),
         false,
     );
-    t.plan_has_ev_allocation = true;
-    t.overlay_enabled = false;
+    t.ev_overlay = test_ticks::ev_plan_allocated();
     let mut sp = StdHashMap::from([("ev".to_string(), 7.0)]);
     enforce_import_limit(&t, &mut sp, None, &no_bounds()).unwrap();
     assert!((sp["ev"] - (3.0 - LIMIT_MARGIN_KW - 0.5)).abs() < 1e-6);
@@ -172,8 +170,8 @@ fn enforce_import_limit_covers_the_chargers_response_lag_with_the_battery() {
         sp["battery"]
     );
     assert_eq!(
-        out.active_lever,
-        Some("battery"),
+        out.active_lever.as_deref(),
+        Some("battery:battery"),
         "the lever that actually moved this tick"
     );
     assert!(projected(&t, &sp) <= 3.0);
@@ -208,7 +206,7 @@ fn enforce_import_limit_works_before_the_first_plan() {
     let t = tick(&sim, None, 2.0, limit_target_kw(Some(1.0), None), false);
     let mut sp = StdHashMap::from([("battery".to_string(), 0.0)]);
     let out = enforce_import_limit(&t, &mut sp, None, &no_bounds()).unwrap();
-    assert_eq!(out.active_lever, Some("battery"));
+    assert_eq!(out.active_lever.as_deref(), Some("battery:battery"));
     assert!(projected(&t, &sp) <= 1.0);
 }
 
@@ -253,7 +251,11 @@ fn enforce_import_limit_curtails_emergency_heat_during_an_alert() {
     let t = tick(&sim, Some(&slot), 0.5, limit_target_kw(hard, None), true);
     let mut sp = StdHashMap::from([("heater".to_string(), 1.5)]);
     let out = enforce_import_limit(&t, &mut sp, None, &no_bounds()).unwrap();
-    assert_eq!(out.heater_emergency_mode, Some((true, false)), "Curtail");
+    assert_eq!(
+        out.heater_emergency_mode.get("heater"),
+        Some(&(true, false)),
+        "Curtail"
+    );
     assert_eq!(sp["heater"], 0.0, "and no planned stage either");
 }
 
@@ -275,7 +277,7 @@ fn enforce_import_limit_never_curtails_emergency_heat_for_a_capacity_limit() {
     );
     let mut sp = StdHashMap::from([("heater".to_string(), 0.0)]);
     let out = enforce_import_limit(&t, &mut sp, None, &no_bounds()).unwrap();
-    assert_eq!(out.heater_emergency_mode, None);
+    assert!(out.heater_emergency_mode.is_empty());
     assert!((out.unresolved_kw - (3.5 - (1.0 - LIMIT_MARGIN_KW))).abs() < 1e-6);
 }
 
@@ -283,10 +285,14 @@ fn enforce_import_limit_never_curtails_emergency_heat_for_a_capacity_limit() {
 fn heater_curtail_is_offered_only_during_an_alert_whatever_the_marginal_cost() {
     let sim = make_sim(vec![("heater", heater_snap(17.0, 18.0, 23.0, 23.0))]);
     let penalty_slot = test_slot(0.95, 0.95, 5.0, 0.0, 0.0, 0.08);
-    assert!(heater_emergency_lever(&sim, Some(&penalty_slot), 1.0, false, false).is_none());
+    assert!(
+        heater_emergency_lever(&sim, "heater", Some(&penalty_slot), 1.0, false, false).is_none()
+    );
     let routine_slot = test_slot(0.20, 0.20, 5.0, 0.0, 0.0, 0.08);
-    assert!(heater_emergency_lever(&sim, Some(&routine_slot), 1.0, false, true).is_some());
-    assert!(heater_emergency_lever(&sim, None, 1.0, false, true).is_some());
+    assert!(
+        heater_emergency_lever(&sim, "heater", Some(&routine_slot), 1.0, false, true).is_some()
+    );
+    assert!(heater_emergency_lever(&sim, "heater", None, 1.0, false, true).is_some());
 }
 
 // ── hysteresis and stability ────────────────────────────────────────────────
@@ -303,7 +309,7 @@ fn enforce_import_limit_keeps_a_shed_stage_off_until_it_fits_with_room_to_spare(
     let t_fresh = tick(&sim, None, 0.35, limit_target_kw(Some(2.0), None), false);
     let fresh = enforce_import_limit(&t_fresh, &mut sp_fresh, None, &no_bounds()).unwrap();
     assert_eq!(sp_fresh["heater"], 1.5);
-    assert_eq!(fresh.active_lever, None);
+    assert_eq!(fresh.active_lever.as_deref(), None);
 
     let mut sp_engaged = StdHashMap::from([("heater".to_string(), 1.5)]);
     let t_engaged = tick(
@@ -321,7 +327,7 @@ fn enforce_import_limit_keeps_a_shed_stage_off_until_it_fits_with_room_to_spare(
     )
     .unwrap();
     assert_eq!(sp_engaged["heater"], 0.0);
-    assert_eq!(engaged.active_lever, Some("heater_pause"));
+    assert_eq!(engaged.active_lever.as_deref(), Some("heater_pause:heater"));
 }
 
 #[test]
@@ -333,19 +339,24 @@ fn both_passes_together_settle_under_a_persistent_unforecast_load() {
     let slot = test_slot(0.25, 0.08, 2.3, 0.0, 0.0, 0.08);
     let base_setpoints = StdHashMap::from([("battery".to_string(), 0.0)]);
     let mut battery_kw = 0.0_f64;
-    let mut dev_incumbent: Option<&'static str> = None;
-    let mut limit_incumbent: Option<&'static str> = None;
+    let mut dev_incumbent: Option<String> = None;
+    let mut limit_incumbent: Option<String> = None;
     let mut history = Vec::new();
     for _ in 0..10 {
         let sim = make_sim(vec![
             ("battery", battery_snap(battery_kw, 0.5)),
             ("base_load", base_snap(2.3)),
         ]);
-        let target = limit_target_kw(Some(1.0), limit_incumbent);
+        let target = limit_target_kw(Some(1.0), limit_incumbent.as_deref());
         let t = tick(&sim, Some(&slot), 2.3, target, false);
-        let mut outcome = reconcile(&t, &base_setpoints, dev_incumbent);
-        let limit = enforce_import_limit(&t, &mut outcome.setpoints, limit_incumbent, &no_bounds())
-            .unwrap();
+        let mut outcome = reconcile(&t, &base_setpoints, dev_incumbent.as_deref());
+        let limit = enforce_import_limit(
+            &t,
+            &mut outcome.setpoints,
+            limit_incumbent.as_deref(),
+            &no_bounds(),
+        )
+        .unwrap();
         assert!(projected(&t, &outcome.setpoints) <= 1.0);
         dev_incumbent = outcome.active_lever;
         limit_incumbent = limit.active_lever;

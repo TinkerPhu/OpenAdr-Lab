@@ -60,13 +60,13 @@ pub(crate) fn build_tick_setpoints(
         .or(ctx.inject.grid_import_limit_kw);
     let hard_limit_kw = limit::hard_import_limit_kw(capacity_limit_kw, alert_active)
         .filter(|_| ctx.limit_enforcement_enabled);
+    let ev_overlay =
+        controller::arbiter::ev_overlays(sim_snap, plan_snap, now, |id| ctx.overlay_enabled.of(id));
     let tick = controller::arbiter::ArbiterTick {
         sim: sim_snap,
         plan_slot: plan_snap.and_then(|p| p.current_slot(now)),
         objective: plan_snap.map_or(PlannerObjective::MinCost, |p| p.objective),
-        plan_has_ev_allocation: plan_snap
-            .is_some_and(|p| controller::dispatcher::plan_allocates(p, now, crate::ids::ASSET_EV)),
-        overlay_enabled: ctx.overlay_enabled,
+        ev_overlay: &ev_overlay,
         live_pv_kw,
         live_pv_released_kw,
         live_base_load_kw,
@@ -75,7 +75,7 @@ pub(crate) fn build_tick_setpoints(
             hard_limit_kw,
             ctx.limit_incumbent_lever.as_deref(),
         ),
-        prev_battery_bridge_kw: ctx.battery_bridge_kw,
+        prev_bridge_kw_by_asset: &ctx.bridge_kw_by_asset,
     };
 
     let mut outcome = if ctx.deviation_arbiter_enabled {
@@ -85,8 +85,7 @@ pub(crate) fn build_tick_setpoints(
         controller::dispatcher::apply_surplus_ev_overlay(
             &mut sp,
             sim_snap,
-            tick.plan_has_ev_allocation,
-            ctx.overlay_enabled,
+            &ev_overlay,
             live_pv_kw,
         );
         controller::arbiter::ArbiterOutcome {
@@ -97,15 +96,7 @@ pub(crate) fn build_tick_setpoints(
 
     let sp = &mut outcome.setpoints;
     let (dispatch, alerts) = (&ctx.dispatch_windows, &ctx.alert_windows);
-    apply_dispatch_override(
-        sp,
-        sim_snap,
-        now,
-        dispatch,
-        alerts,
-        live_pv_kw,
-        live_base_load_kw,
-    );
+    apply_dispatch_override(sp, &tick, now, dispatch, alerts);
     apply_comms_loss_clamp(sp, sim_snap, ctx.comms_loss);
     let bounds_kw = comms_loss_setpoint_bounds_kw(sim_snap, ctx.comms_loss);
     // A deviation-pass PV curtailment lowers generation, so the limit pass
@@ -117,9 +108,10 @@ pub(crate) fn build_tick_setpoints(
     };
     let incumbent = ctx.limit_incumbent_lever.as_deref();
     outcome.limit = limit::enforce_import_limit(&limit_tick, sp, incumbent, &bounds_kw);
-    // Limit-pass Curtail (alerts only) overrides a deviation-pass Absorb.
-    if let Some(mode) = outcome.limit.as_ref().and_then(|l| l.heater_emergency_mode) {
-        outcome.heater_emergency_mode = Some(mode);
-    }
+    // Limit-pass Curtail (alerts only) overrides a deviation-pass Absorb, heater by heater.
+    let limit_modes = outcome.limit.iter().flat_map(|l| &l.heater_emergency_mode);
+    let limit_modes: Vec<(String, (bool, bool))> =
+        limit_modes.map(|(id, m)| (id.clone(), *m)).collect();
+    outcome.heater_emergency_mode.extend(limit_modes);
     outcome
 }

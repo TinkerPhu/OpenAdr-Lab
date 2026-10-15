@@ -2,7 +2,8 @@ Feature: Hard import limits are met at execution (GB-47)
   An active import limit is met from the next tick whatever the plan says:
   the arbiter's limit-enforcement pass sheds the excess with the cheapest
   lever (battery, EV charging, heater stages) while the planner catches up,
-  and each decision is visible in GET /arbiter-diagnostics and the
+  each lever belonging to the asset that declares it (reported as
+  `<kind>:<asset_id>`), and each decision is visible in GET /arbiter-diagnostics and the
   controller event log (GET /trace/events). Switching limit enforcement off
   leaves the plan alone — the reference for measuring the planner.
 
@@ -28,6 +29,7 @@ Feature: Hard import limits are met at execution (GB-47)
     When a sustained base-load step of 3.5 kW starts
     Then the VEN net site power stays at or below 2.05 kW for 15 seconds within 60 seconds
     And the arbiter diagnostics show the limit pass steering under 2.0 kW with a lever and nothing unresolved
+    And the limit pass's lever names an asset of the VEN's roster
     And the controller event log has a "limit" ArbiterDecision
 
   Scenario: With limit enforcement off the same load exceeds the limit

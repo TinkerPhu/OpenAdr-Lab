@@ -115,6 +115,8 @@ mod tests {
                     embodied_co2_g_kwh: None,
                     emergency_what_ifs: None,
                     ac_ceiling_kw: None,
+                    arbiter_lever: None,
+                    roster_index: 0,
                 },
             )]),
         }

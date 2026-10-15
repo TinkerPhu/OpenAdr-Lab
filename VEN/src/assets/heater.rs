@@ -406,6 +406,14 @@ impl Asset for Heater {
         Some(self.emergency_what_ifs_inner(s))
     }
 
+    fn arbiter_lever(&self) -> Option<crate::entities::asset::ArbiterLever> {
+        Some(crate::entities::asset::ArbiterLever {
+            kind: crate::entities::asset::ArbiterLeverKind::PausableLoad,
+            rated_import_kw: self.max_kw,
+            rated_export_kw: 0.0,
+        })
+    }
+
     fn history_view(&self, state: &AssetState) -> AssetHistoryView {
         let s: &HeaterState = own(state);
         AssetHistoryView {

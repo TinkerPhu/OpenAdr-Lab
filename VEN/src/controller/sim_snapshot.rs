@@ -23,6 +23,31 @@ pub struct SimSnapshot {
     pub assets: HashMap<String, AssetSnapshot>,
 }
 
+impl SimSnapshot {
+    /// The assets in roster order (profile order), ties by id: the one order every
+    /// per-asset loop of the arbiter uses, so a tie between equal levers always breaks the
+    /// same way.
+    pub fn assets_in_roster_order(&self) -> Vec<(&str, &AssetSnapshot)> {
+        let mut assets: Vec<(&str, &AssetSnapshot)> =
+            self.assets.iter().map(|(id, a)| (id.as_str(), a)).collect();
+        assets.sort_by(|(a_id, a), (b_id, b)| {
+            a.roster_index
+                .cmp(&b.roster_index)
+                .then_with(|| a_id.cmp(b_id))
+        });
+        assets
+    }
+
+    /// The ids of the assets declaring a lever of one of `kinds`, in roster order.
+    pub fn lever_asset_ids(&self, kinds: &[crate::entities::asset::ArbiterLeverKind]) -> Vec<&str> {
+        self.assets_in_roster_order()
+            .into_iter()
+            .filter(|(_, a)| a.arbiter_lever.is_some_and(|l| kinds.contains(&l.kind)))
+            .map(|(id, _)| id)
+            .collect()
+    }
+}
+
 /// Grid meter snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct GridSnapshot {
@@ -107,6 +132,13 @@ pub struct AssetSnapshot {
     /// The asset's AC output ceiling [kW] (`Asset::ac_ceiling_kw`) - PV inverter only.
     #[serde(skip)]
     pub ac_ceiling_kw: Option<f64>,
+    /// The lever this asset offers the arbiter (`Asset::arbiter_lever`).
+    #[serde(skip)]
+    pub arbiter_lever: Option<crate::entities::asset::ArbiterLever>,
+    /// The asset's place in the profile's roster: the arbiter's tie-break between levers of
+    /// equal cost, and the order EVs are offered a surplus in.
+    #[serde(skip)]
+    pub roster_index: usize,
 }
 
 impl AssetSnapshot {
@@ -173,6 +205,8 @@ mod tests {
             embodied_co2_g_kwh: None,
             emergency_what_ifs: None,
             ac_ceiling_kw: None,
+            arbiter_lever: None,
+            roster_index: 0,
         };
         assert_eq!(snap.val("soc"), Some(0.5));
         assert_eq!(snap.val("nonexistent"), None);

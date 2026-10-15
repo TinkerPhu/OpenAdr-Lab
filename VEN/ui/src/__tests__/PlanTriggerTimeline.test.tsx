@@ -204,7 +204,7 @@ describe("PlanTriggerTimeline", () => {
       type: "ArbiterDecision",
       ts: "2026-04-04T10:00:00Z",
       pass: "limit",
-      active_lever: "battery",
+      active_lever: "battery:battery",
       target_kw: 0.9,
       excess_kw: 1.4,
       unresolved_kw: 0.3,

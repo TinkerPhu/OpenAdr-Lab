@@ -29,7 +29,7 @@ measured_net_kw: number | null,
  */
 limit: LimitPassOutcome | null, 
 /**
- * The battery's share of its last command that only bridged a lagging command
- * (kW, both passes) — removed from the carried battery command next tick (R-104).
+ * Each storage asset's share of its last command that only bridged a lagging command
+ * (kW, both passes) — removed from its carried command next tick (R-104).
  */
-battery_bridge_kw: number, updated_at: string | null, };
+bridge_kw_by_asset: { [key in string]: number }, updated_at: string | null, };

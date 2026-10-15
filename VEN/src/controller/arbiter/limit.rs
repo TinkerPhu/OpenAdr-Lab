@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use ts_rs::TS;
 
-use super::arbiter_levers::{current_setpoint_kw, LEVER_EV, LEVER_HEATER_PAUSE};
+use super::arbiter_levers::{current_setpoint_kw, kind_of_key, LEVER_EV, LEVER_HEATER_PAUSE};
 pub use super::SetpointBoundsKw;
 use super::{
     apply_ranked_levers, projected_net_kw, ArbiterTick, LeverInputs, LeverPolicy, DEAD_BAND_KW,
@@ -40,6 +40,7 @@ const SWITCHING_LEVERS: [&str; 2] = [LEVER_HEATER_PAUSE, LEVER_EV];
 pub(crate) const LIMIT_POLICY: LeverPolicy = LeverPolicy {
     ev_overrides_plan: true,
     battery_respects_objective: false,
+    admits: super::ALL_LEVERS,
 };
 
 /// The hard import limit in force now (kW): 0 while an alert window is active
@@ -59,7 +60,8 @@ pub fn hard_import_limit_kw(
 /// limit, a further `LIMIT_RELEASE_HYSTERESIS_KW` below while a switching lever
 /// led the limit pass last tick (`incumbent_lever`).
 pub fn limit_target_kw(hard_limit_kw: Option<f64>, incumbent_lever: Option<&str>) -> Option<f64> {
-    let hysteresis_kw = if incumbent_lever.is_some_and(|l| SWITCHING_LEVERS.contains(&l)) {
+    let switching = |l: &str| SWITCHING_LEVERS.contains(&kind_of_key(l));
+    let hysteresis_kw = if incumbent_lever.is_some_and(switching) {
         LIMIT_RELEASE_HYSTERESIS_KW
     } else {
         0.0
@@ -77,15 +79,15 @@ pub struct LimitPassOutcome {
     /// Excess no lever could shed — forced power, the heater's comfort floor
     /// outside an alert, or exhausted levers (kW). Reported, never hidden.
     pub unresolved_kw: f64,
-    /// The first lever that shed anything; next tick's incumbent.
-    pub active_lever: Option<&'static str>,
-    /// `(curtail, absorb)`, set only by an alert's Curtail.
-    pub heater_emergency_mode: Option<(bool, bool)>,
+    /// The first lever that shed anything (`<kind>:<asset_id>`); next tick's incumbent.
+    pub active_lever: Option<String>,
+    /// `(curtail, absorb)` per asset, set only by an alert's Curtail.
+    pub heater_emergency_mode: HashMap<String, (bool, bool)>,
     /// Setpoint change per asset, after − before (kW).
     pub adjusted_kw_by_asset: HashMap<String, f64>,
-    /// The battery's share that only bridges a lagging command (kW) — see
-    /// `ArbiterTick::prev_battery_bridge_kw`.
-    pub battery_bridge_kw: f64,
+    /// Each storage asset's share that only bridges a lagging command (kW) — see
+    /// `ArbiterTick::prev_bridge_kw_by_asset`.
+    pub bridge_kw_by_asset: HashMap<String, f64>,
 }
 
 /// Runs the limit pass on `setpoints` (the tick's final map, after deviation
@@ -120,7 +122,7 @@ pub fn enforce_import_limit(
     outcome.unresolved_kw = applied.unresolved_kw;
     outcome.active_lever = applied.active_lever;
     outcome.heater_emergency_mode = applied.heater_emergency_mode;
-    outcome.battery_bridge_kw = applied.battery_bridge_kw;
+    outcome.bridge_kw_by_asset = applied.bridge_kw_by_asset;
     let moved_ids: Vec<String> = setpoints.keys().cloned().collect();
     outcome.adjusted_kw_by_asset =
         super::release::setpoint_shift_kw(setpoints, moved_ids.iter().map(String::as_str), |id| {

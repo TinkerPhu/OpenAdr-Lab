@@ -6,47 +6,26 @@ use std::collections::HashMap;
 
 use crate::controller::SimSnapshot;
 
-/// While a DISPATCH_SETPOINT window is active, steer the battery so net site
-/// power hits the commanded setpoint, overriding the plan's battery allocation
-/// (other assets keep their planned setpoints; the plan keeps running
-/// underneath and resumes when the window ends).
+/// While a DISPATCH_SETPOINT window is active, steer the storage levers so net site
+/// power hits the commanded setpoint (`arbiter::meet_dispatch_setpoint`), overriding the
+/// plan's storage allocation (other assets keep their planned setpoints; the plan keeps
+/// running underneath and resumes when the window ends).
 /// Precedence (recorded decision): an active alert window wins - safety over
 /// instruction - so the override is skipped entirely while one is active.
 pub(crate) fn apply_dispatch_override(
     sp: &mut HashMap<String, f64>,
-    sim_snap: &SimSnapshot,
+    tick: &crate::controller::arbiter::ArbiterTick,
     now: DateTime<Utc>,
     dispatch_windows: &[crate::entities::capacity::DispatchWindow],
     alert_windows: &[crate::entities::capacity::AlertWindow],
-    live_pv_kw: Option<f64>,
-    live_base_load_kw: Option<f64>,
 ) {
     use lab_core::time_window::{any_covering, covering};
     if any_covering(alert_windows, now) {
         return;
     }
-    let Some(win) = covering(dispatch_windows, now) else {
-        return;
-    };
-    let Some(bat) = sim_snap.assets.get(crate::ids::ASSET_BATTERY) else {
-        return; // no dispatchable actuator - nothing to steer with
-    };
-
-    // Net site power without the battery — the arbiter's own projection
-    // (live PV/base load for this tick, forced power, heater stages), so the
-    // override and the limit pass that may follow it agree on the site.
-    let net_without_battery = crate::controller::arbiter::projected_net_kw_except(
-        sim_snap,
-        sp,
-        live_pv_kw,
-        live_base_load_kw,
-        &[crate::ids::ASSET_BATTERY],
-    );
-
-    // battery > 0 = charging (adds import). Clamp to live capability.
-    let wanted_bat_kw = win.setpoint_kw - net_without_battery;
-    let clamped = wanted_bat_kw.clamp(bat.cap_max_export_kw, bat.cap_max_import_kw);
-    sp.insert(crate::ids::ASSET_BATTERY.to_string(), clamped);
+    if let Some(win) = covering(dispatch_windows, now) {
+        crate::controller::arbiter::meet_dispatch_setpoint(tick, sp, win.setpoint_kw);
+    }
 }
 
 /// R-59 fail-safe: once VTN comms-loss has been confirmed for the profile's
@@ -81,34 +60,24 @@ pub(crate) fn comms_loss_setpoint_bounds_kw(
         return Default::default();
     };
     let pct = cl.max_power_pct;
-    [
-        (crate::ids::ASSET_EV, "max_charge_kw", None),
-        (crate::ids::ASSET_HEATER, "max_kw", None),
-        (
-            crate::ids::ASSET_BATTERY,
-            "max_charge_kw",
-            Some("max_discharge_kw"),
-        ),
-    ]
-    .into_iter()
-    .filter_map(|(asset_id, import_key, export_key)| {
-        let snap = sim_snap.assets.get(asset_id)?;
-        let max_charge = snap.val(import_key).unwrap_or(f64::MAX);
-        let max_discharge = export_key.and_then(|k| snap.val(k)).unwrap_or(0.0);
-        // Positive = charge/import, negative = discharge/export.
-        Some((
-            asset_id.to_string(),
-            (-(pct * max_discharge), pct * max_charge),
-        ))
-    })
-    .collect()
+    // Every asset that offers a lever is controllable; each is capped at `pct` of its own
+    // rated range, both ways (positive = charge/import, negative = discharge/export).
+    sim_snap
+        .assets
+        .iter()
+        .filter_map(|(asset_id, snap)| {
+            let lever = snap.arbiter_lever?;
+            let bounds_kw = (-(pct * lever.rated_export_kw), pct * lever.rated_import_kw);
+            Some((asset_id.clone(), bounds_kw))
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod dispatch_override_tests {
     use super::*;
     use crate::controller::sim_snapshot::{AssetSnapshot, GridSnapshot};
-    use crate::entities::asset::SetpointResponse;
+    use crate::entities::asset::{ArbiterLever, ArbiterLeverKind, SetpointResponse};
     use crate::entities::capacity::{AlertWindow, DispatchWindow};
     use chrono::TimeZone;
 
@@ -133,6 +102,8 @@ mod dispatch_override_tests {
             embodied_co2_g_kwh: None,
             emergency_what_ifs: None,
             ac_ceiling_kw: None,
+            arbiter_lever: None,
+            roster_index: 0,
         }
     }
 
@@ -194,7 +165,9 @@ mod dispatch_override_tests {
     fn make_sim() -> SimSnapshot {
         let mut assets = std::collections::HashMap::new();
         assets.insert("base_load".to_string(), snap_asset(0.5, 0.5, 0.5));
-        assets.insert("battery".to_string(), snap_asset(0.0, 5.0, -5.0));
+        let mut battery = snap_asset(0.0, 5.0, -5.0);
+        battery.arbiter_lever = lever_snap(0.0, ArbiterLeverKind::Storage, 5.0, 5.0).arbiter_lever;
+        assets.insert("battery".to_string(), battery);
         SimSnapshot {
             ts: ts(0),
             grid: GridSnapshot {
@@ -207,6 +180,32 @@ mod dispatch_override_tests {
             },
             assets,
         }
+    }
+
+    /// The override as the tick runs it, without a plan.
+    fn dispatch(
+        sp: &mut HashMap<String, f64>,
+        sim: &SimSnapshot,
+        now: DateTime<Utc>,
+        windows: &[DispatchWindow],
+        alerts: &[AlertWindow],
+        live_pv_kw: Option<f64>,
+        live_base_load_kw: Option<f64>,
+    ) {
+        use crate::controller::arbiter::test_ticks;
+        let tick = crate::controller::arbiter::ArbiterTick {
+            sim,
+            plan_slot: None,
+            objective: crate::entities::planner_params::PlannerObjective::MinCost,
+            ev_overlay: test_ticks::ev_on(),
+            live_pv_kw,
+            live_pv_released_kw: None,
+            live_base_load_kw,
+            alert_active: false,
+            limit_target_kw: None,
+            prev_bridge_kw_by_asset: test_ticks::no_bridge(),
+        };
+        apply_dispatch_override(sp, &tick, now, windows, alerts);
     }
 
     fn win(setpoint_kw: f64) -> DispatchWindow {
@@ -222,7 +221,7 @@ mod dispatch_override_tests {
     fn test_apply_dispatch_override_steers_battery_to_site_setpoint() {
         let sim = make_sim();
         let mut sp = HashMap::from([("base_load".to_string(), 0.5)]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
+        dispatch(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
         // site = base 0.5 + battery -> battery must charge 1.5 kW to hit 2.0.
         assert!((sp["battery"] - 1.5).abs() < 1e-9);
     }
@@ -231,7 +230,7 @@ mod dispatch_override_tests {
     fn apply_dispatch_override_uses_this_ticks_live_base_load() {
         let sim = make_sim();
         let mut sp = HashMap::from([("base_load".to_string(), 0.5)]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, Some(1.2));
+        dispatch(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, Some(1.2));
         // net w/o battery = live base load 1.2 → battery charges 0.8, not 1.5.
         assert!((sp["battery"] - 0.8).abs() < 1e-9, "got {}", sp["battery"]);
     }
@@ -246,7 +245,7 @@ mod dispatch_override_tests {
             ("base_load".to_string(), 0.5),
             ("pv".to_string(), f64::MAX), // uncontrollable sentinel
         ]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], Some(-3.0), None);
+        dispatch(&mut sp, &sim, ts(60), &[win(2.0)], &[], Some(-3.0), None);
         // net w/o battery = base 0.5 + live PV −3.0 = −2.5 → battery charges 4.5.
         assert!(
             (sp["battery"] - 4.5).abs() < 1e-9,
@@ -261,7 +260,7 @@ mod dispatch_override_tests {
         sim.assets
             .insert("pv".to_string(), snap_asset(0.0, 0.0, 8.0));
         let mut sp = HashMap::from([("base_load".to_string(), 0.5), ("pv".to_string(), f64::MAX)]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
+        dispatch(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
         // net w/o battery = base 0.5 + stale PV 0.0 → battery charges 1.5.
         assert!((sp["battery"] - 1.5).abs() < 1e-9);
     }
@@ -270,9 +269,9 @@ mod dispatch_override_tests {
     fn test_apply_dispatch_override_clamps_to_battery_capability() {
         let sim = make_sim();
         let mut sp = HashMap::from([("base_load".to_string(), 0.5)]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(20.0)], &[], None, None);
+        dispatch(&mut sp, &sim, ts(60), &[win(20.0)], &[], None, None);
         assert!((sp["battery"] - 5.0).abs() < 1e-9, "clamped at max charge");
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(-20.0)], &[], None, None);
+        dispatch(&mut sp, &sim, ts(60), &[win(-20.0)], &[], None, None);
         assert!(
             (sp["battery"] - (-5.0)).abs() < 1e-9,
             "clamped at max discharge"
@@ -290,7 +289,7 @@ mod dispatch_override_tests {
             event_id: "a1".into(),
             message: String::new(),
         };
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[alert], None, None);
+        dispatch(&mut sp, &sim, ts(60), &[win(2.0)], &[alert], None, None);
         assert!(
             !sp.contains_key("battery"),
             "override skipped while alert active"
@@ -307,7 +306,7 @@ mod dispatch_override_tests {
         let mut sim = make_sim();
         sim.assets.insert("pv".to_string(), pv_snap(-2.0));
         let mut sp = HashMap::from([("base_load".to_string(), 0.5), ("pv".to_string(), f64::MAX)]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
+        dispatch(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
         // net without battery = 0.5 + (-2.0 live PV) = -1.5 -> battery 3.5.
         assert!((sp["battery"] - 3.5).abs() < 1e-9);
     }
@@ -328,7 +327,7 @@ mod dispatch_override_tests {
             ("base_load".to_string(), 0.5),
             ("heater".to_string(), 0.0), // dispatcher committed 0; hysteresis overrides it
         ]);
-        apply_dispatch_override(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
+        dispatch(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
         // net w/o battery = base 0.5 + forced heater 3.0 = 3.5 -> battery must
         // discharge 1.5 kW (charge = -1.5) to still hit the 2.0 kW site target.
         assert!(
@@ -342,15 +341,25 @@ mod dispatch_override_tests {
     fn test_apply_dispatch_override_inactive_outside_window() {
         let sim = make_sim();
         let mut sp = HashMap::from([("base_load".to_string(), 0.5)]);
-        apply_dispatch_override(&mut sp, &sim, ts(700), &[win(2.0)], &[], None, None);
+        dispatch(&mut sp, &sim, ts(700), &[win(2.0)], &[], None, None);
         assert!(!sp.contains_key("battery"), "window ended - no override");
     }
 
     // ── apply_comms_loss_clamp (R-59) ────────────────────────────────────────
 
-    fn snap_asset_with_values(power_kw: f64, values: &[(&str, f64)]) -> AssetSnapshot {
+    /// An asset declaring `kind` with its rated range — what the comms-loss clamp reads.
+    fn lever_snap(
+        power_kw: f64,
+        kind: ArbiterLeverKind,
+        rated_import_kw: f64,
+        rated_export_kw: f64,
+    ) -> AssetSnapshot {
         let mut snap = snap_asset(power_kw, f64::MAX, -f64::MAX);
-        snap.values = values.iter().map(|(k, v)| (k.to_string(), *v)).collect();
+        snap.arbiter_lever = Some(ArbiterLever {
+            kind,
+            rated_import_kw,
+            rated_export_kw,
+        });
         snap
     }
 
@@ -369,7 +378,7 @@ mod dispatch_override_tests {
         let mut sim = make_sim();
         sim.assets.insert(
             "ev".to_string(),
-            snap_asset_with_values(10.0, &[("max_charge_kw", 7.4)]),
+            lever_snap(10.0, ArbiterLeverKind::SurplusCharge, 7.4, 0.0),
         );
         let mut sp = HashMap::from([("ev".to_string(), 7.4)]);
         apply_comms_loss_clamp(&mut sp, &sim, None);
@@ -381,7 +390,7 @@ mod dispatch_override_tests {
         let mut sim = make_sim();
         sim.assets.insert(
             "ev".to_string(),
-            snap_asset_with_values(10.0, &[("max_charge_kw", 7.4)]),
+            lever_snap(10.0, ArbiterLeverKind::SurplusCharge, 7.4, 0.0),
         );
         let mut sp = HashMap::from([("ev".to_string(), 7.4)]);
         apply_comms_loss_clamp(&mut sp, &sim, comms_loss(false, 0.7));
@@ -393,7 +402,7 @@ mod dispatch_override_tests {
         let mut sim = make_sim();
         sim.assets.insert(
             "ev".to_string(),
-            snap_asset_with_values(10.0, &[("max_charge_kw", 7.4)]),
+            lever_snap(10.0, ArbiterLeverKind::SurplusCharge, 7.4, 0.0),
         );
         let mut sp = HashMap::from([("ev".to_string(), 7.4)]);
         apply_comms_loss_clamp(&mut sp, &sim, comms_loss(true, 0.5));
@@ -405,7 +414,7 @@ mod dispatch_override_tests {
         let mut sim = make_sim();
         sim.assets.insert(
             "heater".to_string(),
-            snap_asset_with_values(6.0, &[("max_kw", 6.0)]),
+            lever_snap(6.0, ArbiterLeverKind::PausableLoad, 6.0, 0.0),
         );
         let mut sp = HashMap::from([("heater".to_string(), 6.0)]);
         apply_comms_loss_clamp(&mut sp, &sim, comms_loss(true, 0.7));
@@ -417,7 +426,7 @@ mod dispatch_override_tests {
         let mut sim = make_sim(); // already has "battery" with cap_max_import/export, override values
         sim.assets.insert(
             "battery".to_string(),
-            snap_asset_with_values(0.0, &[("max_charge_kw", 5.0), ("max_discharge_kw", 5.0)]),
+            lever_snap(0.0, ArbiterLeverKind::Storage, 5.0, 5.0),
         );
         let mut sp = HashMap::from([("battery".to_string(), 5.0)]);
         apply_comms_loss_clamp(&mut sp, &sim, comms_loss(true, 0.6));
@@ -441,7 +450,7 @@ mod dispatch_override_tests {
         let mut sim = make_sim();
         sim.assets.insert(
             "ev".to_string(),
-            snap_asset_with_values(10.0, &[("max_charge_kw", 7.4)]),
+            lever_snap(10.0, ArbiterLeverKind::SurplusCharge, 7.4, 0.0),
         );
         let mut sp = HashMap::from([("ev".to_string(), 1.0)]);
         apply_comms_loss_clamp(&mut sp, &sim, comms_loss(true, 0.7));
@@ -453,10 +462,35 @@ mod dispatch_override_tests {
         let mut sim = make_sim();
         sim.assets.insert(
             "ev".to_string(),
-            snap_asset_with_values(10.0, &[("max_charge_kw", 7.4)]),
+            lever_snap(10.0, ArbiterLeverKind::SurplusCharge, 7.4, 0.0),
         );
         let mut sp = HashMap::new(); // ev has no setpoint entry this tick
         apply_comms_loss_clamp(&mut sp, &sim, comms_loss(true, 0.5));
         assert!(!sp.contains_key("ev"));
+    }
+
+    /// W5a: the window is met by whichever asset declares storage, whatever its id.
+    #[test]
+    fn dispatch_steers_a_battery_named_otherwise() {
+        let mut sim = make_sim();
+        let battery = sim.assets.remove("battery").unwrap();
+        sim.assets.insert("home-battery".to_string(), battery);
+        let mut sp = HashMap::from([("base_load".to_string(), 0.5)]);
+        dispatch(&mut sp, &sim, ts(60), &[win(2.0)], &[], None, None);
+        assert!((sp["home-battery"] - 1.5).abs() < 1e-9, "got {sp:?}");
+    }
+
+    /// W5a: every asset declaring a lever is clamped, a second EV included.
+    #[test]
+    fn apply_comms_loss_clamp_caps_every_ev() {
+        let mut sim = make_sim();
+        for id in ["ev-a", "ev-b"] {
+            let ev = lever_snap(10.0, ArbiterLeverKind::SurplusCharge, 7.4, 0.0);
+            sim.assets.insert(id.to_string(), ev);
+        }
+        let mut sp = HashMap::from([("ev-a".to_string(), 7.4), ("ev-b".to_string(), 7.4)]);
+        apply_comms_loss_clamp(&mut sp, &sim, comms_loss(true, 0.5));
+        assert!((sp["ev-a"] - 3.7).abs() < 1e-9, "got {sp:?}");
+        assert!((sp["ev-b"] - 3.7).abs() < 1e-9, "got {sp:?}");
     }
 }

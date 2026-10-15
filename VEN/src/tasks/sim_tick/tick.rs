@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::controller::arbiter::heater_emergency_modes;
 use crate::controller::{MeasurementPort, WeatherForecastPort};
 use crate::entities::asset::PlanTriggerSignal;
 use crate::entities::asset_params::PvForecastParams;
@@ -105,11 +106,8 @@ pub(crate) async fn tick_once(
             ctx.comms_loss,
         );
 
-        let (heater_emergency_curtail, heater_emergency_absorb) =
-            super::arbiter_glue::resolve_heater_emergency_mode(
-                &ctx.inject,
-                outcome.heater_emergency_mode,
-            );
+        let heater_emergency_by_asset =
+            heater_emergency_modes(&ctx.inject, &outcome.heater_emergency_mode, &pre_snap);
 
         sim_guard.tick(crate::simulator::TickInputs {
             pv_irradiance_override: ctx.inject.pv_irradiance,
@@ -122,8 +120,7 @@ pub(crate) async fn tick_once(
             ambient_temp_c_override: ctx.inject.ambient_temp_c,
             heater_temp_min_override: ctx.inject.heater_temp_min_c,
             heater_temp_max_override: ctx.inject.heater_temp_max_c,
-            heater_emergency_curtail_override: heater_emergency_curtail,
-            heater_emergency_absorb_override: heater_emergency_absorb,
+            heater_emergency_by_asset,
             base_load_kw_override: ctx.inject.base_load_kw,
             base_load_alpha: ctx.inject.base_load_alpha,
             base_load_measured_kw: ctx.base_load_measured_kw_now,
@@ -131,7 +128,7 @@ pub(crate) async fn tick_once(
             base_load_heuristic: ctx.base_load_heuristic.clone(),
             ev_plugged_override: ctx.inject.ev_plugged,
             ev_soc_target_override: ctx.inject.ev_soc_target,
-            ev_departure_time: ctx.ev_session.as_ref().map(|s| s.departure_time),
+            ev_departure_by_asset: ctx.ev_departure_by_asset.clone(),
             ..crate::simulator::TickInputs::new(dt_s, now, std::mem::take(&mut outcome.setpoints))
         });
 

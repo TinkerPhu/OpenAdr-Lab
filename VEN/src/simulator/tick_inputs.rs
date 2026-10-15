@@ -35,8 +35,9 @@ pub struct TickInputs {
     pub ambient_temp_c_override: Option<f64>,
     pub heater_temp_min_override: Option<f64>,
     pub heater_temp_max_override: Option<f64>,
-    pub heater_emergency_curtail_override: Option<bool>,
-    pub heater_emergency_absorb_override: Option<bool>,
+    /// `(curtail, absorb)` emergency-mode overrides per heater id (the arbiter's or an
+    /// inject's); a heater without an entry follows its thermostat.
+    pub heater_emergency_by_asset: HashMap<String, (Option<bool>, Option<bool>)>,
 
     // Base load
     pub base_load_kw_override: Option<f64>,
@@ -48,7 +49,8 @@ pub struct TickInputs {
     // EV
     pub ev_plugged_override: Option<bool>,
     pub ev_soc_target_override: Option<f64>,
-    pub ev_departure_time: Option<DateTime<Utc>>,
+    /// The departure of the session governing each EV now, by EV id.
+    pub ev_departure_by_asset: HashMap<String, DateTime<Utc>>,
 }
 
 impl TickInputs {
@@ -80,8 +82,7 @@ impl TickInputs {
             ambient_temp_c_override: None,
             heater_temp_min_override: None,
             heater_temp_max_override: None,
-            heater_emergency_curtail_override: None,
-            heater_emergency_absorb_override: None,
+            heater_emergency_by_asset: HashMap::new(),
             base_load_kw_override: None,
             base_load_alpha: DEFAULT_BASE_LOAD_ALPHA,
             base_load_measured_kw: None,
@@ -89,7 +90,7 @@ impl TickInputs {
             base_load_heuristic: None,
             ev_plugged_override: None,
             ev_soc_target_override: None,
-            ev_departure_time: None,
+            ev_departure_by_asset: HashMap::new(),
         }
     }
 }

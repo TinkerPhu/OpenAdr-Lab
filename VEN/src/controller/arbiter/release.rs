@@ -1,6 +1,6 @@
 //! R-88: when a held correction is released, and how much it has displaced from plan.
 //!
-//! The deviation pass carries the battery's and EV's last applied setpoint forward as next
+//! The deviation pass carries each storage asset's and EV's last applied setpoint forward as next
 //! tick's baseline — otherwise every quiet tick would snap them back to plan and recreate the
 //! deviation they just cancelled. That makes a correction state the arbiter holds, so it needs
 //! an explicit end: it is released, all at once, on the first tick where putting the carried
@@ -8,21 +8,28 @@
 
 use std::collections::HashMap;
 
-use super::arbiter_levers::current_setpoint_kw;
+use super::arbiter_levers::{current_setpoint_kw, lever_kind_of, LeverId};
 use super::{deviation_kw, projected_net_kw_except, ArbiterTick};
+use crate::controller::SimSnapshot;
+use crate::entities::asset::ArbiterLeverKind;
 use crate::entities::plan::PlanTimeSlot;
 
-/// The levers whose setpoint the deviation pass carries from tick to tick — the only state a
-/// correction holds. Their ids double as the lever ids `apply_ranked_levers` reports.
-pub(super) const CARRIED_LEVERS: [&str; 2] = [crate::ids::ASSET_BATTERY, crate::ids::ASSET_EV];
+/// The assets whose setpoint the deviation pass carries from tick to tick — the only state a
+/// correction holds: every storage asset, then every EV, each in roster order.
+pub(super) fn carried_ids(sim: &SimSnapshot) -> Vec<&str> {
+    let mut ids = sim.lever_asset_ids(&[ArbiterLeverKind::Storage]);
+    ids.extend(sim.lever_asset_ids(&[ArbiterLeverKind::SurplusCharge]));
+    ids
+}
 
 /// `setpoints` with every carried lever put back at its plan value from `plan_setpoints`.
 pub(super) fn at_plan(
     setpoints: &HashMap<String, f64>,
     plan_setpoints: &HashMap<String, f64>,
+    sim: &SimSnapshot,
 ) -> HashMap<String, f64> {
     let mut released = setpoints.clone();
-    for id in CARRIED_LEVERS {
+    for id in carried_ids(sim) {
         if let Some(&plan_kw) = plan_setpoints.get(id) {
             released.insert(id.to_string(), plan_kw);
         }
@@ -46,14 +53,13 @@ pub(super) fn deviation_without_correction_kw(
     // arbiter holds, carried through the inverter's generation limit instead of a setpoint.
     let live_pv_kw = tick.live_pv_released_kw.or(tick.live_pv_kw);
     let (sim, live_base_kw) = (tick.sim, tick.live_base_load_kw);
-    let others_kw =
-        projected_net_kw_except(sim, setpoints, live_pv_kw, live_base_kw, &CARRIED_LEVERS);
-    let released = at_plan(setpoints, plan_setpoints);
-    let levers_at_plan_kw: f64 = CARRIED_LEVERS
+    let carried = carried_ids(sim);
+    let others_kw = projected_net_kw_except(sim, setpoints, live_pv_kw, live_base_kw, &carried);
+    let released = at_plan(setpoints, plan_setpoints, sim);
+    let levers_at_plan_kw: f64 = carried
         .iter()
-        .filter_map(|id| {
-            let snap = sim.assets.get(*id)?;
-            Some(snap.power_when_command_lands_kw(current_setpoint_kw(&released, sim, id)))
+        .map(|id| {
+            sim.assets[*id].power_when_command_lands_kw(current_setpoint_kw(&released, sim, id))
         })
         .sum();
     deviation_kw(slot, others_kw + levers_at_plan_kw, tick.limit_target_kw)
@@ -79,15 +85,21 @@ pub(crate) fn setpoint_shift_kw<'a>(
 pub(super) fn displaced_from_plan_kw(
     setpoints: &HashMap<String, f64>,
     plan_setpoints: &HashMap<String, f64>,
+    sim: &SimSnapshot,
 ) -> HashMap<String, f64> {
-    setpoint_shift_kw(setpoints, CARRIED_LEVERS, |id| {
+    setpoint_shift_kw(setpoints, carried_ids(sim), |id| {
         plan_setpoints.get(id).copied().unwrap_or(0.0)
     })
 }
 
 /// The lever a held correction is held by: the first carried lever still off-plan.
-pub(super) fn holding_lever(displaced_kw: &HashMap<String, f64>) -> Option<&'static str> {
-    CARRIED_LEVERS
+pub(super) fn holding_lever(
+    displaced_kw: &HashMap<String, f64>,
+    sim: &SimSnapshot,
+) -> Option<String> {
+    let id = carried_ids(sim)
         .into_iter()
-        .find(|id| displaced_kw.contains_key(*id))
+        .find(|id| displaced_kw.contains_key(*id))?;
+    let kind = sim.assets[id].arbiter_lever?.kind;
+    Some(LeverId::of_asset(lever_kind_of(kind), id).key())
 }
