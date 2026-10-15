@@ -63,7 +63,7 @@ pub(crate) struct LeverPolicy {
     pub(crate) admits: &'static [&'static str],
 }
 
-/// Every lever kind, in the precedence that breaks a cost tie between kinds.
+/// Every lever kind (the tie-break precedence between kinds is `lever_candidates`' build order).
 pub(crate) const ALL_LEVERS: &[&str] = &[
     LEVER_BATTERY,
     LEVER_EV,
@@ -113,7 +113,8 @@ pub(crate) struct AppliedLevers {
     pub(crate) bridge_kw_by_asset: HashMap<String, f64>,
 }
 
-/// Every lever this tick offers, in candidate order: lever-kind precedence (`ALL_LEVERS`),
+/// Every lever this tick offers, in candidate order: lever-kind precedence (storage, EV,
+/// heater pause, emergency, PV — the order below),
 /// then roster order. One lever per asset that declares it; the emergency lever is offered
 /// by every asset answering the emergency what-ifs, PV curtailment by the site.
 fn lever_candidates(
