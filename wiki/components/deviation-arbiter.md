@@ -4,7 +4,7 @@ type: component
 created: 2026-07-28
 updated: 2026-10-15
 synced_commit: dfdb62b
-sources: [VEN/src/controller/arbiter.rs, VEN/src/controller/arbiter/arbiter_levers.rs, VEN/src/entities/arbiter_residual.rs, VEN/src/tasks/sim_tick/arbiter_glue.rs, VEN/src/tasks/sim_tick/tick.rs, VEN/src/state/arbiter.rs, VEN/src/routes/hems/arbiter.rs, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_milp_planner.md, docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md, docs/reference/KEY_LEARNINGS.md, docs/history/project_journal.md]
+sources: [VEN/src/controller/arbiter.rs, VEN/src/controller/arbiter/, VEN/src/entities/arbiter_residual.rs, VEN/src/tasks/sim_tick/arbiter_glue.rs, VEN/src/tasks/sim_tick/tick.rs, VEN/src/state/arbiter.rs, VEN/src/routes/hems/arbiter.rs, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_milp_planner.md, docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md, docs/reference/KEY_LEARNINGS.md, docs/history/project_journal.md]
 tags: [arbiter, deviation, real-time, marginal-cost, ven]
 ---
 
@@ -19,6 +19,14 @@ current marginal €/kWh, and greedily consumes the tick's `deviation_kw` cheape
 respecting each lever's remaining capacity (an EV already at target SoC or a battery at its
 SoC limit contributes zero, not merely low priority) — `docs/architecture/VEN_ARCHITECTURE.md`
 §2.1.
+
+Since W5a (`bdc6236c`) a lever belongs to the asset that declares it (`Asset::arbiter_lever`,
+`entities/asset.rs::ArbiterLeverKind`), not to a fixed asset id: two batteries are two levers,
+ranked like any others, with a cost tie broken by lever-kind precedence and then roster order
+(`VEN/src/controller/arbiter/ranked.rs`). Diagnostics name a lever `<kind>:<asset_id>`, EVs each have
+their own overlay, and the [[simulator]] receives the heater emergency mode and the EV departure per
+asset. The dispatch override and the comms-loss clamp use the same declarations
+(`controller/arbiter/dispatch.rs`, `tasks/sim_tick/dispatch_override.rs`) — see [[asset-layer]].
 
 ## Why a single arbiter, not another reactive loop
 

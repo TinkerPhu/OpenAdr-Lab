@@ -15752,3 +15752,34 @@ overlay off for an EV without a record, so `Default` is now the one rule. The ro
 heater-target test literal became one fixture. A `cargo check` was chained with `;` after a WSL lock
 acquire that timed out, so it ran for two minutes beside another session's clippy; builds since are
 gated with `&&`.
+
+## W5a: arbiter levers per asset (refactor/arbiter-levers-per-asset)
+
+**What.** Each asset declares the arbiter lever it offers (`Asset::arbiter_lever`: storage,
+surplus charging, pausable load, with its rated range), carried on `AssetSnapshot` with its roster
+position. The arbiter builds one lever per declaring asset (`controller/arbiter/ranked.rs`), ranks
+them by marginal cost with ties by lever-kind precedence then roster order, and reports a lever as
+`<kind>:<asset_id>`. Carried levers, release and the lag bridge run per storage/EV asset; each EV
+has its own overlay; the heater emergency mode and an EV's departure reach the simulator per asset;
+a VTN dispatch window is met by the ranked storage levers; the comms-loss fail-safe clamps every
+lever asset to its share of its declared rated range. Fixed-id lookups: 77 -> 43 (the rest, PV and
+base-load plumbing, is W5b).
+
+**Why.** W1-W4 let the planner plan a second battery, EV or heater; real-time control still steered
+one asset per kind by its fixed id, so a second one was never a lever, never clamped on comms loss
+and never offered a surplus.
+
+**Decisions (user, 2026-10-15).** D1 rank per asset, ties by roster order; D2 dispatch through the
+ranked storage levers; D3 opportunistic surplus in roster order; D4 generic comms-loss clamp; D5
+PV/base load multi-instance (W5b); D6 two branches.
+
+**How it was proven.** The existing arbiter, limit, dispatch and tick tests pass unchanged apart
+from lever names (single-asset parity), plus new tests for each spec scenario; BDD: the limit
+pass's lever names an asset of the roster.
+
+**Issues.** Candidate order is the tie-break of a stable cost sort, so building candidates in pure
+roster order would have changed which of two equal-cost levers (EV vs heater pause, both 0 EUR/kWh)
+acts on a one-asset site; candidates are built kind by kind in the old order, then by roster. The
+first opportunistic loop dropped every EV from the projection, including one the plan allocates;
+only the EVs the overlay may steer leave it now. The comms-loss clamp now also bounds a V2G EV's
+discharge (declared rated export), which the id table left at 0.
