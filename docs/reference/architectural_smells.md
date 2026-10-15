@@ -59,10 +59,10 @@ duplication), R-125 (SoC names without a unit). R-121 (`ui-charts/` held more th
   fact is keyed by asset id, and `Plan.planned_asset_ids` names the assets a plan scheduled
   (audit rule 16 covers `entities/plan.rs`). What remains is the rest of the way: PV and base
   load as single site series (`baseline_kw`, `pv_forecast_kw`, `pv_used_kw`), sessions, the
-  arbiter and the UI, and the places that look an asset up by its fixed id. Lifting that is a
-  different product, beyond what an OpenADR lab needs. A VEN has at most one asset of each kind
-  (shiftable loads excepted), and the one-PV plan fields are that boundary written down, not a
-  debt. Do not re-file.
-  The boundary is enforced: `profile::validate` refuses a profile with two assets of a kind
-  (`validate_asset_roster`), which before 2026-10-10 loaded and was silently mis-planned.
+  arbiter and the UI, and the places that look an asset up by its fixed id.
+  **Reversed (2026-10-15, user decision, W2-W7):** that rest was done — PV and base load are
+  per-asset forecast participants with their own weather and measurement, sessions and settings
+  are per asset, the arbiter's levers, the dispatch override and the comms-loss clamp act on every
+  declaring asset, the UI renders every asset, and `profile::validate` now refuses a repeated
+  asset id instead of a second asset of a kind. A VEN may hold several assets of one kind.
 - Decided: #8 delete `SimulatorPort` (tasks call `to_sim_snapshot()` directly; done 2026-10-12, `refactor/delete-simulator-port` — the earlier note that `docs/register-cleanup` had done it was wrong); #9 ts-rs, incrementally (R-133).

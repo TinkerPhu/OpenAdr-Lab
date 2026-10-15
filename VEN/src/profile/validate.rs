@@ -373,13 +373,6 @@ impl Profile {
     }
 }
 
-/// The checks one heater block must pass: its power stages, its thermostat deadband and its
-/// declared request default (R-112).
-/// At least one asset, and at most one of each kind. The planner has one slot per kind (one battery, EV
-/// and heater in the MILP, one PV and one base-load series), so a second one would not be an error
-/// there, only silently wrong; several assets of one kind are outside this project's scope
-/// (`docs/reference/architectural_smells.md`). Shiftable loads are not profile assets and are
-/// not limited here.
 /// The site-level `weather_pv:` and `measurements:` sections moved into the assets (W5b): a
 /// profile that still has them is refused with the place to move them to, never read as if
 /// they were absent.
@@ -398,9 +391,11 @@ fn validate_retired_sections(profile: &Profile, errors: &mut Vec<String>) {
     }
 }
 
-/// The roster: at least one asset, at most one of each kind, at most one measured PV and
-/// one measured base load (the MQTT transport has one topic each), and none of the retired
-/// site-level feed sections.
+/// The roster: at least one asset, every asset id unique (two EVs that omit their ids would both
+/// default to `ev`; every route, plan and history row keys an asset by its id), at most one
+/// measured PV and one measured base load (the MQTT transport has one topic each), and none of
+/// the retired site-level feed sections. Several assets of one kind are planned, controlled and
+/// shown each under its own id (W1-W7), so their number is not limited.
 fn validate_asset_roster(profile: &Profile, errors: &mut Vec<String>) {
     validate_retired_sections(profile, errors);
     let assets = &profile.assets;
@@ -424,24 +419,19 @@ fn validate_asset_roster(profile: &Profile, errors: &mut Vec<String>) {
             ));
         }
     }
-    let kind = |a: &AssetProfile| match a {
-        AssetProfile::Ev(_) => "ev",
-        AssetProfile::Heater(_) => "heater",
-        AssetProfile::Pv(_) => "pv",
-        AssetProfile::Battery(_) => "battery",
-        AssetProfile::BaseLoad(_) => "base_load",
-    };
-    let mut count: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    let mut count: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     for asset in assets {
-        *count.entry(kind(asset)).or_default() += 1;
+        *count.entry(asset.to_params().id().to_string()).or_default() += 1;
     }
-    for (kind, n) in count.into_iter().filter(|(_, n)| *n > 1) {
+    for (id, n) in count.into_iter().filter(|(_, n)| *n > 1) {
         errors.push(format!(
-            "assets: at most one '{kind}' per VEN, found {n} (several assets of one kind are not supported)"
+            "assets: the id '{id}' is used by {n} assets; give each asset its own `id`"
         ));
     }
 }
 
+/// The checks one heater block must pass: its power stages, its thermostat deadband and its
+/// declared request default (R-112).
 fn validate_heater(h: &HeaterConfig, errors: &mut Vec<String>) {
     if !(1..=2).contains(&h.power_stages) {
         errors.push(format!(
@@ -624,41 +614,37 @@ spikes:
         .expect("test profile parses")
     }
 
-    /// A VEN has at most one asset of each kind: the planner has one slot per kind, so a second
-    /// battery (or PV, EV, heater, base load) would be silently mis-planned. Refused at start-up.
+    /// W7: several assets of one kind are planned, controlled and shown each under its own id,
+    /// so a profile may hold two arrays and two EVs.
     #[test]
-    fn validate_rejects_two_assets_of_one_kind() {
+    fn validate_accepts_two_assets_of_one_kind_with_their_own_ids() {
         let profile = profile_with_assets(
-            "  - {type: base_load, id: base_load}
-  - {type: base_load, id: base_load_2}
+            "  - {type: pv, id: pv-east}
+  - {type: pv, id: pv-west}
+  - {type: ev, id: car-a}
+  - {type: ev, id: car-b}
+  - {type: base_load, id: base_load}
 ",
         );
-        let errors = profile.validate().unwrap_err();
-        assert!(
-            errors
-                .iter()
-                .any(|e| e.contains("at most one") && e.contains("base_load")),
-            "got {errors:?}"
-        );
+        assert!(profile.validate().is_ok(), "{:?}", profile.validate());
     }
 
+    /// Every route, plan and history row keys an asset by its id: two EVs that omit their ids
+    /// would both default to `ev`. Refused, naming the id once.
     #[test]
-    fn validate_names_every_duplicated_kind_once() {
+    fn validate_rejects_an_id_used_twice() {
         let profile = profile_with_assets(
-            "  - {type: base_load, id: a}
-  - {type: base_load, id: b}
-  - {type: base_load, id: c}
-  - {type: pv, id: east}
-  - {type: pv, id: west}
+            "  - {type: ev}
+  - {type: ev}
+  - {type: base_load, id: base_load}
 ",
         );
         let errors = profile.validate().unwrap_err();
         let dup: Vec<_> = errors
             .iter()
-            .filter(|e| e.contains("at most one"))
+            .filter(|e| e.contains("the id 'ev'"))
             .collect();
-        assert_eq!(dup.len(), 2, "one message per kind, got {errors:?}");
-        assert!(dup.iter().any(|e| e.contains("pv")), "got {errors:?}");
+        assert_eq!(dup.len(), 1, "one message per id, got {errors:?}");
     }
 
     #[test]

@@ -15835,3 +15835,20 @@ battery or EV would have been invisible (no card, no cost rates on its timeline)
 **Issues.** The Controller's tariff enrichment and grid-share computation ran over a fixed list of
 five ids, so a shiftable load's timeline never got cost rates; it now does. Two stacked charts
 each moved `pv` to the front by id, in two different orders; one rule (`stackOrder`) replaces both.
+
+## W7: several assets of one kind (refactor/multi-instance-profiles)
+
+**What.** Profile validation accepts several assets of one kind and refuses a repeated asset id
+instead (two EVs that omit their ids would both default to `ev`). A multi-asset test profile (two
+EVs, an east and a west array) runs in its own E2E VEN (`test-ven-multi`); a planner test plans it
+through the production context builder; `ven_multi_asset.feature` checks the listing, the per-array
+forecasts in the plan, a request for one EV becoming that EV's session, and one EV's setting
+leaving the other alone. The decision recorded in `architectural_smells.md` ("a VEN has at most one
+asset of each kind ... Do not re-file") is marked reversed.
+
+**Why.** W1-W6 made every layer per asset; the validation was the last gate. With it lifted, the
+multi-asset profile exercises them together end to end.
+
+**Issues.** The two tests that pinned the refusal of a second asset of a kind were replaced, not
+weakened: they tested the reversed decision; their successors pin acceptance and the new
+unique-id rule.

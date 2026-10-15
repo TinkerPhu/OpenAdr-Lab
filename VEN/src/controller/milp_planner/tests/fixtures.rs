@@ -270,3 +270,20 @@ pub(super) fn lossless_battery(
 ) -> BatteryMilpContext {
     battery_ctx(capacity_kwh, init_kwh, min_kwh, p_max_kw, 1.0)
 }
+
+/// Load a real profile (`VEN/profiles/<name>.yaml`) through the same translation `main.rs`
+/// uses.
+pub(super) fn fleet_profile(name: &str) -> Profile {
+    let yaml = std::fs::read_to_string(format!("profiles/{name}.yaml")).expect("profile");
+    let real: crate::profile::Profile = serde_yaml::from_str(&yaml).expect("parse");
+    real.validate().expect("the profile validates");
+    let (_, planner, assets) = crate::domain_params::build_domain_params(&real);
+    Profile {
+        assets,
+        planner,
+        grid: GridConfig {
+            max_import_kw: real.grid.max_import_kw,
+            max_export_kw: real.grid.max_export_kw,
+        },
+    }
+}

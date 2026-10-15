@@ -1,7 +1,7 @@
 //! Several assets of one kind in one plan. The planner core knows no asset kind, so two batteries
 //! or two EVs are planned like any two assets: each with its own variables, costs, readback and
-//! plan result, by its own id. (Profile validation still allows one asset per kind on a VEN;
-//! these tests hand the planner its contexts directly.)
+//! plan result, by its own id. Most tests hand the planner its contexts directly; the last plans
+//! the multi-asset test profile end to end, through the production context builder (W7).
 
 use super::*;
 use crate::controller::milp_interactions::{
@@ -73,6 +73,24 @@ fn session(id: u128, target_soc_frac: f64, departure: DateTime<Utc>) -> EvSessio
         origin: EvSessionOrigin::UserRequest,
         ..ev_session_until(now, target_soc_frac, departure)
     }
+}
+
+/// `ctxs` planned over `profile` at flat tariffs (0.25 / 0.08 EUR/kWh) with no capacity limit.
+fn plan_flat(
+    ctxs: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
+    profile: &Profile,
+    now: DateTime<Utc>,
+) -> Plan {
+    run_planner(
+        ctxs,
+        &make_tariffs(0.25, 0.08, 300.0),
+        &no_capacity(),
+        profile,
+        now,
+        PlanTrigger::Periodic,
+        None,
+        None,
+    )
 }
 
 /// Each asset's allocated power per slot [kW], 0.0 where it has no allocation.
@@ -293,16 +311,7 @@ fn two_pv_arrays_are_planned_as_one_site_forecast() {
     let mut ctxs = forecast_contexts(&profile, now, None);
     ctxs.insert(0, pv_array("pv-roof", 3.0, n));
     ctxs.insert(1, pv_array("pv-garage", 2.0, n));
-    let plan = run_planner(
-        ctxs,
-        &make_tariffs(0.25, 0.08, 300.0),
-        &no_capacity(),
-        &profile,
-        now,
-        PlanTrigger::Periodic,
-        None,
-        None,
-    );
+    let plan = plan_flat(ctxs, &profile, now);
     assert_eq!(
         plan.solve_status,
         crate::entities::plan::SolveStatus::Optimal
@@ -327,4 +336,65 @@ fn two_pv_arrays_are_planned_as_one_site_forecast() {
         );
         assert!(slot.allocations.is_empty() && slot.planned_kw_by_asset.is_empty());
     }
+}
+
+/// W7: the multi-asset test profile (two EVs, an east and a west array) validates, and the
+/// production context builder and the planner plan each asset under its own id: both EVs are
+/// planned assets with their own session, both arrays forecast assets with their own power.
+#[test]
+fn the_multi_asset_profile_plans_every_asset_under_its_own_id() {
+    let now = fixed_now();
+    let profile = fleet_profile("multi_asset_test");
+    let mut sim = crate::simulator::SimState::from_params(&profile.assets, now);
+    for id in ["car-a", "car-b"] {
+        if let Some((entry, _)) = sim.find_asset_mut(id) {
+            if let AssetState::Ev(s) = &mut entry.state {
+                s.plugged = true;
+            }
+        }
+    }
+    let crate::entities::time_grid::TimeGrid { n, cum_s, .. } =
+        crate::entities::time_grid::TimeGrid::from_zones(&profile.planner.plan_zones);
+    let mut queue = crate::entities::device_session::EvSessionQueue::default();
+    queue
+        .insert(EvSession {
+            asset_id: "car-b".into(),
+            ..session(7, 0.6, now + Duration::hours(6))
+        })
+        .expect("one session");
+    let sessions = std::collections::BTreeMap::from([("car-b".to_string(), queue)]);
+    let ctxs = crate::simulator::plan_context::build_asset_contexts(
+        &sim,
+        n,
+        &cum_s,
+        now,
+        &sessions,
+        &std::collections::BTreeMap::new(),
+        &profile.planner,
+        &std::collections::HashMap::new(),
+        &std::collections::BTreeMap::new(),
+        &std::collections::HashMap::new(),
+        None,
+    );
+    let plan = plan_flat(ctxs, &profile, now);
+    assert!(plan.solve_status.solved(), "{:?}", plan.solve_status);
+    for id in ["car-a", "car-b", "battery"] {
+        assert!(
+            plan.planned_asset_ids.iter().any(|p| p == id),
+            "{id} is planned"
+        );
+    }
+    for id in ["pv-east", "pv-west", "base_load"] {
+        assert!(
+            plan.slots[0].forecast_by_asset.contains_key(id),
+            "{id} is forecast"
+        );
+    }
+    // car-b reaches its session's target by its departure; car-a has none to serve.
+    let delivered_kwh: f64 = allocated_kw(&plan, "car-b")
+        .iter()
+        .zip(&plan.slots)
+        .map(|(kw, s)| kw * (s.end - s.start).num_seconds() as f64 / 3600.0)
+        .sum();
+    assert!(delivered_kwh > 0.0, "car-b charges for its own session");
 }
