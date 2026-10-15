@@ -34,5 +34,5 @@ Branch: `refactor/arbiter-levers-per-asset`.
 - [x] 5.1 Lever-name assertions and UI fixtures; BDD for a renamed battery as lever;
       `audit_step_definitions.py`.
 - [ ] 5.2 All checks and suites on Node2.
-- [ ] 5.3 Docs (VEN_ARCHITECTURE arbiter section, use case), journal, wiki.
+- [x] 5.3 Docs (VEN_ARCHITECTURE arbiter section, use case), journal, wiki.
 - [ ] 5.4 Delete this change; merge; clean up.

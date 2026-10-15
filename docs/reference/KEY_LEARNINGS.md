@@ -3442,3 +3442,10 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
 - When a value becomes per-key with a fallback (`map.get(id).unwrap_or_default()`), check that
   `Default` is the same value every other "initial" path produces: here the derived `Default` had
   the opportunistic overlay off while serde's default and the app's start state had it on.
+
+## A stable sort's input order is behaviour (2026-10-15)
+
+- When a ranking sorts by cost with a stable sort, the order the candidates are collected in is the
+  tie-break. Re-collecting them (here: by roster instead of by lever kind) silently changes which of
+  two equal-cost options wins. Keep the old order as the first key and add the new one after it,
+  and pin the tie in a test.
