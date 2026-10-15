@@ -15815,3 +15815,23 @@ construction in places that never named an id (`find_map(downcast_ref::<PvInvert
 smoothing state, one site-level section). Profile validation still allows one asset of each kind;
 lifting it is a separate step. Typing the weather UI fixtures against the generated wire type
 caught a stale `sky_condition` literal the old cast had hidden.
+
+## W6: the VEN UI per asset (refactor/ui-per-asset)
+
+**What.** `/sim` carries each asset's `roster_index`; `api/assets.ts` is the one place the UI asks
+"which assets of this type, in roster order" and "in which order do power charts stack". The
+Devices page renders one EV and one heater card per asset (titled with the asset id, each running
+its own asset's hooks and requesting for its own asset), the Controller one cell per asset from a
+per-type table, chart declarations are per type, tariff enrichment covers every roster asset, the
+comfort editor lists every curve-priced asset, History queries forecast accuracy once for all
+assets.
+
+**Why.** W1-W5 made the backend per asset; the UI still showed one fixed id per kind, so a second
+battery or EV would have been invisible (no card, no cost rates on its timeline).
+
+**Decisions (user, 2026-10-15).** One card per asset; titled by asset id; the card is the picker
+(requests are only created from cards); W7 next, no deployment to the production VENs.
+
+**Issues.** The Controller's tariff enrichment and grid-share computation ran over a fixed list of
+five ids, so a shiftable load's timeline never got cost rates; it now does. Two stacked charts
+each moved `pv` to the front by id, in two different orders; one rule (`stackOrder`) replaces both.
