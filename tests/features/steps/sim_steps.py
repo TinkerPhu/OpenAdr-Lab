@@ -126,7 +126,7 @@ def step_reset_battery_soc(context, soc):
 
 @when("I set the VEN battery capacity_kwh to {capacity_kwh:g}")
 def step_set_battery_capacity(context, capacity_kwh):
-    context.last_response = ven_put("/sim/config/battery", json={"capacity_kwh": capacity_kwh})
+    context.last_response = ven_put("/sim/config/battery/battery", json={"capacity_kwh": capacity_kwh})
 
 
 @then('the VEN error names "{key}"')

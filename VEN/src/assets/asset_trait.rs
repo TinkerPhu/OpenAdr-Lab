@@ -214,8 +214,14 @@ pub trait Asset: Send + Sync {
         unimplemented!("Asset::state_values() only applies to AssetConfig-backed asset kinds")
     }
 
+    /// Whether this asset keeps a summary of its trailing window of recorded power, so the
+    /// window task reads its history. Only the base load does, to show.
+    fn learns_observed_window(&self) -> bool {
+        false
+    }
+
     /// Receive the summary of this asset's trailing window of recorded power (`None` while the
-    /// history holds no record). Default: ignore it. Only the base load keeps one, to show.
+    /// history holds no record). Default: ignore it.
     fn set_observed_window(&mut self, _window: Option<LoadWindowStats>) {}
 
     /// The simulated-origin charge sessions this asset's configured usage schedule predicts in

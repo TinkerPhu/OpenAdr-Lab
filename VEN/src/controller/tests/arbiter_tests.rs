@@ -185,6 +185,7 @@ fn test_slot(
         export_flexibility_kw: 0.0,
         planned_kw_by_asset: StdHashMap::new(),
         planned_state_by_asset: StdHashMap::new(),
+        forecast_by_asset: Default::default(),
     }
 }
 

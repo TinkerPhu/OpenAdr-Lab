@@ -129,9 +129,13 @@ impl SimReadPort for SimHandle {
             .map(|(_, cfg)| cfg.default_comfort_rates())
     }
 
-    async fn usage_schedule_view(&self, now: DateTime<Utc>) -> Option<EvUsageSimState> {
+    async fn usage_schedule_view(
+        &self,
+        asset_id: &str,
+        now: DateTime<Utc>,
+    ) -> Option<EvUsageSimState> {
         let sim = self.sim.lock().await;
-        sim.find_asset(crate::ids::ASSET_EV)
+        sim.find_asset(asset_id)
             .and_then(|(_, cfg)| cfg.usage_schedule_view(now))
     }
 
@@ -279,10 +283,10 @@ mod tests {
     #[tokio::test]
     async fn usage_schedule_view_is_none_without_a_configured_schedule() {
         let (handle, _sim) = handle_with(&all_kinds());
-        assert!(handle.usage_schedule_view(Utc::now()).await.is_none());
+        assert!(handle.usage_schedule_view("ev", Utc::now()).await.is_none());
         let (handle, _sim) = handle_with(&[]);
         assert!(
-            handle.usage_schedule_view(Utc::now()).await.is_none(),
+            handle.usage_schedule_view("ev", Utc::now()).await.is_none(),
             "no EV at all"
         );
     }

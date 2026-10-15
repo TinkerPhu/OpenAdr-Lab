@@ -28,16 +28,17 @@ pub struct CommsLossState {
 }
 
 impl CommsLossState {
-    /// The PV ceiling this state imposes [kW, signed as the resolver expects],
-    /// or `None` when it imposes none. Reads the PV asset's own
-    /// `inverter_max_kw` rather than assuming a rating.
+    /// The site PV ceiling this state imposes [kW, signed as the resolver expects],
+    /// or `None` when it imposes none (or the site has no inverter). The share of every
+    /// array's own `ac_ceiling_kw`, summed: the generation limit is a site limit.
     pub fn pv_ceiling_kw(&self, sim: &SimSnapshot) -> Option<f64> {
         if !self.active {
             return None;
         }
         sim.assets
-            .get(crate::ids::ASSET_PV)
-            .and_then(|s| s.ac_ceiling_kw)
+            .values()
+            .filter_map(|s| s.ac_ceiling_kw)
+            .reduce(|a, b| a + b)
             .map(|max_kw| self.max_power_pct * max_kw)
     }
 }
@@ -96,20 +97,34 @@ mod tests {
     /// Built from a real `PvInverter`, so `inverter_max_kw` is whatever the
     /// asset itself reports rather than a hand-written fixture value.
     fn sim_with_pv(inverter_max_kw: f64) -> SimSnapshot {
-        let params = PvParams {
-            id: crate::ids::ASSET_PV.to_string(),
-            rated_kw: inverter_max_kw,
-            inverter_max_kw,
-            co2_g_kwh: 0.0,
-        };
-        let pv = PvInverter::from_params(&params);
-        let state = crate::assets::AssetState::Pv(PvInverter::initial_state(&params));
+        sim_with_arrays(&[(crate::ids::ASSET_PV, inverter_max_kw)])
+    }
+
+    fn sim_with_arrays(arrays: &[(&str, f64)]) -> SimSnapshot {
         let mut snap = empty_sim();
-        snap.assets.insert(
-            crate::ids::ASSET_PV.to_string(),
-            snapshot_from_asset(&pv, state, crate::ids::ASSET_PV, 0.0, 0.0),
-        );
+        for &(id, inverter_max_kw) in arrays {
+            let params = PvParams {
+                id: id.to_string(),
+                rated_kw: inverter_max_kw,
+                inverter_max_kw,
+                co2_g_kwh: 0.0,
+            };
+            let pv = PvInverter::from_params(&params);
+            let state = crate::assets::AssetState::Pv(PvInverter::initial_state(&params));
+            snap.assets.insert(
+                id.to_string(),
+                snapshot_from_asset(&pv, state, "pv", 0.0, 0.0),
+            );
+        }
         snap
+    }
+
+    /// W5b: the site ceiling is the share of every array's rating, whatever their ids.
+    #[test]
+    fn two_arrays_give_the_share_of_their_summed_rating() {
+        let sim = sim_with_arrays(&[("pv-east", 6.0), ("pv-west", 4.0)]);
+        let ceiling = state(true).pv_ceiling_kw(&sim).unwrap();
+        assert!((ceiling - 3.0).abs() < 1e-9, "30 % of 10 kW, got {ceiling}");
     }
 
     fn state(active: bool) -> CommsLossState {

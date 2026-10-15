@@ -89,7 +89,8 @@ impl Default for ControllerSimState {
 #[derive(Debug, Clone, Default)]
 pub struct HemsState {
     pub active_plan: Option<Plan>,
-    pub anchor_until: Option<DateTime<Utc>>,
+    /// Each heater's anchor end, by heater id (`services::planning::heater_block_ends`).
+    pub anchor_until: BTreeMap<String, DateTime<Utc>>,
     pub planned_tariffs: Vec<TariffSnapshot>,
     pub capacity_state: OadrCapacityState,
     /// The Dynamic Operating Envelope schedule (per-interval import/export capacity
@@ -362,11 +363,11 @@ impl AppState {
         self.hems.write().await.active_plan = plan;
     }
 
-    pub async fn anchor_until(&self) -> Option<DateTime<Utc>> {
-        self.hems.read().await.anchor_until
+    pub async fn anchor_until(&self) -> BTreeMap<String, DateTime<Utc>> {
+        self.hems.read().await.anchor_until.clone()
     }
 
-    pub async fn set_anchor_until(&self, t: Option<DateTime<Utc>>) {
+    pub async fn set_anchor_until(&self, t: BTreeMap<String, DateTime<Utc>>) {
         self.hems.write().await.anchor_until = t;
     }
 

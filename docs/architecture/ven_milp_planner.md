@@ -55,7 +55,9 @@ when a kind is named in `controller/milp_planner/` or `controller/milp_interacti
   its forecast, with the full-use tie-break in both objective parts; base load contributes its
   forecast as fixed net power. Forecast participants get no allocation, no planned power, no
   place among the planned assets and no share of the malus; the plan's `pv_forecast_kw`,
-  `pv_used_kw` and `baseline_kw` are their site totals. `build_milp_inputs` sums their forecasts
+  `pv_used_kw` and `baseline_kw` are their site totals, and `PlanTimeSlot::forecast_by_asset`
+  keeps each one's own forecast and used power (`results.rs::forecast_by_asset`), which the
+  timeline and the forecast-accuracy samples read per asset. `build_milp_inputs` sums their forecasts
   into `generation_forecast_kw` and `load_forecast_kw`; nothing else in the planner holds a PV or
   base-load series.
 - *Balance.* Each asset states its net power per slot (`net_power_expr`, positive = import). The
@@ -139,7 +141,7 @@ now_aligned = floor(wall_clock_unix_ts / step_A_s) * step_A_s
 
 2. **Warm-start continuity.** The new plan is warm-started from the previous plan's allocation values (see §4). This only works when the grids align: slot `t` of the new plan must correspond to the same physical time window as slot `t` of the previous plan. Alignment guarantees this for all slots except the very first (which may have advanced one step if a zone boundary was crossed).
 
-3. **Block-commitment anchor.** The planner can lock a slot's setpoint for the remainder of its duration (to prevent rapid resetting of heater relays, for example). The anchor is stored as a UTC timestamp. If grids are not aligned, the anchored time falls between two slots in the next replan, breaking the lock. With alignment, the anchor always coincides with a slot boundary. The anchor is a stability preference, never physics: the heater keeps it only up to the last slot its tank can hold (`assets/heater_milp.rs :: anchor_the_tank_can_hold`). A plan in force often fills the tank to exactly its ceiling, and replayed from a tank that gained heat since, the same stages overflow it. A pinned stage under a hard ceiling made the whole site's solve infeasible at presolve, the mirror image of the anchored-off case `heater_block_end` already refuses. The ceiling itself is the tank's maximum or its current energy, whichever is higher (`ceiling_kwh`), so a tank Absorb heated past its maximum doesn't contradict its own starting state either.
+3. **Block-commitment anchor.** The planner can lock a slot's setpoint for the remainder of its duration (to prevent rapid resetting of heater relays, for example). The anchor is stored as a UTC timestamp per heater (`services::planning::heater_block_ends`, keyed by heater id; `build_heater_anchor` builds each heater's own vector, which `build_asset_contexts` hands only to that heater). If grids are not aligned, the anchored time falls between two slots in the next replan, breaking the lock. With alignment, the anchor always coincides with a slot boundary. The anchor is a stability preference, never physics: the heater keeps it only up to the last slot its tank can hold (`assets/heater_milp.rs :: anchor_the_tank_can_hold`). A plan in force often fills the tank to exactly its ceiling, and replayed from a tank that gained heat since, the same stages overflow it. A pinned stage under a hard ceiling made the whole site's solve infeasible at presolve, the mirror image of the anchored-off case `heater_block_end` already refuses. The ceiling itself is the tank's maximum or its current energy, whichever is higher (`ceiling_kwh`), so a tank Absorb heated past its maximum doesn't contradict its own starting state either.
 
 4. **UI readability.** Aligned timestamps display as clean clock times (14:20:00, 14:25:00, 14:30:00) rather than arbitrary seconds.
 
@@ -244,7 +246,7 @@ surcharge   = extra_heater_switches × gate_switch_penalty_eur
 adopt       = improvement > threshold_eur + surcharge
 ```
 
-**Switch count weighting (3-tier):** `count_heater_switches` returns a Zone-A-normalised float. Each transition in a Zone-C slot (900 s) contributes `900 / 300 = 3.0` instead of 1.0, consistent with the MILP's internal switching cost (which scales by `dt_h`). Profile value `gate_switch_penalty_eur` is interpreted as "EUR per Zone-A-equivalent switch."
+**Switch count weighting (3-tier):** `count_heater_switches` returns a Zone-A-normalised float, summed over every heater at its own stage size (`heater_stage_sizes_kw`, by heater id). Each transition in a Zone-C slot (900 s) contributes `900 / 300 = 3.0` instead of 1.0, consistent with the MILP's internal switching cost (which scales by `dt_h`). Profile value `gate_switch_penalty_eur` is interpreted as "EUR per Zone-A-equivalent switch."
 
 ---
 

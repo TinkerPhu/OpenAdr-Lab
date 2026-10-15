@@ -54,6 +54,7 @@ pub struct TimelineSnapshot {
 }
 
 /// Time window parameters for `build_asset_timeline`.
+#[derive(Debug, Clone, Copy)]
 pub struct TimeWindow {
     /// Hours of history to include (clamped to ≥ 0).
     pub hours_back: f64,

@@ -444,7 +444,7 @@ impl Asset for Heater {
     }
 
     fn asset_type_str(&self) -> &'static str {
-        crate::ids::ASSET_HEATER
+        "heater"
     }
 
     /// The heater is the one asset whose near-term dispatch the planner pins

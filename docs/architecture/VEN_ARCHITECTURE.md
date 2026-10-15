@@ -1026,7 +1026,7 @@ EV reports it before the solve as its own `WarningKind::TargetAboveLimit` warnin
 (`DeclaredEv::input_warnings`) and the plan charges to the limit. That is the warning's only meaning — a soft request
 charging less than its target is the comfort curve working as asked, not an unmet obligation. The
 cap guards a real session's target too, which the same mask can strand. Both classes report
-themselves on `GET /ev-usage-sim` via a `mode` field (`simulated` /
+themselves on `GET /assets/{asset_id}/ev-usage-sim` via a `mode` field (`simulated` /
 `forecast`), which the VEN UI EV card labels from a per-case declaration.
 
 ### 3.0d Asset Competence Assurance
@@ -1083,7 +1083,7 @@ so the history sampler never reads `state_values()` keys; `PvCurtailmentSource::
 rule for which source names a window), `RequestResolvable::request_defaults` (current SoC, default
 target, capacity and charge rate a user request resolves against; `AssetRequestSlice` does the
 arithmetic once), `Asset::is_cancellable` (a started shiftable load is non-interruptible) and
-`Asset::usage_schedule_view` (the EV's configured trip schedule for `GET /ev-usage-sim`). The tick
+`Asset::usage_schedule_view` (the EV's configured trip schedule for `GET /assets/{asset_id}/ev-usage-sim`). The tick
 loop's tasks do the same: they ask and schedule, they do not decide. `Asset::planned_usage_sessions`
 (the EV's predicted plan-ahead sessions; `services::ev_usage_plan` installs them; `ev_schedule::trip_windows`
 is the one trip walk, shared with the `usage_forecast` expected uses), `Asset::set_observed_window`
@@ -1120,7 +1120,7 @@ is `services::request_submission::{submit, cancel_and_announce, complete_shiftab
 event carries both statuses as `UserRequestStatus`, spelled as `/user-requests` spells them
 (`"ACTIVE"`, …), with `from_status: null` for a created request and the status the request actually
 had for a cancel (R-130); the VEN UI renders it through `requestTransitionText` (`NEW → ACTIVE`). And a value set through `/sim/reset` or
-`/sim/config/battery` is checked by the asset itself (`Asset::validate_values`, called by `SimHandle`;
+`/sim/config/battery/{asset_id}` is checked by the asset itself (`Asset::validate_values`, called by `SimHandle`;
 `DomainError::InvalidValue` -> 400, `AssetNotFound` -> 404). Tests: `services/request_submission.rs`,
 `simulator/handle.rs` `the_battery_refuses_*`. No `serde_json::Value` crosses a domain port: the
 `TelemetryPort` takes `TelemetryBody`/`TraceBody` (the snapshot or the event, flattened, plus `venName`)
@@ -1461,7 +1461,7 @@ Physics-based device simulation.
 | GET | `/sim` | Full simulator state: device states, power flows, energy counters |
 | GET | `/sim/schema` | JSON schema for the profile YAML |
 | POST | `/sim/reset/:asset_id` | Reset a specific asset to its profile defaults |
-| PUT | `/sim/config/battery` | Update battery configuration at runtime |
+| PUT | `/sim/config/battery/{asset_id}` | Update that battery's configuration at runtime |
 | GET | `/sim/inject` | Current injection overrides (`SimInjectState`) |
 | POST | `/sim/inject` | Set one or more injection overrides — **full-replace** semantics (see D-06) |
 | POST | `/sim/inject/reset` | Clear all injection overrides |
@@ -1507,7 +1507,7 @@ behaviour classes (`state.rs::SimInjectState`):
 | GET | `/flexibility/capacity` | 5 | Sustained-commitment power/duration/energy capacity curves (import, export) — see below |
 | GET | `/ev-session` | 5 | Every EV's queued `EvSession`s, each naming its EV (`asset_id`); sessions are created through `/user-requests` (BL-41) |
 | GET / PUT | `/assets/:asset_id/ev-settings` | 5 | That EV's opportunistic surplus-charging overlay toggle; 404 for an asset that takes no charge sessions |
-| GET | `/ev-usage-sim` | — | `ev-usage-simulation` / `ev-usage-forecast`: read-only `{mode, engage_charge_planning, next_trip}` diagnostics, `204` when the EV has no usage schedule configured |
+| GET | `/assets/{asset_id}/ev-usage-sim` | — | `ev-usage-simulation` / `ev-usage-forecast`: read-only `{mode, engage_charge_planning, next_trip}` diagnostics, `204` when the EV has no usage schedule configured |
 | GET / POST / DELETE | `/baseline-override` | 5 | Read / create / clear additive baseline-load adjustments |
 
 **Sustained-commitment capacity curve** (`GET /flexibility/capacity`,

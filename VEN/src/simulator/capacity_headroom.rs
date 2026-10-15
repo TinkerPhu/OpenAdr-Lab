@@ -262,13 +262,21 @@ fn series_to_events(series: &[(i64, f64, f64)]) -> Vec<Event> {
 /// and the old code was silently discarding that fact. (Base load isn't the
 /// only contributor that can do this — see `merge_events`'s doc comment for
 /// `ShiftableLoadAsset`'s own version of the same effect.)
+///
+/// Every base load of the roster contributes its own forecast, whatever its id.
 fn base_load_capacity_events(sim: &SimState, t1: DateTime<Utc>, t2_max: Duration) -> Vec<Event> {
-    let Some((_, cfg)) = sim.find_asset(crate::ids::ASSET_BASE_LOAD) else {
-        return Vec::new();
-    };
-    let Some(bl) = cfg.as_any().downcast_ref::<crate::assets::BaseLoad>() else {
-        return Vec::new();
-    };
+    sim.iter_assets()
+        .filter_map(|(_, cfg)| cfg.as_any().downcast_ref::<crate::assets::BaseLoad>())
+        .flat_map(|bl| one_base_load_events(bl, t1, t2_max))
+        .collect()
+}
+
+/// One base load's forecast as hourly piecewise-constant steps from `t1`.
+fn one_base_load_events(
+    bl: &crate::assets::BaseLoad,
+    t1: DateTime<Utc>,
+    t2_max: Duration,
+) -> Vec<Event> {
     let t2_max_s = t2_max.num_seconds().max(0);
     let mut events = Vec::new();
     let mut prev_kw = 0.0_f64;

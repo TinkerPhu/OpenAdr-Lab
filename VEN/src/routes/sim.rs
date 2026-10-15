@@ -144,9 +144,10 @@ pub async fn post_sim_reset(
     no_content_or_error(roster.reset_asset(&asset_id, values).await)
 }
 
-/// PUT /sim/config/battery — update battery capacity_kwh and/or min_soc.
+/// PUT /sim/config/battery/:asset_id — update that battery's capacity_kwh and/or min_soc.
 pub async fn put_sim_config_battery(
     State(roster): State<Roster>,
+    Path(asset_id): Path<String>,
     Json(body): Json<BatteryConfigBody>,
 ) -> impl IntoResponse {
     let mut values = std::collections::HashMap::new();
@@ -154,11 +155,7 @@ pub async fn put_sim_config_battery(
     if let Some(min_soc_frac) = body.min_soc_frac {
         values.insert("min_soc".to_string(), min_soc_frac);
     }
-    no_content_or_error(
-        roster
-            .update_asset_config(crate::ids::ASSET_BATTERY, values)
-            .await,
-    )
+    no_content_or_error(roster.update_asset_config(&asset_id, values).await)
 }
 
 /// 204 on success; the domain error's own status and message otherwise (`routes/error.rs`).

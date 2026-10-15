@@ -235,6 +235,7 @@ mod tests {
                 export_flexibility_kw: 0.0,
                 planned_kw_by_asset: Map::new(),
                 planned_state_by_asset: Map::new(),
+                forecast_by_asset: Default::default(),
             })
             .collect();
         Plan {

@@ -316,10 +316,10 @@ def step_no_slot_exceeds_import_threshold(context, kw):
 
 def _predicted_trip(context):
     """The EV's next predicted trip, read from the same diagnostics route the
-    UI shows (`GET /ev-usage-sim`) rather than recomputed here — the asset is
+    UI shows (`GET /assets/ev/ev-usage-sim`) rather than recomputed here — the asset is
     the single authority for its own schedule."""
-    resp = ven_get("/ev-usage-sim")
-    assert resp.status_code == 200, f"/ev-usage-sim returned {resp.status_code}"
+    resp = ven_get("/assets/ev/ev-usage-sim")
+    assert resp.status_code == 200, f"ev-usage-sim returned {resp.status_code}"
     trip = resp.json().get("next_trip")
     assert trip, "no predicted trip to compare the plan against"
     leave = datetime.fromisoformat(trip["leave_at"].replace("Z", "+00:00"))

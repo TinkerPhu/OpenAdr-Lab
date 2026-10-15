@@ -305,30 +305,29 @@ pub fn build_asset_timeline(
                 values.insert("import_limit_kw".into(), slot.import_cap_kw);
                 values.insert("export_limit_kw".into(), slot.export_cap_kw);
             } else {
-                // Physical asset: PV uses pv_used_kw (negate: generation is export-negative) —
-                // the planner's actual dispatch decision, not the raw forecast; the two differ
-                // exactly when the plan curtails (see pv-export-curtailment/pv-curtailment-history).
-                // Base load uses baseline_kw — non-controllable, so no allocation is ever created.
-                // All other assets use their packet allocation, or 0 kW if absent.
+                // Physical asset: a forecast asset (PV array, base load) uses its own power in
+                // the slot (`forecast_by_asset.used_kw`, generation negative) — the planner's
+                // actual decision, not the raw forecast; the two differ exactly when the plan
+                // curtails (see pv-export-curtailment/pv-curtailment-history). It has no
+                // allocation. All other assets use their packet allocation, or 0 kW if absent.
                 // We always emit a point (even 0 kW) so that all assets share the same
                 // set of plan-slot timestamps. Omitting zero-allocation slots causes the
                 // stacked chart to fall back to an exact-match miss → false zero spikes.
-                let power_kw = if asset_id == crate::ids::ASSET_PV {
-                    -slot.pv_used_kw
-                } else if asset_id == crate::ids::ASSET_BASE_LOAD {
-                    slot.baseline_kw
-                } else {
-                    slot.allocations
+                let forecast = slot.forecast_by_asset.get(asset_id);
+                let power_kw = match forecast {
+                    Some(f) => f.used_kw,
+                    None => slot
+                        .allocations
                         .iter()
                         .find(|a| a.asset_id == asset_id)
                         .map(|a| a.power_kw)
-                        .unwrap_or(0.0)
+                        .unwrap_or(0.0),
                 };
                 values.insert("power_kw".into(), power_kw);
                 // Exposed alongside power_kw so the UI can derive "planned curtailment" as
                 // pv_forecast_kw - (-power_kw), the same gap PlanPowerStack.tsx already shows.
-                if asset_id == crate::ids::ASSET_PV {
-                    values.insert("pv_forecast_kw".into(), slot.pv_forecast_kw);
+                if let Some(f) = forecast.filter(|f| f.generation) {
+                    values.insert("pv_forecast_kw".into(), -f.forecast_kw);
                 }
                 // Derive cost/CO2 rates from the allocation's pre-computed cost_eur / co2_g,
                 // which already account for the PV-surplus vs grid split (see alloc_cost_eur).
@@ -548,6 +547,7 @@ mod tests {
                 power_kw,
             )]),
             planned_state_by_asset: std::collections::HashMap::new(),
+            forecast_by_asset: Default::default(),
         }
     }
 
@@ -676,6 +676,7 @@ mod tests {
         let mut slot = make_slot(60, "", 0.0, now);
         slot.pv_forecast_kw = 4.0;
         slot.pv_used_kw = 4.0; // no curtailment intended — this test is about cost/co2 rates
+        slot.forecast_by_asset = pv_forecast_power("pv", 4.0, 4.0);
         plan.slots.push(slot);
         let result = build_asset_timeline(
             "pv",
@@ -1048,7 +1049,51 @@ mod tests {
             export_flexibility_kw: 0.0,
             planned_kw_by_asset: std::collections::HashMap::new(),
             planned_state_by_asset: std::collections::HashMap::new(),
+            forecast_by_asset: pv_forecast_power("pv", pv_forecast_kw, pv_forecast_kw),
         }
+    }
+
+    /// The plan's power for the PV array `pv_id`: forecast and used magnitudes, stored signed.
+    fn pv_forecast_power(
+        pv_id: &str,
+        forecast_kw: f64,
+        used_kw: f64,
+    ) -> std::collections::HashMap<String, crate::entities::plan::ForecastSlotPower> {
+        let power = crate::entities::plan::ForecastSlotPower {
+            forecast_kw: -forecast_kw,
+            used_kw: -used_kw,
+            generation: true,
+        };
+        std::collections::HashMap::from([(pv_id.to_string(), power)])
+    }
+
+    /// W5b: two arrays each show their own power, whatever their ids.
+    #[test]
+    fn each_pv_array_shows_its_own_planned_power() {
+        let now = ts(0);
+        let known = make_known(&["pv-east", "pv-west"]);
+        let snap = make_timeline_snap(vec![]);
+        let mut plan = empty_plan(now);
+        let mut slot = make_slot(60, "", 0.0, now);
+        slot.forecast_by_asset = pv_forecast_power("pv-east", 3.0, 3.0);
+        slot.forecast_by_asset
+            .extend(pv_forecast_power("pv-west", 1.0, 0.5));
+        plan.slots.push(slot);
+        let window = TimeWindow {
+            hours_back: 0.0,
+            hours_forward: 1.0,
+        };
+        let at = |id: &str, key: &str| {
+            build_asset_timeline(id, &known, &snap, Some(&plan), now, window).unwrap()[0].values
+                [key]
+        };
+        assert_eq!(at("pv-east", "power_kw"), -3.0);
+        assert_eq!(at("pv-west", "power_kw"), -0.5);
+        assert_eq!(
+            at("pv-west", "pv_forecast_kw"),
+            1.0,
+            "its own forecast, for the curtailment band"
+        );
     }
 
     #[test]
@@ -1124,6 +1169,7 @@ mod tests {
 
         let mut slot = make_pv_slot(60, 5.0, now);
         slot.pv_used_kw = 2.0;
+        slot.forecast_by_asset = pv_forecast_power("pv", 5.0, 2.0);
         let plan = Plan {
             id: Uuid::new_v4(),
             created_at: now,

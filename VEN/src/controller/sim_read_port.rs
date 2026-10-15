@@ -25,7 +25,11 @@ pub trait SimReadPort: Send + Sync {
     async fn default_comfort_rates(&self, asset_id: &str) -> Option<Vec<ComfortRate>>;
 
     /// The EV's configured usage schedule; `None` when there is no EV or no schedule.
-    async fn usage_schedule_view(&self, now: DateTime<Utc>) -> Option<EvUsageSimState>;
+    async fn usage_schedule_view(
+        &self,
+        asset_id: &str,
+        now: DateTime<Utc>,
+    ) -> Option<EvUsageSimState>;
 
     /// One slice per asset for resolving a user request, each with the asset's own request
     /// defaults and its BUILT-IN comfort curve; a user's override is applied by the caller

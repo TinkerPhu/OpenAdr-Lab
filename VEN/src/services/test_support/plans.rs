@@ -43,6 +43,7 @@ pub fn flat_plan(step_s: u64, slots: usize, start: DateTime<Utc>) -> Plan {
             export_flexibility_kw: 0.0,
             planned_kw_by_asset: Map::new(),
             planned_state_by_asset: Map::new(),
+            forecast_by_asset: Default::default(),
         })
         .collect();
     Plan {

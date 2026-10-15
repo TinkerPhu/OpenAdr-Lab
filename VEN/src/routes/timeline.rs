@@ -493,6 +493,7 @@ mod tests {
                 export_flexibility_kw: 0.0,
                 planned_kw_by_asset: std::collections::HashMap::new(),
                 planned_state_by_asset: std::collections::HashMap::new(),
+                forecast_by_asset: Default::default(),
             })
             .collect();
         Plan {
@@ -660,6 +661,7 @@ mod tests {
                 export_flexibility_kw: 0.0,
                 planned_kw_by_asset: std::collections::HashMap::new(),
                 planned_state_by_asset: std::collections::HashMap::new(),
+                forecast_by_asset: Default::default(),
             })
             .collect();
         Plan {

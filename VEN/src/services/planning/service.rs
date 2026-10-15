@@ -14,7 +14,7 @@ use crate::entities::PlannerObjective;
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::state::AppState;
 
-use super::{evaluate_acceptance_gate, heater_block_end, PlanCycleResult, PlanningService};
+use super::{evaluate_acceptance_gate, heater_block_ends, PlanCycleResult, PlanningService};
 
 impl PlanningService {
     /// Run the MILP solver on a blocking thread via the injected `SolverPort`,
@@ -71,7 +71,7 @@ impl PlanningService {
         threshold_eur: f64,
         decay_s: f64,
         gate_switch_penalty_eur: f64,
-        heater_p_step_kw: f64,
+        heater_stage_sizes_kw: &std::collections::BTreeMap<String, f64>,
         solver_ms: u64,
         objective: PlannerObjective,
         state: &AppState,
@@ -103,7 +103,7 @@ impl PlanningService {
             threshold_eur,
             decay_s,
             gate_switch_penalty_eur,
-            heater_p_step_kw,
+            heater_stage_sizes_kw,
             now,
         );
 
@@ -111,23 +111,25 @@ impl PlanningService {
         if adopted {
             info!(trigger = %trigger_reason, slot_count, "planner: plan adopted");
             state.set_active_plan(Some(plan.clone())).await;
-            let anchor = heater_block_end(&plan, now);
+            let anchor = heater_block_ends(&plan, now, heater_stage_sizes_kw.keys());
             state.set_anchor_until(anchor).await;
 
             // §5.5: reset the arbiter's residual accumulator on every plan
             // adoption (any trigger, not just hard ones) and re-snapshot each
             // SoC-coupled asset's available capacity as the new baseline.
             if let Some(sim_snap) = state.sim().await {
-                let mut new_capacities = std::collections::HashMap::new();
-                for asset_id in [crate::ids::ASSET_BATTERY, crate::ids::ASSET_EV] {
-                    if let Some(snap) = sim_snap.assets.get(asset_id) {
+                let new_capacities: std::collections::HashMap<String, f64> = sim_snap
+                    .assets
+                    .iter()
+                    .filter(|(_, snap)| snap.has_state_of_charge())
+                    .map(|(asset_id, snap)| {
                         let capacity_kwh = snap
                             .available_charge_kwh
                             .unwrap_or(0.0)
                             .max(snap.available_discharge_kwh.unwrap_or(0.0));
-                        new_capacities.insert(asset_id.to_string(), capacity_kwh);
-                    }
-                }
+                        (asset_id.clone(), capacity_kwh)
+                    })
+                    .collect();
                 state.reset_residual(&new_capacities).await;
             }
         } else {

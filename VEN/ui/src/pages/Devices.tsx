@@ -34,7 +34,7 @@ export function DevicesPage() {
   const { data: allRequests = [], isLoading, isError, error } = useRequests();
   const { data: sim } = useSim();
   const { data: evSettings } = useEvSettings(EV_ASSET_ID);
-  const { data: evUsageSim } = useEvUsageSim();
+  const { data: evUsageSim } = useEvUsageSim(EV_ASSET_ID);
   const { data: arbiterSettings } = useArbiterSettings();
   const { data: arbiterDiagnostics } = useArbiterDiagnostics(
     (arbiterSettings?.deviation_arbiter_enabled ?? false) ||

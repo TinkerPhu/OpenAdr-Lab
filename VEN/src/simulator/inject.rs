@@ -12,8 +12,9 @@ use std::collections::HashMap;
 use crate::entities::sim_inject::SimInjectState;
 use crate::simulator::SimState;
 
-/// One injectable state field: its wire name, the asset it belongs to, what
-/// that asset calls it in `Asset::reset`, and how to read it.
+/// One injectable state field: its wire name, the kind of asset it sets (every asset of that
+/// type in the roster, whatever its id — the inject is a developer tool, like the tick
+/// overrides it sits beside), what that asset calls it in `Asset::reset`, and how to read it.
 ///
 /// Declared as data, including the accessor, so a new injectable state field
 /// is one row rather than another near-identical `if let` block
@@ -21,7 +22,7 @@ use crate::simulator::SimState;
 /// four things.
 struct StateInjection {
     field: &'static str,
-    asset_id: &'static str,
+    asset_type: &'static str,
     state_key: &'static str,
     read: fn(&SimInjectState) -> Option<f64>,
 }
@@ -29,19 +30,19 @@ struct StateInjection {
 const STATE_INJECTIONS: [StateInjection; 3] = [
     StateInjection {
         field: "battery_soc",
-        asset_id: crate::ids::ASSET_BATTERY,
+        asset_type: "battery",
         state_key: "soc",
         read: |i| i.battery_soc,
     },
     StateInjection {
         field: "ev_soc",
-        asset_id: crate::ids::ASSET_EV,
+        asset_type: "ev",
         state_key: "soc",
         read: |i| i.ev_soc,
     },
     StateInjection {
         field: "heater_temp_c",
-        asset_id: crate::ids::ASSET_HEATER,
+        asset_type: "heater",
         state_key: "temp_c",
         read: |i| i.heater_temp_c,
     },
@@ -53,7 +54,7 @@ pub fn apply_state_injections(inject: &SimInjectState, sim: &mut SimState) -> Ve
     let mut cleared = Vec::new();
     for StateInjection {
         field,
-        asset_id,
+        asset_type,
         state_key,
         read,
     } in STATE_INJECTIONS
@@ -61,11 +62,13 @@ pub fn apply_state_injections(inject: &SimInjectState, sim: &mut SimState) -> Ve
         let Some(value) = read(inject) else {
             continue;
         };
-        if let Some((entry, cfg)) = sim.find_asset_mut(asset_id) {
-            cfg.reset(
-                &mut entry.state,
-                HashMap::from([(state_key.to_string(), value)]),
-            );
+        for (cfg, entry) in sim.asset_configs.iter().zip(sim.assets.iter_mut()) {
+            if cfg.asset_type_str() == asset_type {
+                cfg.reset(
+                    &mut entry.state,
+                    HashMap::from([(state_key.to_string(), value)]),
+                );
+            }
         }
         // Pushed even when the asset is absent, matching the previous
         // behaviour: a one-shot inject is consumed by the tick that saw it,
@@ -105,6 +108,29 @@ mod tests {
 
         assert_eq!(cleared, vec!["battery_soc"]);
         let (entry, _) = sim.find_asset(crate::ids::ASSET_BATTERY).unwrap();
+        match &entry.state {
+            AssetState::Battery(s) => assert!((s.soc_frac - 0.8).abs() < 1e-9),
+            other => panic!("expected Battery state, got {other:?}"),
+        }
+    }
+
+    /// W5b: the injection reaches the battery whatever its id.
+    #[test]
+    fn applies_a_battery_soc_injection_to_a_battery_named_otherwise() {
+        let mut sim = SimState::from_params(
+            &[AssetParams::Battery(BatteryParams {
+                id: "home-battery".to_string(),
+                initial_soc_frac: 0.5,
+                ..BatteryParams::default()
+            })],
+            chrono::Utc::now(),
+        );
+        let inject = SimInjectState {
+            battery_soc: Some(0.8),
+            ..SimInjectState::default()
+        };
+        apply_state_injections(&inject, &mut sim);
+        let (entry, _) = sim.find_asset("home-battery").unwrap();
         match &entry.state {
             AssetState::Battery(s) => assert!((s.soc_frac - 0.8).abs() < 1e-9),
             other => panic!("expected Battery state, got {other:?}"),
