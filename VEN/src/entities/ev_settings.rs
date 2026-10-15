@@ -32,6 +32,14 @@ impl Default for EvSettings {
     }
 }
 
+impl EvSettings {
+    /// Whether the overlay may offer this EV a surplus now: switched on, and no session of its
+    /// own running (the session's plan governs the EV then).
+    pub fn overlay_enabled(&self, session_active: bool) -> bool {
+        self.opportunistic_charging_enabled && !session_active
+    }
+}
+
 /// Opportunistic charging is on unless the user turns it off, so a snapshot
 /// written before the field existed restores with the overlay enabled.
 fn opportunistic_charging_default() -> bool {

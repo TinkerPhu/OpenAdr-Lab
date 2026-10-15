@@ -296,7 +296,8 @@ impl SimState {
     ///   (the tick it's posted) wins outright, weather ignored; otherwise weather (if
     ///   configured/fresh) is the base with any decaying override offset blended
     ///   additively on top; sin model only when no weather is configured at all.
-    /// - `heater_emergency_curtail/absorb_override`: Behaviour C, see `Heater::apply_tick_overrides`.
+    /// - `heater_emergency_by_asset`: Behaviour C per heater, see `Heater::apply_tick_overrides`.
+    /// - `ev_departure_by_asset`: the governing session's departure per EV.
     /// - `pv_measured_kw`/`base_load_measured_kw`: real-measurement MQTT feeds;
     ///   PV outranks `weather_pv_kw`, BaseLoad replaces the natural profile+noise base.
     /// - `weather_pv_forecast`: the full weather-forecast series behind `weather_pv_kw`
@@ -326,8 +327,7 @@ impl SimState {
             ambient_temp_c_override,
             heater_temp_min_override,
             heater_temp_max_override,
-            heater_emergency_curtail_override,
-            heater_emergency_absorb_override,
+            heater_emergency_by_asset,
             base_load_kw_override,
             base_load_alpha,
             base_load_measured_kw,
@@ -335,7 +335,7 @@ impl SimState {
             base_load_heuristic,
             ev_plugged_override,
             ev_soc_target_override,
-            ev_departure_time,
+            ev_departure_by_asset,
         } = inputs;
         let natural_irradiance = crate::entities::solar::natural_irradiance_at(now);
 
@@ -375,7 +375,7 @@ impl SimState {
         // `apply_tick_overrides` only assigns fields, never recomputes
         // smoothing. Built once, shared read-only by every asset in the loop
         // below (Battery declines — no arm in the old match for it either).
-        let tick_overrides = TickOverrides {
+        let mut tick_overrides = TickOverrides {
             now,
             pv_irradiance: irradiance,
             pv_irradiance_offset: self.pv_smoothing.irradiance_offset,
@@ -393,14 +393,14 @@ impl SimState {
             heater_ambient_temp_c_override: ambient_temp_c_override,
             heater_temp_min_override,
             heater_temp_max_override,
-            heater_emergency_curtail_override,
-            heater_emergency_absorb_override,
+            heater_emergency_curtail_override: None,
+            heater_emergency_absorb_override: None,
             base_load_measured_kw,
             base_load_baseline_kw,
             base_load_heuristic,
             ev_plugged_override,
             ev_soc_target_override,
-            ev_departure_time,
+            ev_departure_time: None,
         };
 
         let dt = chrono::Duration::milliseconds((dt_s * 1000.0) as i64);
@@ -408,6 +408,14 @@ impl SimState {
 
         for (cfg, entry) in self.asset_configs.iter_mut().zip(self.assets.iter_mut()) {
             // ── Apply environment and Behaviour C state injections ────────
+            // The per-asset part: this asset's own emergency mode and departure.
+            let (curtail, absorb) = heater_emergency_by_asset
+                .get(&entry.id)
+                .copied()
+                .unwrap_or((None, None));
+            tick_overrides.heater_emergency_curtail_override = curtail;
+            tick_overrides.heater_emergency_absorb_override = absorb;
+            tick_overrides.ev_departure_time = ev_departure_by_asset.get(&entry.id).copied();
             if let Some(overridable) = cfg.as_tick_overridable() {
                 overridable.apply_tick_overrides(&mut entry.state, &tick_overrides);
             }

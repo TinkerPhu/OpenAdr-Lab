@@ -36,5 +36,7 @@ pub fn snapshot_from_asset(
         embodied_co2_g_kwh: asset.embodied_co2_g_kwh(),
         emergency_what_ifs: asset.emergency_what_ifs(&state),
         ac_ceiling_kw: asset.ac_ceiling_kw(),
+        arbiter_lever: asset.arbiter_lever(),
+        roster_index: 0,
     }
 }

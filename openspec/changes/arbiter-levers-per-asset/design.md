@@ -23,7 +23,9 @@ Reused: `rank_levers` (unchanged; its stable sort keeps roster order on equal co
 
 ## Decisions
 
-- **D1 Ranking (user: A).** One lever per asset, ranked by marginal cost; ties by roster order.
+- **D1 Ranking (user: A).** One lever per asset, ranked by marginal cost; ties by lever-kind
+  precedence (battery, EV, heater pause, emergency, PV — today's candidate order, so a one-asset
+  site ranks exactly as before), then roster order.
   Today every storage lever's cost is the slot's site marginal cost (wear is a site planner
   parameter, `c_bat_wear_eur_kwh`), so two batteries tie and roster order decides. A per-asset
   cost is a later change on the lever's cost, not on this structure.

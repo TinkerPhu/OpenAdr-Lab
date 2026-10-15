@@ -45,7 +45,7 @@ impl SimState {
     /// so that controller logic never needs to import `SimState` or `AssetConfig`.
     pub fn to_sim_snapshot(&self) -> SimSnapshot {
         let mut assets_map = HashMap::new();
-        for (entry, cfg) in self.iter_assets() {
+        for (roster_index, (entry, cfg)) in self.iter_assets().enumerate() {
             let values = cfg.state_values(&entry.state);
             let cap = cfg.capability(&entry.state);
             let (available_discharge_kwh, available_charge_kwh) = match cfg
@@ -73,6 +73,8 @@ impl SimState {
                     embodied_co2_g_kwh: cfg.embodied_co2_g_kwh(),
                     emergency_what_ifs: cfg.emergency_what_ifs(&entry.state),
                     ac_ceiling_kw: cfg.ac_ceiling_kw(),
+                    arbiter_lever: cfg.arbiter_lever(),
+                    roster_index,
                 },
             );
         }

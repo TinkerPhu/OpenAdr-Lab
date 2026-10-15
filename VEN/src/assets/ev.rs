@@ -378,6 +378,14 @@ impl Asset for EvCharger {
         Some(crate::entities::asset_params::RequestKind::ChargeSession)
     }
 
+    fn arbiter_lever(&self) -> Option<crate::entities::asset::ArbiterLever> {
+        Some(crate::entities::asset::ArbiterLever {
+            kind: crate::entities::asset::ArbiterLeverKind::SurplusCharge,
+            rated_import_kw: self.max_charge_kw,
+            rated_export_kw: self.max_discharge_kw,
+        })
+    }
+
     fn asset_type(&self) -> crate::entities::asset::AssetType {
         crate::entities::asset::AssetType::Ev
     }

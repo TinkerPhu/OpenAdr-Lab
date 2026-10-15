@@ -807,7 +807,7 @@ underlying disturbance persists.
 
 **Devices → Arbiter card** (the deviation readout is visible while deviation correction is on):
 - `Projected net site power` and `Deviation from plan` update every ~5s
-- `Deviation from plan` drops to ~0 once the battery has corrected; `Active lever` stays `battery`
+- `Deviation from plan` drops to ~0 once the battery has corrected; `Active lever` stays `battery:battery`
   for as long as the correction is **held** — the battery is still off-plan to cancel the change
 - `Deviation if released` shows what would be left with the battery back at plan: about the size
   of your irradiance change while you hold it
@@ -819,7 +819,7 @@ underlying disturbance persists.
   (`ResidualThreshold` in the plan trigger), and the new plan takes the gap into account
 - With the EV plugged in and charging headroom left, the EV (zero cost) takes the correction. The
   charger applies a new command a tick late, so for that one tick the battery covers it:
-  `Battery bridging the charger lag` shows the amount, and is back to 0 kW the next tick. What
+  `Storage bridging the charger lag` shows the amount per battery, and is back to 0 kW the next tick. What
   you should **not** see is `Active lever` and the EV's power flipping every few seconds while
   `Measured net site power` stays put — that was the hunt this bridge used to cause (R-104)
 

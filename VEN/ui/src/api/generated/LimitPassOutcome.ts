@@ -18,19 +18,19 @@ excess_kw: number,
  */
 unresolved_kw: number, 
 /**
- * The first lever that shed anything; next tick's incumbent.
+ * The first lever that shed anything (`<kind>:<asset_id>`); next tick's incumbent.
  */
 active_lever: string | null, 
 /**
- * `(curtail, absorb)`, set only by an alert's Curtail.
+ * `(curtail, absorb)` per asset, set only by an alert's Curtail.
  */
-heater_emergency_mode: [boolean, boolean] | null, 
+heater_emergency_mode: { [key in string]: [boolean, boolean] }, 
 /**
  * Setpoint change per asset, after − before (kW).
  */
 adjusted_kw_by_asset: { [key in string]: number }, 
 /**
- * The battery's share that only bridges a lagging command (kW) — see
- * `ArbiterTick::prev_battery_bridge_kw`.
+ * Each storage asset's share that only bridges a lagging command (kW) — see
+ * `ArbiterTick::prev_bridge_kw_by_asset`.
  */
-battery_bridge_kw: number, };
+bridge_kw_by_asset: { [key in string]: number }, };

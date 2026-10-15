@@ -423,3 +423,96 @@ mod pv_weather_blend_tests {
 // this file reached the size cap.
 mod recording_tests;
 mod snapshot_values_tests;
+
+/// W5a: each asset declares the arbiter lever it offers, and the snapshot carries it with the
+/// asset's roster position; nothing decides by id which asset is a lever.
+mod lever_declaration_tests {
+    use super::super::*;
+    use crate::entities::asset::ArbiterLeverKind;
+
+    #[test]
+    fn to_sim_snapshot_carries_each_assets_declared_lever_and_roster_position() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("profiles")
+            .join("test.yaml");
+        let profile: crate::profile::Profile =
+            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let params = profile.asset_params();
+        let snap = SimState::from_params(&params, Utc::now()).to_sim_snapshot();
+
+        let kind_of = |id: &str| snap.assets[id].arbiter_lever.map(|l| l.kind);
+        assert_eq!(kind_of("battery"), Some(ArbiterLeverKind::Storage));
+        assert_eq!(kind_of("ev"), Some(ArbiterLeverKind::SurplusCharge));
+        assert_eq!(kind_of("heater"), Some(ArbiterLeverKind::PausableLoad));
+        assert_eq!(kind_of("pv"), None);
+        assert_eq!(kind_of("base_load"), None);
+
+        let battery = snap.assets["battery"].arbiter_lever.unwrap();
+        assert!(battery.rated_import_kw > 0.0 && battery.rated_export_kw > 0.0);
+        assert_eq!(
+            snap.assets["heater"].arbiter_lever.unwrap().rated_export_kw,
+            0.0
+        );
+
+        let in_order: Vec<&str> = snap
+            .assets_in_roster_order()
+            .iter()
+            .map(|(id, _)| *id)
+            .collect();
+        let roster: Vec<String> = params.iter().map(|p| p.id().to_string()).collect();
+        assert_eq!(in_order, roster);
+    }
+}
+
+/// W5a: a per-asset tick input (the arbiter's emergency mode) reaches only its own asset.
+mod per_asset_tick_input_tests {
+    use super::super::*;
+    use crate::assets::heater::{Heater, HeaterEmergencyMode};
+    use crate::entities::asset_params::AssetParams;
+
+    fn two_heaters() -> SimState {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("profiles")
+            .join("test.yaml");
+        let profile: crate::profile::Profile =
+            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let heater = profile
+            .asset_params()
+            .into_iter()
+            .find_map(|p| match p {
+                AssetParams::Heater(h) => Some(h),
+                _ => None,
+            })
+            .unwrap();
+        let named = |id: &str| {
+            let mut h = heater.clone();
+            h.id = id.to_string();
+            AssetParams::Heater(h)
+        };
+        SimState::from_params(&[named("heater-a"), named("heater-b")], Utc::now())
+    }
+
+    fn mode_of(sim: &SimState, id: &str) -> HeaterEmergencyMode {
+        let (_, asset) = sim.find_asset(id).unwrap();
+        asset
+            .as_any()
+            .downcast_ref::<Heater>()
+            .unwrap()
+            .emergency_mode
+    }
+
+    #[test]
+    fn a_heaters_emergency_mode_reaches_only_that_heater() {
+        let mut sim = two_heaters();
+        let now = Utc::now();
+        sim.tick(TickInputs {
+            heater_emergency_by_asset: HashMap::from([(
+                "heater-a".to_string(),
+                (Some(true), Some(false)),
+            )]),
+            ..TickInputs::new(30.0, now, HashMap::new())
+        });
+        assert_eq!(mode_of(&sim, "heater-a"), HeaterEmergencyMode::Curtail);
+        assert_eq!(mode_of(&sim, "heater-b"), HeaterEmergencyMode::Normal);
+    }
+}

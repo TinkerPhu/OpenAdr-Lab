@@ -19,20 +19,78 @@ use std::collections::HashMap;
 
 pub(crate) mod arbiter_levers;
 mod decision;
+mod dispatch;
+mod emergency;
 mod lag_bridge;
 pub mod limit;
+mod ranked;
 mod release;
 
 pub use decision::decision_event;
+pub use dispatch::meet_dispatch_setpoint;
+pub use emergency::heater_emergency_modes;
+#[cfg(test)]
+use ranked::rank_levers;
+pub use ranked::SetpointBoundsKw;
+pub(crate) use ranked::{apply_ranked_levers, LeverInputs, LeverPolicy, ALL_LEVERS};
+use ranked::{DEVIATION_POLICY, DISPATCH_POLICY};
 
 use crate::controller::SimSnapshot;
+use crate::entities::asset::ArbiterLeverKind;
 use crate::entities::plan::PlanTimeSlot;
 use crate::entities::planner_params::PlannerObjective;
+use arbiter_levers::apply_ev_lever_opportunistic;
+#[cfg(test)]
 use arbiter_levers::{
-    apply_battery_lever, apply_ev_lever, apply_ev_lever_opportunistic, apply_heater_pause_lever,
-    battery_lever, ev_lever, heater_emergency_lever, heater_pause_lever, pv_curtailment_lever,
-    Lever, LEVER_BATTERY, LEVER_EV, LEVER_HEATER_EMERGENCY, LEVER_HEATER_PAUSE, LEVER_PV_CURTAIL,
+    apply_battery_lever, apply_heater_pause_lever, heater_emergency_lever, heater_pause_lever,
+    Lever, LeverId,
 };
+
+/// One EV's opportunistic regime this tick: whether the plan allocates it charging now (its
+/// own commitment, never second-guessed) and whether its own settings enable opportunistic
+/// charging.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct EvOverlay {
+    pub plan_allocates: bool,
+    pub enabled: bool,
+}
+
+impl EvOverlay {
+    /// A pass that may also cut what the plan scheduled (the limit pass) treats every EV so.
+    pub(crate) const OVERRIDING: EvOverlay = EvOverlay {
+        plan_allocates: false,
+        enabled: true,
+    };
+
+    /// Whether this EV may be offered a surplus (and have that charge clawed back).
+    pub fn offers_surplus(&self) -> bool {
+        !self.plan_allocates && self.enabled
+    }
+}
+
+/// Each EV's overlay this tick, by asset id. An EV without an entry is offered nothing.
+pub type EvOverlays = HashMap<String, EvOverlay>;
+
+/// The overlay of every EV in the roster (`ArbiterLeverKind::SurplusCharge`): the plan's
+/// allocation from `plan`, the setting from `enabled`, which answers per asset id.
+pub fn ev_overlays(
+    sim: &SimSnapshot,
+    plan: Option<&crate::entities::plan::Plan>,
+    now: chrono::DateTime<chrono::Utc>,
+    enabled: impl Fn(&str) -> bool,
+) -> EvOverlays {
+    sim.lever_asset_ids(&[ArbiterLeverKind::SurplusCharge])
+        .into_iter()
+        .map(|id| {
+            let overlay = EvOverlay {
+                plan_allocates: plan
+                    .is_some_and(|p| crate::controller::dispatcher::plan_allocates(p, now, id)),
+                enabled: enabled(id),
+            };
+            (id.to_string(), overlay)
+        })
+        .collect()
+}
 
 /// Illustrative defaults — the design doc's own open-question list notes none
 /// of these have a numeric default from the source material; these are the
@@ -59,8 +117,9 @@ pub const DEAD_BAND_KW: f64 = 0.1;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ArbiterOutcome {
     pub setpoints: HashMap<String, f64>,
-    /// `(curtail, absorb)` — mirrors `SimInjectState`'s two independent flags.
-    pub heater_emergency_mode: Option<(bool, bool)>,
+    /// `(curtail, absorb)` per asset whose emergency mode the arbiter set — mirrors
+    /// `SimInjectState`'s two independent flags. Empty when it set none.
+    pub heater_emergency_mode: HashMap<String, (bool, bool)>,
     /// Additional generation-limit tightening (kW, positive magnitude) the
     /// arbiter wants folded into `resolve_pv_generation_limit_kw`'s tighter-wins
     /// comparison.
@@ -69,9 +128,9 @@ pub struct ArbiterOutcome {
     /// signed) — the correction's displacement, which `residual_kwh_by_asset` turns into
     /// energy for the replan backstop. Empty when nothing is held.
     pub displaced_kw_by_asset: HashMap<String, f64>,
-    /// The cheapest lever actually used this tick, if any — fed back in as
-    /// `incumbent_lever` next tick for the preemption-margin hysteresis.
-    pub active_lever: Option<&'static str>,
+    /// The cheapest lever actually used this tick, if any (`<kind>:<asset_id>`) — fed back
+    /// in as `incumbent_lever` next tick for the preemption-margin hysteresis.
+    pub active_lever: Option<String>,
     /// This tick's `projected_net_kw`/`deviation_kw` (diagnostics surface —
     /// `state::arbiter::ArbiterDiagnostics`, `GET /arbiter-diagnostics`).
     /// `None` only in the no-plan-yet startup window, where no plan target
@@ -85,9 +144,10 @@ pub struct ArbiterOutcome {
     pub unresolved_kw: f64,
     /// The limit-enforcement pass's result (`None` while it is switched off).
     pub limit: Option<limit::LimitPassOutcome>,
-    /// The battery's share of this tick's setpoint that only bridges a lagging command
-    /// (kW) — next tick's `ArbiterTick::prev_battery_bridge_kw`, with the limit pass's.
-    pub battery_bridge_kw: f64,
+    /// Each storage asset's share of this tick's setpoint that only bridges a lagging
+    /// command (kW) — next tick's `ArbiterTick::prev_bridge_kw_by_asset`, with the limit
+    /// pass's.
+    pub bridge_kw_by_asset: HashMap<String, f64>,
 }
 
 impl ArbiterOutcome {
@@ -123,8 +183,8 @@ pub struct ArbiterTick<'a> {
     /// `None` in the no-plan-yet startup window.
     pub plan_slot: Option<&'a PlanTimeSlot>,
     pub objective: PlannerObjective,
-    pub plan_has_ev_allocation: bool,
-    pub overlay_enabled: bool,
+    /// Each EV's opportunistic regime (`ev_overlays`).
+    pub ev_overlay: &'a EvOverlays,
     pub live_pv_kw: Option<f64>,
     /// This tick's PV preview under the generation limit that would apply **without** the
     /// arbiter's own tightening — the PV a released correction would face. `live_pv_kw`
@@ -139,12 +199,12 @@ pub struct ArbiterTick<'a> {
     /// The import ceiling both passes steer to (`limit::limit_target_kw`);
     /// `None` = no hard import limit in force.
     pub limit_target_kw: Option<f64>,
-    /// The part of the battery's last command that only bridged a lagging lever's
-    /// command (kW, battery setpoint sign; `battery_bridge_kw` of both passes last
-    /// tick). That command has landed since, so the bridge is no correction to carry:
-    /// carried, it read as a deviation of its own, and the arbiter undid the EV's
-    /// now-landed change to remove it — the EV/battery hunt of R-104.
-    pub prev_battery_bridge_kw: f64,
+    /// The part of each storage asset's last command that only bridged a lagging lever's
+    /// command (kW, setpoint sign; `bridge_kw_by_asset` of both passes last tick). That
+    /// command has landed since, so the bridge is no correction to carry: carried, it read
+    /// as a deviation of its own, and the arbiter undid the EV's now-landed change to remove
+    /// it — the EV/battery hunt of R-104.
+    pub prev_bridge_kw_by_asset: &'a HashMap<String, f64>,
 }
 
 /// Generalizes the former `apply_surplus_ev_overlay`'s `net_other_kw`
@@ -233,35 +293,6 @@ pub fn deviation_kw(
     projected_net_kw - target_kw
 }
 
-/// The greedy ranking loop: exclude zero-or-below-capacity levers outright
-/// (§5.3's explicit requirement — not merely deprioritize), sort remaining by
-/// marginal cost ascending, consume `remaining_kw` lever by lever. A
-/// challenger must beat the incumbent (last tick's `active_lever`) by more
-/// than `LEVER_PREEMPTION_MARGIN_EUR_PER_KWH` to take the top slot — prevents
-/// tick-to-tick chatter between two near-equal-cost levers (§4a.1).
-fn rank_levers(mut levers: Vec<Lever>, incumbent_lever: Option<&str>) -> Vec<Lever> {
-    levers.sort_by(|a, b| {
-        a.marginal_cost_eur_per_kwh
-            .partial_cmp(&b.marginal_cost_eur_per_kwh)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    if let (Some(incumbent_id), Some(cheapest)) = (incumbent_lever, levers.first().copied()) {
-        if cheapest.id != incumbent_id {
-            if let Some(incumbent_idx) = levers.iter().position(|l| l.id == incumbent_id) {
-                let incumbent = levers[incumbent_idx];
-                let beats_by_more_than_margin = incumbent.marginal_cost_eur_per_kwh
-                    - cheapest.marginal_cost_eur_per_kwh
-                    > LEVER_PREEMPTION_MARGIN_EUR_PER_KWH;
-                if !beats_by_more_than_margin {
-                    // Keep the incumbent in front — swap it to the head.
-                    levers.swap(0, incumbent_idx);
-                }
-            }
-        }
-    }
-    levers
-}
-
 /// Top-level entry point, called once per tick from
 /// `tasks::sim_tick::helpers::build_tick_setpoints` in place of the former
 /// direct call to `apply_surplus_ev_overlay`.
@@ -280,13 +311,11 @@ pub fn reconcile(
     // correction, immediately re-creating the very deviation it just
     // resolved whenever the underlying disturbance is persistent rather than
     // transient. Mirrors `projected_net_kw`'s use of `snap.setpoint_kw` for
-    // the same two assets, above.
-    for id in [crate::ids::ASSET_BATTERY, crate::ids::ASSET_EV] {
-        if let Some(snap) = sim.assets.get(id) {
-            setpoints.insert(id.to_string(), snap.setpoint_kw);
-        }
+    // the same assets, above.
+    for id in release::carried_ids(sim) {
+        setpoints.insert(id.to_string(), sim.assets[id].setpoint_kw);
     }
-    lag_bridge::drop_last_bridge(&mut setpoints, tick.prev_battery_bridge_kw);
+    lag_bridge::drop_last_bridge(&mut setpoints, tick.prev_bridge_kw_by_asset);
 
     let Some(slot) = tick.plan_slot else {
         // No active plan yet (startup window): same fallback as the
@@ -297,8 +326,7 @@ pub fn reconcile(
             sim,
             live_pv_kw,
             live_base_load_kw,
-            tick.plan_has_ev_allocation,
-            tick.overlay_enabled,
+            tick.ev_overlay,
         );
         return ArbiterOutcome {
             setpoints,
@@ -320,14 +348,15 @@ pub fn reconcile(
     // R-88: the cause is gone — release the whole correction to plan in one tick, the
     // one true "cleared", instead of undoing it step by step.
     if without_kw.abs() < DEAD_BAND_KW {
-        let setpoints = release::at_plan(&setpoints, base_setpoints);
+        let setpoints = release::at_plan(&setpoints, base_setpoints, sim);
         return ArbiterOutcome { setpoints, ..quiet };
     }
     // Settled but still held: nothing to move this tick, yet the levers are off-plan, so the
     // correction is active (no false "cleared") and keeps counting toward the backstop.
     if dev_kw.abs() < DEAD_BAND_KW {
-        let displaced_kw_by_asset = release::displaced_from_plan_kw(&setpoints, base_setpoints);
-        let active_lever = release::holding_lever(&displaced_kw_by_asset);
+        let displaced_kw_by_asset =
+            release::displaced_from_plan_kw(&setpoints, base_setpoints, sim);
+        let active_lever = release::holding_lever(&displaced_kw_by_asset, sim);
         return ArbiterOutcome {
             setpoints,
             displaced_kw_by_asset,
@@ -342,7 +371,7 @@ pub fn reconcile(
         bounds_kw: &SetpointBoundsKw::new(),
     };
     let applied = apply_ranked_levers(&mut setpoints, &DEVIATION_POLICY, &inputs, dev_kw);
-    let displaced_kw_by_asset = release::displaced_from_plan_kw(&setpoints, base_setpoints);
+    let displaced_kw_by_asset = release::displaced_from_plan_kw(&setpoints, base_setpoints, sim);
 
     ArbiterOutcome {
         setpoints,
@@ -352,166 +381,54 @@ pub fn reconcile(
         // correction (it may have no capacity left this tick) — still active, not cleared.
         active_lever: applied
             .active_lever
-            .or_else(|| release::holding_lever(&displaced_kw_by_asset)),
+            .or_else(|| release::holding_lever(&displaced_kw_by_asset, sim)),
         displaced_kw_by_asset,
         net_kw: Some(net_kw),
         dev_kw: Some(dev_kw),
         unresolved_kw: applied.unresolved_kw,
         dev_without_correction_kw: Some(without_kw),
         limit: None,
-        battery_bridge_kw: applied.battery_bridge_kw,
+        bridge_kw_by_asset: applied.bridge_kw_by_asset,
     }
 }
 
-/// How a pass may use the levers — the only thing that differs between the
-/// arbiter's passes; the candidate/rank/apply machinery is shared
-/// (`apply_ranked_levers`). Declared as data, not branched on per call site.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct LeverPolicy {
-    /// The EV lever may also reduce charging the plan itself scheduled, and
-    /// regardless of the opportunistic-overlay toggle — not only opportunistic
-    /// charge.
-    pub(crate) ev_overrides_plan: bool,
-    /// Battery discharge follows the planner objective's refusal under
-    /// `MaxRevenue`.
-    pub(crate) battery_respects_objective: bool,
-}
+/// Overlays and bridges the arbiter tests hand a tick: built once, so a tick built by a
+/// helper function can borrow them for `'static`.
+#[cfg(test)]
+pub(crate) mod test_ticks {
+    use super::{EvOverlay, EvOverlays};
+    use std::collections::HashMap;
+    use std::sync::LazyLock;
 
-/// Deviation correction: never second-guesses the plan's own EV commitment
-/// and keeps `MaxRevenue`'s discharge refusal.
-pub(crate) const DEVIATION_POLICY: LeverPolicy = LeverPolicy {
-    ev_overrides_plan: false,
-    battery_respects_objective: true,
-};
-
-/// Per-asset `(min, max)` setpoint bounds (kW) a pass must stay inside — the
-/// comms-loss fail-safe's clamp (`tasks::sim_tick::dispatch_override`).
-pub type SetpointBoundsKw = HashMap<String, (f64, f64)>;
-
-/// Everything a pass hands the shared lever machinery besides the setpoints.
-pub(crate) struct LeverInputs<'a> {
-    pub(crate) tick: &'a ArbiterTick<'a>,
-    /// This pass's own last-tick lever (preemption-margin hysteresis).
-    pub(crate) incumbent_lever: Option<&'a str>,
-    pub(crate) bounds_kw: &'a SetpointBoundsKw,
-}
-
-/// What the shared lever loop did this tick.
-#[derive(Debug, Default)]
-pub(crate) struct AppliedLevers {
-    pub(crate) heater_emergency_mode: Option<(bool, bool)>,
-    pub(crate) pv_generation_limit_tighten_kw: Option<f64>,
-    pub(crate) active_lever: Option<&'static str>,
-    /// Part of `|deviation_kw|` no lever could take (kW).
-    pub(crate) unresolved_kw: f64,
-    /// The battery's share of this tick's setpoint that only bridges a lagging command
-    /// (kW, battery setpoint sign) — see `ArbiterTick::prev_battery_bridge_kw`.
-    pub(crate) battery_bridge_kw: f64,
-}
-
-/// Candidate → `rank_levers` → greedy apply, shared by every arbiter pass.
-/// Positive `deviation_kw` = import to shed; negative = surplus to absorb.
-/// Each lever consumes what it actually achieved, not what it was assigned.
-pub(crate) fn apply_ranked_levers(
-    setpoints: &mut HashMap<String, f64>,
-    policy: &LeverPolicy,
-    inputs: &LeverInputs,
-    deviation_kw: f64,
-) -> AppliedLevers {
-    let (tick, sim) = (inputs.tick, inputs.tick.sim);
-    let (ev_plan_allocated, ev_overlay_enabled) = if policy.ev_overrides_plan {
-        (false, true)
-    } else {
-        (tick.plan_has_ev_allocation, tick.overlay_enabled)
-    };
-    let battery_bounds_kw = inputs.bounds_kw.get(crate::ids::ASSET_BATTERY).copied();
-    let battery_objective = if policy.battery_respects_objective {
-        tick.objective
-    } else {
-        PlannerObjective::MinCost
-    };
-
-    let mut candidates = Vec::new();
-    candidates.extend(battery_lever(
-        setpoints,
-        sim,
-        tick.plan_slot,
-        deviation_kw,
-        battery_bounds_kw,
-    ));
-    candidates.extend(ev_lever(
-        setpoints,
-        sim,
-        deviation_kw,
-        ev_plan_allocated,
-        ev_overlay_enabled,
-    ));
-    candidates.extend(heater_pause_lever(setpoints, sim, deviation_kw));
-    candidates.extend(heater_emergency_lever(
-        sim,
-        tick.plan_slot,
-        deviation_kw,
-        inputs.incumbent_lever == Some(LEVER_HEATER_EMERGENCY),
-        tick.alert_active,
-    ));
-    candidates.extend(pv_curtailment_lever(tick.plan_slot, deviation_kw));
-
-    let mut applied = AppliedLevers::default();
-    let mut remaining_kw = deviation_kw.abs();
-    let mut bridge = lag_bridge::LagBridge::default();
-    for lever in rank_levers(candidates, inputs.incumbent_lever) {
-        if remaining_kw < DEAD_BAND_KW {
-            break;
-        }
-        let assigned_kw = remaining_kw.min(lever.available_capacity_kw);
-        if assigned_kw <= 0.0 {
-            continue;
-        }
-        // Sign convention: positive assigned_kw always means "reduce import /
-        // increase export by this much" — apply_* functions below translate
-        // that into the correct setpoint-delta direction per asset.
-        let signed_assigned_kw = if deviation_kw > 0.0 {
-            assigned_kw
-        } else {
-            -assigned_kw
+    static EV_ON: LazyLock<EvOverlays> = LazyLock::new(|| {
+        let on = EvOverlay {
+            plan_allocates: false,
+            enabled: true,
         };
-        let achieved_kw = match lever.id {
-            LEVER_BATTERY => bridge.battery_moved(
-                apply_battery_lever(
-                    setpoints,
-                    sim,
-                    signed_assigned_kw,
-                    battery_objective,
-                    battery_bounds_kw,
-                ),
-                deviation_kw,
-            ),
-            LEVER_EV => bridge.ev_moved(apply_ev_lever(setpoints, sim, signed_assigned_kw)),
-            LEVER_HEATER_PAUSE => apply_heater_pause_lever(setpoints, sim, signed_assigned_kw),
-            LEVER_HEATER_EMERGENCY => {
-                applied.heater_emergency_mode = Some(if deviation_kw > 0.0 {
-                    // Curtail (alerts only): no planned stage either.
-                    setpoints.insert(crate::ids::ASSET_HEATER.to_string(), 0.0);
-                    (true, false)
-                } else {
-                    (false, true) // Absorb
-                });
-                assigned_kw
-            }
-            LEVER_PV_CURTAIL => {
-                applied.pv_generation_limit_tighten_kw = Some(assigned_kw);
-                assigned_kw
-            }
-            _ => 0.0,
+        HashMap::from([("ev".to_string(), on)])
+    });
+    static EV_PLAN_ALLOCATED: LazyLock<EvOverlays> = LazyLock::new(|| {
+        let allocated = EvOverlay {
+            plan_allocates: true,
+            enabled: false,
         };
-        if achieved_kw > 0.0 {
-            applied.active_lever.get_or_insert(lever.id);
-            remaining_kw -= achieved_kw;
-        }
+        HashMap::from([("ev".to_string(), allocated)])
+    });
+    static NO_BRIDGE: LazyLock<HashMap<String, f64>> = LazyLock::new(HashMap::new);
+
+    /// The EV `ev` with opportunistic charging on and nothing allocated by the plan.
+    pub(crate) fn ev_on() -> &'static EvOverlays {
+        &EV_ON
     }
-    applied.unresolved_kw = remaining_kw.max(0.0);
-    applied.battery_bridge_kw = bridge.battery_bridge_kw();
-    applied
+
+    /// The EV `ev` charging as the plan allocates it, overlay off.
+    pub(crate) fn ev_plan_allocated() -> &'static EvOverlays {
+        &EV_PLAN_ALLOCATED
+    }
+
+    pub(crate) fn no_bridge() -> &'static HashMap<String, f64> {
+        &NO_BRIDGE
+    }
 }
 
 #[cfg(test)]

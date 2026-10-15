@@ -122,6 +122,22 @@ def step_limit_diagnostics_with_lever(context, limit_kw):
     _wait_for_limit_diagnostics(limit_kw, lever_required=True)
 
 
+@then("the limit pass's lever names an asset of the VEN's roster")
+def step_limit_lever_names_an_asset(context):
+    # A lever belongs to the asset that declares it: `<kind>:<asset_id>` (W5a), so the
+    # diagnostics say which asset was steered, whatever its id.
+    def lever():
+        r = ven_get("/arbiter-diagnostics")
+        return ((r.json() if r.ok else {}).get("limit") or {}).get("active_lever")
+
+    lever = poll_until(lever, lambda l: l is not None, timeout=15, interval=1,
+                       description="a limit-pass lever")
+    kind, _, asset_id = lever.partition(":")
+    assert kind and asset_id, f"lever {lever!r} does not name an asset"
+    assets = ven_get("/sim").json()["assets"]
+    assert asset_id in assets, f"lever {lever!r} names no asset of {sorted(assets)}"
+
+
 @given("the simulator imposes an import limit of {limit_kw:f} kW")
 def step_sim_import_limit(context, limit_kw):
     # `grid_import_limit_kw` stands in for a capacity limit at execution only

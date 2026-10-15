@@ -55,22 +55,19 @@ pub(crate) struct TickContext {
     pub dispatch_windows: Vec<crate::entities::capacity::DispatchWindow>,
     pub alert_windows: Vec<crate::entities::capacity::AlertWindow>,
     pub rates_snap: Vec<crate::entities::tariff_snapshot::TariffSnapshot>,
-    pub overlay_enabled: bool,
+    /// Each EV's opportunistic-charging switch this tick.
+    pub overlay_enabled: super::arbiter_glue::OverlayEnabled,
     pub deviation_arbiter_enabled: bool,
     pub incumbent_lever: Option<String>,
-    /// Last tick's battery bridge (R-104), so the carried battery command drops it.
-    pub battery_bridge_kw: f64,
+    /// Last tick's storage bridges (R-104), so each carried storage command drops its own.
+    pub bridge_kw_by_asset: std::collections::HashMap<String, f64>,
     /// GB-47 limit-enforcement gate and that pass's own last-tick lever.
     pub limit_enforcement_enabled: bool,
     pub limit_incumbent_lever: Option<String>,
-    /// Live EV session state for the site-headroom forecast
-    /// (`simulator::capacity_headroom::compute_site_headroom_forecast`) —
-    /// read fresh here (pre-lock, async) so a session's departure time is a
-    /// live scheduling fact, not a planning result. Shiftable loads no
-    /// longer need a separate field here (`shiftable-load-as-asset`,
-    /// Spec B): they're real `SimState` asset entries, read directly by the
-    /// forecast functions via `sim.iter_assets()`.
-    pub ev_session: Option<crate::entities::device_session::EvSession>,
+    /// The departure of the session governing each EV now, by asset id — read fresh here
+    /// (pre-lock, async) so a departure time is a live scheduling fact, not a planning
+    /// result; each EV gets its own (`TickInputs::ev_departure_by_asset`).
+    pub ev_departure_by_asset: std::collections::HashMap<String, chrono::DateTime<chrono::Utc>>,
     pub comms_loss: Option<CommsLossState>,
 }
 
@@ -124,6 +121,8 @@ pub(crate) async fn resolve_tick_context(
         .get(crate::ids::ASSET_BASE_LOAD)
         .cloned();
     let base_load_heuristic_kw_now = base_load_heuristic.as_ref().map(|h| h.sample_kw(now));
+    let (overlay_enabled, ev_sessions_now) =
+        super::arbiter_glue::resolve_overlay_enabled(state, now).await;
 
     TickContext {
         inject,
@@ -143,15 +142,16 @@ pub(crate) async fn resolve_tick_context(
         dispatch_windows: state.dispatch_windows().await,
         alert_windows: state.alert_windows().await,
         rates_snap: state.planned_tariffs().await,
-        overlay_enabled: super::arbiter_glue::resolve_overlay_enabled(state, now).await,
+        overlay_enabled,
         deviation_arbiter_enabled: state.deviation_arbiter_enabled().await,
         incumbent_lever: state.arbiter_active_lever().await,
-        battery_bridge_kw: state.arbiter_battery_bridge_kw().await,
+        bridge_kw_by_asset: state.arbiter_bridge_kw_by_asset().await,
         limit_enforcement_enabled: state.limit_enforcement_enabled().await,
         limit_incumbent_lever: state.limit_active_lever().await,
-        // The session governing this tick: the one whose window is open now, for the EV the
-        // arbiter's EV lever drives (by id until W5 makes the lever per asset).
-        ev_session: state.current_ev_session(crate::ids::ASSET_EV, now).await,
+        ev_departure_by_asset: ev_sessions_now
+            .into_iter()
+            .map(|(id, s)| (id, s.departure_time))
+            .collect(),
         comms_loss,
     }
 }

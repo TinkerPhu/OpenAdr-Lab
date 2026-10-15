@@ -242,6 +242,11 @@ pub trait Asset: Send + Sync {
         None
     }
 
+    /// The lever this asset offers the deviation arbiter, or `None` if it offers none.
+    fn arbiter_lever(&self) -> Option<crate::entities::asset::ArbiterLever> {
+        None
+    }
+
     /// The asset's AC output ceiling [kW], or `None` if it has none. Only the PV inverter does;
     /// comms-loss curtailment is a percentage of it.
     fn ac_ceiling_kw(&self) -> Option<f64> {

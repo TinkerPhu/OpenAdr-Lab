@@ -17,6 +17,13 @@ import type {
 } from "../../api/types";
 import { formatKwOrDash } from "@lab/ui/unitFormat";
 
+/** Each storage asset's bridge, `<asset> <kW>`, or a dash while none bridges. */
+function formatBridges(bridgeKwByAsset: Record<string, number | undefined>): string {
+  const entries = Object.entries(bridgeKwByAsset).filter(([, kw]) => kw !== undefined && kw !== 0);
+  if (entries.length === 0) return formatKwOrDash(undefined);
+  return entries.map(([assetId, kw]) => `${assetId} ${formatKwOrDash(kw)}`).join(", ");
+}
+
 export type ArbiterSettingsCardProps = {
   arbiterSettings: ArbiterSettings | undefined;
   putArbiterSettings: (body: UpdateArbiterSettingsBody) => void;
@@ -97,9 +104,9 @@ function DiagnosticsReadout(props: {
     <Stack spacing={1.5}>
       {deviationEnabled && <DeviationReadout diagnostics={diagnostics} />}
       {limitEnabled && <LimitReadout limit={diagnostics.limit} />}
-      <Typography variant="body2" data-testid="arbiter-battery-bridge">
+      <Typography variant="body2" data-testid="arbiter-storage-bridge">
         {/* Covers a command that lands a tick late; dropped, not carried, next tick (R-104). */}
-        Battery bridging the charger lag: <strong>{formatKwOrDash(diagnostics.battery_bridge_kw)}</strong>
+        Storage bridging the charger lag: <strong>{formatBridges(diagnostics.bridge_kw_by_asset)}</strong>
       </Typography>
       <Typography variant="body2">
         Measured net site power: <strong>{formatKwOrDash(diagnostics.measured_net_kw)}</strong>

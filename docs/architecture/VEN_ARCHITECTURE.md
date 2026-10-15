@@ -1126,8 +1126,25 @@ had for a cancel (R-130); the VEN UI renders it through `requestTransitionText` 
 `TelemetryPort` takes `TelemetryBody`/`TraceBody` (the snapshot or the event, flattened, plus `venName`)
 and the MQTT adapter serialises them (`telemetry_port::to_wire`); `SensorSnapshot.raw` is a typed
 `SensorRaw` whose unknown client keys ride in `extra` (both in `entities/sensor.rs`; a non-2xx VTN
-answer reaches services as `DomainError::VtnRejected { status }`, translated in `vtn.rs`, R-131). Lever ids are the named
-`LEVER_*` constants in `arbiter_levers.rs` — a namespace of their own, not asset ids. A shiftable
+answer reaches services as `DomainError::VtnRejected { status }`, translated in `vtn.rs`, R-131). Lever kinds are the named
+`LEVER_*` constants in `arbiter_levers.rs` — a namespace of their own, not asset ids. Which asset
+offers a lever is the asset's own declaration (`Asset::arbiter_lever` → `AssetSnapshot::arbiter_lever`:
+`ArbiterLeverKind::{Storage, SurplusCharge, PausableLoad}` with its rated range; the emergency lever
+is offered by every asset answering `emergency_what_ifs`, PV curtailment is one site lever). The
+arbiter builds one lever per declaring asset (`controller/arbiter/ranked.rs::lever_candidates`),
+ranks all of them by marginal cost and breaks a tie by lever-kind precedence, then roster order
+(`AssetSnapshot::roster_index`, `SimSnapshot::assets_in_roster_order`), and reports a lever as
+`<kind>:<asset_id>` (`battery:battery`, `heater_pause:heater`; a site lever as its kind). The carried
+levers, the release rule and the lag bridge apply to every storage and surplus-charging asset; each EV
+has its own overlay (`ArbiterTick::ev_overlay`: its plan allocation and its own `EvSettings`), and
+opportunistic surplus charging serves EVs in roster order. The heater emergency mode and an EV
+session's departure reach the simulator per asset (`TickInputs::heater_emergency_by_asset`,
+`ev_departure_by_asset`). A VTN dispatch window is met by the ranked storage levers under
+`DISPATCH_POLICY` (`controller/arbiter/dispatch.rs`), and the comms-loss fail-safe clamps every asset
+declaring a lever to its percentage of the declared rated range. Tests: `arbiter_tests.rs` (W5a
+section: a battery with another id, two batteries, two EVs, two heaters), `dispatch_override.rs`
+(`dispatch_steers_a_battery_named_otherwise`, `apply_comms_loss_clamp_caps_every_ev`),
+`simulator/tests.rs` (`lever_declaration_tests`, `per_asset_tick_input_tests`). A shiftable
 load enters the roster through `SimState::add_shiftable`, built by `AssetEntry::new`; no caller
 assembles an `AssetEntry` by hand. Tests: `assets/*` `history_view_*`, `simulator/tests.rs`
 `add_shiftable_*`, `assets/ev_schedule.rs` `usage_view_*`.
@@ -1151,13 +1168,14 @@ branching at all. Before this (R-81/R-82) the arbiter applied the heater's round
 asset id — wrong for any other stepped asset — and believed a shed EV setpoint took effect
 immediately, leaving a one-tick excess under a hard import limit. The limit pass now sees that
 lag and covers it with another lever for the tick the charger needs. That cover is a *bridge*,
-not a correction (`controller/arbiter/lag_bridge.rs`, R-104): each pass reports the battery's
-bridging share (`battery_bridge_kw`), the tick stores the total in the arbiter diagnostics, and
-the next tick's `reconcile` takes it out of the battery's carried command before projecting.
+not a correction (`controller/arbiter/lag_bridge.rs`, R-104): each pass reports each storage
+asset's bridging share (`bridge_kw_by_asset`), the tick stores the per-asset total in the arbiter
+diagnostics, and the next tick's `reconcile` takes it out of that asset's carried command before
+projecting.
 Carried, it read as a deviation of its own once the charger's command had landed, and the arbiter
 cut the zero-cost EV to remove it: the EV and the battery alternated every tick while the site
-sat on plan. The VEN UI shows it as "Battery bridging the charger lag" (Devices → arbiter
-settings). Pinned by `arbiter_tests.rs::reconcile_settles_on_the_ev_under_the_real_charger_lag`
+sat on plan. The VEN UI shows it as "Storage bridging the charger lag", per asset (Devices →
+arbiter settings). Pinned by `arbiter_tests.rs::reconcile_settles_on_the_ev_under_the_real_charger_lag`
 and `both_passes_settle_under_a_hard_limit_with_the_real_charger_lag`, which step the real
 `EvCharger` between ticks.
 

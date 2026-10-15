@@ -151,6 +151,14 @@ impl Battery {
 }
 
 impl Asset for Battery {
+    fn arbiter_lever(&self) -> Option<crate::entities::asset::ArbiterLever> {
+        Some(crate::entities::asset::ArbiterLever {
+            kind: crate::entities::asset::ArbiterLeverKind::Storage,
+            rated_import_kw: self.max_charge_kw,
+            rated_export_kw: self.max_discharge_kw,
+        })
+    }
+
     fn key_features(&self, _state: &AssetState) -> Vec<KeyFeature> {
         vec![KeyFeature::energy_kwh("capacity", self.capacity_kwh)]
     }

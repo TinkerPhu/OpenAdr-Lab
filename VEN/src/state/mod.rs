@@ -450,6 +450,11 @@ impl AppState {
             .unwrap_or_default()
     }
 
+    /// Every EV's own settings record, by asset id (EVs without one read `Default`).
+    pub async fn ev_settings_all(&self) -> BTreeMap<String, EvSettings> {
+        self.hems.read().await.ev_settings.clone()
+    }
+
     pub async fn set_ev_settings(&self, asset_id: &str, s: EvSettings) {
         self.hems
             .write()
