@@ -101,6 +101,27 @@ describe("computeCo2RateGH", () => {
 
 // ─── deriveAssetSummaries — gridFraction cost allocation ──────────────────────
 
+describe("deriveAssetSummaries — per asset (W6)", () => {
+  it("shows a cell for each of two batteries, each with its own power and SoC", () => {
+    const sim: SimSnapshot = {
+      ts: new Date(NOW).toISOString(),
+      grid: makeGrid(),
+      assets: makeAssets({
+        "bat-b": { asset_type: "battery", power_kw: -2.0, soc: 0.3, roster_index: 2 },
+        "bat-a": { asset_type: "battery", power_kw: 1.5, soc: 0.8, roster_index: 1 },
+        ev: { power_kw: 0, soc: 0.5, roster_index: 0 },
+      }),
+    };
+    const summaries = deriveAssetSummaries(sim, [], [], {}, NOW);
+    expect(summaries.map((s) => s.assetId)).toEqual(["ev", "bat-a", "bat-b"]);
+    const batB = summaries.find((s) => s.assetId === "bat-b")!;
+    expect(batB.label).toBe("Battery · bat-b");
+    expect(batB.powerKw).toBe(-2.0);
+    expect(batB.socPct).toBeCloseTo(30);
+    expect(batB.color).toBe(summaries.find((s) => s.assetId === "bat-a")!.color);
+  });
+});
+
 describe("deriveAssetSummaries — gridFraction", () => {
   it("battery charging fully from PV shows zero cost rate", () => {
     // PV 4 kW, battery charging 3 kW, base_load 1 kW → grid net = 0

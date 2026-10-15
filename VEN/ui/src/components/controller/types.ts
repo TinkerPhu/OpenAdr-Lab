@@ -89,6 +89,8 @@ export type UserRequestSummary = {
 export type AssetSummary = {
   assetId: AssetId;
   label: string;
+  /** The asset's declared type (`asset_type`); a shiftable load's is `shiftable_load` (W6). */
+  assetType: string;
   color: string;
   /** Signed kW — positive = import from grid, negative = export */
   powerKw: number;

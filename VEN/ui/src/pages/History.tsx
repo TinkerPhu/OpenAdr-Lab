@@ -5,6 +5,7 @@ import {
 } from "@mui/material";
 import {
   useHistoryTicks, useHistoryGrid, useHistoryEvents, useHistoryReports, useHistoryForecastAccuracy,
+  useSim,
 } from "../api/hooks";
 import { dayRangeIso, last24hRangeIso } from "../utils/dayRange";
 import { useFrozenServerNowMs } from "../utils/useFrozenServerNowMs";
@@ -14,16 +15,13 @@ import { GridRatesChart } from "../components/controller/charts/GridRatesChart";
 import { SiteHeadroomChart } from "../components/controller/charts/SiteHeadroomChart";
 import { ASSET_COLORS, ASSET_LABELS } from "../components/controller/types";
 import { assetChartSpec } from "../components/controller/assetChartSpecs";
+import { assetTypeOf } from "../api/assets";
 import type { AssetTimelinePoint, TariffTimePoint } from "../components/controller/types";
 import type { ForecastAccuracyRow, SiteHeadroomSample } from "../api/types";
 
 /** History rows are one-minute means (`history_sampling.rs`). Rows further apart than this
  * mean the VEN was not sampling — a shading must not paint a state across that hole. */
 const HISTORY_MAX_GAP_MS = 5 * 60_000;
-
-/** forecast-accuracy-tracking: only these three assets get near/far forecast samples
- * recorded (see design.md Decision 5) — same set `record_forecast_accuracy_samples` writes. */
-const FORECAST_TRACKED_ASSETS = ["pv", "base_load"] as const;
 
 /** Rows per page for the "Events received"/"Reports sent" tables — both can hold far more
  * rows than a [from, to) window alone bounds (e.g. many active events on a short
@@ -97,8 +95,12 @@ export function HistoryPage() {
   const eventsQuery = useHistoryEvents(fromIso, toIso, HISTORY_TABLE_PAGE_SIZE, eventsOffset);
   const reportsQuery = useHistoryReports(fromIso, toIso, HISTORY_TABLE_PAGE_SIZE, reportsOffset);
   // Rules of hooks — fixed set, so called unconditionally rather than in the render loop below.
-  const pvForecastQuery = useHistoryForecastAccuracy(fromIso, toIso, "pv");
-  const baseLoadForecastQuery = useHistoryForecastAccuracy(fromIso, toIso, "base_load");
+  // forecast-accuracy-tracking: every asset's near/far samples in one query, grouped by asset
+  // below (W6) — the VEN records them for each forecast asset, whatever its id.
+  const forecastQuery = useHistoryForecastAccuracy(fromIso, toIso);
+  // Each asset's type picks its chart's state line and shadings (an asset no longer in the
+  // roster falls back to its id, which is its type on a default profile).
+  const { data: sim } = useSim();
 
   const { data: ticks = [] } = ticksQuery;
   const { data: grid = [] } = gridQuery;
@@ -106,12 +108,9 @@ export function HistoryPage() {
   const { data: reportsPage = { rows: [], total: 0 } } = reportsQuery;
   const events = eventsPage.rows;
   const reports = reportsPage.rows;
-  const { data: pvForecast = [] } = pvForecastQuery;
-  const { data: baseLoadForecast = [] } = baseLoadForecastQuery;
-  const forecastByAsset: Record<string, ForecastAccuracyRow[]> = {
-    pv: pvForecast,
-    base_load: baseLoadForecast,
-  };
+  const { data: forecastRows = [] } = forecastQuery;
+  const forecastByAsset: Record<string, ForecastAccuracyRow[]> = {};
+  for (const row of forecastRows) (forecastByAsset[row.asset_id] ??= []).push(row);
 
   // The query keys are derived from `date`, so react-query already refetches whenever the
   // date actually changes. This covers the cases where the user wants a refresh without a
@@ -127,8 +126,7 @@ export function HistoryPage() {
     gridQuery.refetch();
     eventsQuery.refetch();
     reportsQuery.refetch();
-    pvForecastQuery.refetch();
-    baseLoadForecastQuery.refetch();
+    forecastQuery.refetch();
   };
 
   // Clicking the date control means "show this day" even if the displayed value doesn't
@@ -258,9 +256,8 @@ export function HistoryPage() {
       />
 
       {[...ticksByAsset.entries()].map(([assetId, points]) => {
-        const chartSpec = assetChartSpec(assetId);
-        const isForecastTracked = (FORECAST_TRACKED_ASSETS as readonly string[]).includes(assetId);
-        const forecast = isForecastTracked ? forecastByAsset[assetId] : undefined;
+        const chartSpec = assetChartSpec(assetTypeOf(sim, assetId));
+        const forecast = forecastByAsset[assetId];
         return (
           <Box key={assetId} sx={{ mt: 2 }} data-testid={`history-asset-chart-${assetId}`}>
             <Typography variant="subtitle1">{ASSET_LABELS[assetId] ?? assetId}</Typography>

@@ -12,6 +12,10 @@ import { makeTariff } from "./fixtures/tariff";
 
 // ─── buildTariffPricePoints ───────────────────────────────────────────────────
 
+
+/** A default roster: the assets whose timelines are enriched. */
+const ROSTER = ["ev", "heater", "pv", "battery", "base_load"];
+
 describe("buildTariffPricePoints", () => {
   function makeTariff(overrides: Partial<ApiTariffSnapshot> = {}): ApiTariffSnapshot {
     return {
@@ -279,7 +283,7 @@ describe("enrichAllAssetTimelines", () => {
     // EV draws 4 kW, all from grid (PV = 0)
     const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
     const timelines = makeAllTimelines(4.0, 0, 4.0);
-    const result = enrichAllAssetTimelines(timelines, tariffs);
+    const result = enrichAllAssetTimelines(timelines, tariffs, ROSTER);
     expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBeCloseTo(0.80); // 4 × 0.20
     expect(result["ev"][0].values?.["co2_rate_g_h"]).toBeCloseTo(1200);    // 4 × 300
   });
@@ -288,7 +292,7 @@ describe("enrichAllAssetTimelines", () => {
     // EV draws 3 kW, PV generates 3 kW, grid import = 0
     const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
     const timelines = makeAllTimelines(3.0, -3.0, 0);
-    const result = enrichAllAssetTimelines(timelines, tariffs);
+    const result = enrichAllAssetTimelines(timelines, tariffs, ROSTER);
     expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBeCloseTo(0);
     expect(result["ev"][0].values?.["co2_rate_g_h"]).toBeCloseTo(0);
   });
@@ -297,7 +301,7 @@ describe("enrichAllAssetTimelines", () => {
     // EV draws 4 kW, PV generates 2 kW, grid import = 2 kW
     const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
     const timelines = makeAllTimelines(4.0, -2.0, 2.0);
-    const result = enrichAllAssetTimelines(timelines, tariffs);
+    const result = enrichAllAssetTimelines(timelines, tariffs, ROSTER);
     // gridFraction = 2/4 = 0.5; effectiveKw = 4 × 0.5 = 2; cost = 2 × 0.20 = 0.40
     expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBeCloseTo(0.40);
   });
@@ -311,7 +315,7 @@ describe("enrichAllAssetTimelines", () => {
       co2_g_kwh: 300,
     })];
     const timelines = makeAllTimelines(0, -5.0, -5.0);
-    const result = enrichAllAssetTimelines(timelines, tariffs);
+    const result = enrichAllAssetTimelines(timelines, tariffs, ROSTER);
     // pv power_kw = -5; cost = -5 × 0.06 = -0.30
     expect(result["pv"][0].values?.["cost_rate_eur_h"]).toBeCloseTo(-0.30);
     expect(result["pv"][0].values?.["co2_rate_g_h"]).toBeCloseTo(-1500);   // -5 × 300
@@ -323,13 +327,13 @@ describe("enrichAllAssetTimelines", () => {
       ev: [{ ts: 200, values: { power_kw: 4.0, cost_rate_eur_h: 0.55 } }],
       heater: [], pv: [], battery: [], base_load: [], grid: [{ ts: 200, values: { power_kw: 4.0 } }],
     };
-    const result = enrichAllAssetTimelines(timelines, tariffs);
+    const result = enrichAllAssetTimelines(timelines, tariffs, ROSTER);
     expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBe(0.55);
   });
 
   it("leaves rates absent when no applicable tariff exists", () => {
     const timelines = makeAllTimelines(4.0, 0, 4.0);
-    const result = enrichAllAssetTimelines(timelines, []);
+    const result = enrichAllAssetTimelines(timelines, [], ROSTER);
     expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBeUndefined();
     expect(result["ev"][0].values?.["co2_rate_g_h"]).toBeUndefined();
   });
@@ -346,7 +350,7 @@ describe("enrichAllAssetTimelines", () => {
       base_load: [{ ts: 200, values: { power_kw: 0.0 } }],
       grid:      [{ ts: 200, values: { power_kw: 0.0008 } }],
     };
-    const result = enrichAllAssetTimelines(timelines, tariffs);
+    const result = enrichAllAssetTimelines(timelines, tariffs, ROSTER);
     expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBe(0);
     expect(result["ev"][0].values?.["co2_rate_g_h"]).toBe(0);
   });
@@ -360,7 +364,7 @@ describe("enrichAllAssetTimelines", () => {
       co2_g_kwh: 300,
     })];
     const timelines = makeAllTimelines(0, -0.0005, -0.0005);
-    const result = enrichAllAssetTimelines(timelines, tariffs);
+    const result = enrichAllAssetTimelines(timelines, tariffs, ROSTER);
     expect(result["pv"][0].values?.["cost_rate_eur_h"]).toBe(0);
     expect(result["pv"][0].values?.["co2_rate_g_h"]).toBe(0);
   });
@@ -374,7 +378,7 @@ describe("enrichAllAssetTimelines", () => {
       heater:    [], pv: [], battery: [], base_load: [],
       grid:      [{ ts: 200, values: { power_kw: 4.0e-9 } }],
     };
-    const result = enrichAllAssetTimelines(timelines, tariffs);
+    const result = enrichAllAssetTimelines(timelines, tariffs, ROSTER);
     expect(result["ev"][0].values?.["cost_rate_eur_h"]).toBe(0);
     expect(result["ev"][0].values?.["co2_rate_g_h"]).toBe(0);
   });
@@ -382,7 +386,7 @@ describe("enrichAllAssetTimelines", () => {
   it("passes grid timeline through unchanged", () => {
     const tariffs = [makeTariffSnapshot(100, 0.20, 300)];
     const timelines = makeAllTimelines(4.0, 0, 4.0);
-    const result = enrichAllAssetTimelines(timelines, tariffs);
+    const result = enrichAllAssetTimelines(timelines, tariffs, ROSTER);
     expect(result["grid"]).toBe(timelines["grid"]); // same reference
   });
 });

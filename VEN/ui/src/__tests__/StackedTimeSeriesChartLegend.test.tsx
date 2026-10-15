@@ -117,10 +117,10 @@ describe("StackedTimeSeriesChart — legend", () => {
     expect(screen.getByText("EV (planned)")).toHaveStyle({ color: colorMap.ev });
   });
 
-  it("renders pv's Area first (closest to the X axis) regardless of assetIds order", () => {
-    // assetIds is ["ev", "pv"] — pv must still render before ev in both the
-    // positive and negative stacks, since pv sits at the base of the stack.
-    render(<StackedTimeSeriesChart data={data} assetIds={assetIds} colorMap={colorMap} nowMs={now} />);
+  // W6: the chart stacks in the order it is handed; the order itself is `stackOrder`'s rule
+  // (generation nearest the axis, whatever the asset's id — pinned in assets.test.ts).
+  it("renders the Areas in the stacking order it is handed", () => {
+    render(<StackedTimeSeriesChart data={data} assetIds={["pv", "ev"]} colorMap={colorMap} nowMs={now} />);
     const posNames = areas.filter((a) => (a.name as string).endsWith(" +")).map((a) => a.name);
     const negNames = areas.filter((a) => (a.name as string).endsWith(" -")).map((a) => a.name);
     expect(posNames.indexOf("pv +")).toBeLessThan(posNames.indexOf("ev +"));

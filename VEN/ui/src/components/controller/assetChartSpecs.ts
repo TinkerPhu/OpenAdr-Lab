@@ -123,7 +123,8 @@ const ASSET_CHART_SPECS: Record<string, AssetChartSpec> = {
 
 const NO_SPEC: AssetChartSpec = {};
 
-/** Unknown assets (shiftable loads, base load) draw the power line alone. */
-export function assetChartSpec(assetId: string): AssetChartSpec {
-  return ASSET_CHART_SPECS[assetId] ?? NO_SPEC;
+/** The chart declaration of an asset type (`asset_type`, W6: whatever the asset's id). Other
+ * types (shiftable loads, base load) draw the power line alone. */
+export function assetChartSpec(assetType: string): AssetChartSpec {
+  return ASSET_CHART_SPECS[assetType] ?? NO_SPEC;
 }

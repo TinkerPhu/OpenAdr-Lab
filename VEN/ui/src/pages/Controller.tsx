@@ -6,6 +6,7 @@ import { useSim, useTariffs, useRequests, useSimInject, useSetSimInject, useRese
 import type { AssetId, CollapseState } from "../components/controller/types";
 import { deriveAssetSummaries, deriveTariffConditions } from "../components/controller/dataBuilders";
 import { enrichAllAssetTimelines } from "../components/controller/tariffBuilders";
+import { assetsInRosterOrder } from "../api/assets";
 import { AssetCell } from "../components/controller/AssetCell";
 import { PinnedZone } from "../components/controller/PinnedZone";
 import { GridTariffCell } from "../components/controller/GridTariffCell";
@@ -113,8 +114,13 @@ export function ControllerPage() {
   // Requires allTimelines so gridFraction can be computed per timestamp — PV-covered
   // load is correctly costed at zero, and export produces negative (revenue) rates.
   const enrichedTimelines = useMemo(
-    () => enrichAllAssetTimelines(allTimelines, tariffs),
-    [allTimelines, tariffs]
+    () =>
+      enrichAllAssetTimelines(
+        allTimelines,
+        tariffs,
+        assetsInRosterOrder(sim).map(([id]) => id),
+      ),
+    [allTimelines, tariffs, sim]
   );
 
   const assetSummaries = useMemo(() => {

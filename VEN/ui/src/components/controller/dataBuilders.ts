@@ -16,12 +16,14 @@ import type {
 } from "./types";
 import { ASSET_COLORS, ASSET_LABELS, COLOR_ASSET_FALLBACK } from "./types";
 import type {
+  AssetSnapshot,
   TariffSnapshot as ApiTariffSnapshot,
   SimSnapshot,
   UserRequest,
 } from "../../api/types";
 import type { AssetTimelinePoint } from "./types";
 import { assetValue } from "../../api/assetValue";
+import { assetsInRosterOrder } from "../../api/assets";
 
 // ─── computeCostRateEurH ─────────────────────────────────────────────────────
 
@@ -75,6 +77,70 @@ export function findCurrentTariff(
 
 // ─── deriveAssetSummaries ─────────────────────────────────────────────────────
 
+const numeric = (v: unknown): number | null => (typeof v === "number" ? v : null);
+
+/** What a Controller cell shows for an asset, read from its own snapshot. */
+type SummaryFields = {
+  powerKw: number;
+  socPct?: number | null;
+  tempC?: number | null;
+  maxImportKw?: number | null;
+  maxExportKw?: number | null;
+  capacityKwh?: number | null;
+};
+
+/** Each asset type's cell: its label and what it reads from the asset's snapshot — declared per
+ * type, not branched on per id (`declare-dont-branch`, W6). */
+const SUMMARY_BY_TYPE: Record<string, { label: string; read: (a: AssetSnapshot) => SummaryFields }> = {
+  ev: {
+    label: "EV",
+    read: (a) => ({
+      powerKw: a.power_kw,
+      socPct: (assetValue(a, "soc") ?? 0) * 100,
+      maxImportKw: numeric(assetValue(a, "max_charge_kw")),
+      capacityKwh: numeric(assetValue(a, "battery_kwh")),
+    }),
+  },
+  heater: {
+    label: "Heater",
+    read: (a) => {
+      const tempMinC = numeric(assetValue(a, "temp_min_c"));
+      const tempMaxC = numeric(assetValue(a, "temp_max_c"));
+      const thermalMassKwhPerC = numeric(assetValue(a, "thermal_mass_kwh_per_c"));
+      return {
+        powerKw: a.power_kw,
+        tempC: numeric(assetValue(a, "temp_c")),
+        maxImportKw: numeric(assetValue(a, "max_kw")),
+        capacityKwh:
+          tempMinC !== null && tempMaxC !== null && thermalMassKwhPerC !== null
+            ? (tempMaxC - tempMinC) * thermalMassKwhPerC
+            : null,
+      };
+    },
+  },
+  pv: {
+    label: "PV",
+    read: (a) => ({
+      powerKw: -Math.abs(a.power_kw),
+      maxExportKw: numeric(assetValue(a, "rated_kw")),
+    }),
+  },
+  battery: {
+    label: "Battery",
+    read: (a) => ({
+      powerKw: a.power_kw,
+      socPct: (assetValue(a, "soc") ?? 0) * 100,
+      maxImportKw: numeric(assetValue(a, "max_charge_kw")),
+      maxExportKw: numeric(assetValue(a, "max_discharge_kw")),
+      capacityKwh: numeric(assetValue(a, "capacity_kwh")),
+    }),
+  },
+  base_load: { label: "Base Load", read: (a) => ({ powerKw: a.power_kw }) },
+};
+
+/** The order the Controller lists cells in, by asset type; others follow. */
+const SUMMARY_TYPE_ORDER = ["ev", "heater", "pv", "battery", "base_load"];
+
 /**
  * Build AssetSummary[] from live sim data, tariffs, user requests, and plan.
  * One entry per asset present in SimSnapshot.
@@ -107,7 +173,8 @@ export function deriveAssetSummaries(
     tempC: number | null = null,
     maxImportKw: number | null = null,
     maxExportKw: number | null = null,
-    capacityKwh: number | null = null
+    capacityKwh: number | null = null,
+    assetType: string | null = null
   ): AssetSummary {
     // For consuming assets (powerKw >= 0) scale by gridFraction so only the
     // grid-sourced portion incurs cost. Generating assets (powerKw < 0) are
@@ -125,8 +192,9 @@ export function deriveAssetSummaries(
 
     return {
       assetId,
+      assetType: assetType ?? assetId,
       label,
-      color: ASSET_COLORS[assetId] ?? COLOR_ASSET_FALLBACK,
+      color: ASSET_COLORS[assetId] ?? ASSET_COLORS[assetType ?? ""] ?? COLOR_ASSET_FALLBACK,
       powerKw,
       costRateEurH,
       co2RateGH,
@@ -141,92 +209,46 @@ export function deriveAssetSummaries(
     };
   }
 
-  const numeric = (v: unknown): number | null => (typeof v === "number" ? v : null);
-
-  const evAsset = sim.assets["ev"];
-  if (evAsset) {
-    summaries.push(
-      makeSummary(
-        "ev",
-        "EV",
-        evAsset.power_kw,
-        (assetValue(evAsset, "soc") ?? 0) * 100,
-        null,
-        numeric(assetValue(evAsset, "max_charge_kw")),
-        null,
-        numeric(assetValue(evAsset, "battery_kwh"))
-      )
-    );
-  }
-  const heaterAsset = sim.assets["heater"];
-  if (heaterAsset) {
-    const tempC = numeric(assetValue(heaterAsset, "temp_c"));
-    const tempMinC = numeric(assetValue(heaterAsset, "temp_min_c"));
-    const tempMaxC = numeric(assetValue(heaterAsset, "temp_max_c"));
-    const thermalMassKwhPerC = numeric(assetValue(heaterAsset, "thermal_mass_kwh_per_c"));
-    const capacityKwh =
-      tempMinC !== null && tempMaxC !== null && thermalMassKwhPerC !== null
-        ? (tempMaxC - tempMinC) * thermalMassKwhPerC
-        : null;
-    summaries.push(
-      makeSummary(
-        "heater",
-        "Heater",
-        heaterAsset.power_kw,
-        null,
-        tempC,
-        numeric(assetValue(heaterAsset, "max_kw")),
-        null,
-        capacityKwh
-      )
-    );
-  }
-  const pvAsset = sim.assets["pv"];
-  if (pvAsset) {
-    summaries.push(
-      makeSummary(
-        "pv",
-        "PV",
-        -Math.abs(pvAsset.power_kw),
-        null,
-        null,
-        null,
-        numeric(assetValue(pvAsset, "rated_kw"))
-      )
-    );
-  }
-  const batteryAsset = sim.assets["battery"];
-  if (batteryAsset) {
-    summaries.push(
-      makeSummary(
-        "battery",
-        "Battery",
-        batteryAsset.power_kw,
-        (assetValue(batteryAsset, "soc") ?? 0) * 100,
-        null,
-        numeric(assetValue(batteryAsset, "max_charge_kw")),
-        numeric(assetValue(batteryAsset, "max_discharge_kw")),
-        numeric(assetValue(batteryAsset, "capacity_kwh"))
-      )
-    );
-  }
-  // BaseLoad is always present
-  const baseLoadAsset = sim.assets["base_load"];
-  summaries.push(
-    makeSummary("base_load", "Base Load", (baseLoadAsset?.power_kw ?? 0), null)
-  );
-
-  // Dynamic assets (shiftable loads: wm, dw, etc.) — anything not in the hardcoded set.
+  // One summary per asset of the roster (W6), ordered by type as the cells always were, then
+  // by roster; each read from its own snapshot through its type's declaration. A second asset
+  // of a kind is labelled with its id ("EV · car-b"); an asset of no declared type (a
+  // shiftable load: wm, dw, ...) by its own label or id.
   // Invariant this relies on: every key in `sim.assets` is a real simulator asset with a
   // `GET /capability/:asset_id` endpoint behind it. A backend-only pseudo-asset injected
   // into the same map would be summarized here as if it were a device, rendering a tile and
   // firing a capability request that 404s — which is exactly what the removed `site-residual`
   // virtual asset did (see docs/architecture/forecasting_model.md).
-  const HARDCODED_IDS = new Set(["ev", "heater", "pv", "battery", "base_load"]);
-  for (const [assetId, assetData] of Object.entries(sim.assets)) {
-    if (HARDCODED_IDS.has(assetId)) continue;
-    const label = ASSET_LABELS[assetId] ?? assetId.toUpperCase();
-    summaries.push(makeSummary(assetId, label, assetData.power_kw, null));
+  const typeRank = (t: string) => {
+    const i = SUMMARY_TYPE_ORDER.indexOf(t);
+    return i < 0 ? SUMMARY_TYPE_ORDER.length : i;
+  };
+  const ordered = assetsInRosterOrder(sim).sort(
+    ([, a], [, b]) => typeRank(a.asset_type) - typeRank(b.asset_type),
+  );
+  for (const [assetId, asset] of ordered) {
+    const spec = SUMMARY_BY_TYPE[asset.asset_type];
+    if (!spec) {
+      const label = ASSET_LABELS[assetId] ?? assetId.toUpperCase();
+      summaries.push(
+        makeSummary(assetId, label, asset.power_kw, null, null, null, null, null, asset.asset_type),
+      );
+      continue;
+    }
+    const label = assetId === asset.asset_type ? spec.label : `${spec.label} · ${assetId}`;
+    const f = spec.read(asset);
+    summaries.push(
+      makeSummary(
+        assetId,
+        label,
+        f.powerKw,
+        f.socPct ?? null,
+        f.tempC ?? null,
+        f.maxImportKw ?? null,
+        f.maxExportKw ?? null,
+        f.capacityKwh ?? null,
+        asset.asset_type,
+      ),
+    );
   }
 
   return summaries;

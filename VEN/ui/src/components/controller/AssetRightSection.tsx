@@ -15,23 +15,21 @@ import { assetValue } from "../../api/assetValue";
  * after posting the override the UI releases its local hold so the slider
  * tracks the live sim value as it blends back to the natural baseline.
  *
- * Maps inject key → function that reads the live value from a SimSnapshot.
+ * Maps inject key → the state value it is read back from, on this section's own asset (W6:
+ * whatever its id). `heater_temp_c` is a one-shot reset the backend clears after one tick, so
+ * the slider tracks the live temperature after posting.
  */
-const DECAY_CONTROLS: Record<string, (sim: SimSnapshot | undefined) => number | null> = {
-  pv_irradiance: (sim) => {
-    const v = assetValue(sim?.assets?.["pv"], "irradiance");
-    return typeof v === "number" ? v : null;
-  },
-  base_load_kw: (sim) => {
-    const v = assetValue(sim?.assets?.["base_load"], "baseline_kw");
-    return typeof v === "number" ? v : null;
-  },
-  // One-shot temperature reset: backend clears it after one tick so the slider
-  // must track the live sim temperature after posting (Behaviour B).
-  heater_temp_c: (sim) => {
-    const v = assetValue(sim?.assets?.["heater"], "temp_c");
-    return typeof v === "number" ? v : null;
-  },
+const DECAY_VALUE_KEY: Record<string, string> = {
+  pv_irradiance: "irradiance",
+  base_load_kw: "baseline_kw",
+  heater_temp_c: "temp_c",
+};
+
+/** Persistent overrides with no override set read back the asset's own live value. */
+const LIVE_VALUE_KEY: Record<string, string> = {
+  ev_soc_target: "soc_target",
+  heater_temp_min_c: "temp_min_c",
+  heater_temp_max_c: "temp_max_c",
 };
 
 interface AssetRightSectionProps {
@@ -50,11 +48,14 @@ export function AssetRightSection({
   onResetSoc,
 }: AssetRightSectionProps) {
   const { data: schema = {} } = useSimSchema();
+  const asset = sim?.assets?.[assetId];
+  const isHeater = asset?.asset_type === "heater";
   // heater_temp_c is rendered by the dedicated T_tank hardcoded slider below;
   // exclude it from schema-driven DynamicControl to avoid a duplicate.
   const controls = (schema[assetId] ?? []).filter(
-    (d) => !(assetId === "heater" && d.key === "heater_temp_c")
+    (d) => !(isHeater && d.key === "heater_temp_c")
   );
+  const ownValue = (key: string): number | null => assetValue(asset, key) ?? null;
 
   const socRaw = assetValue(sim?.assets?.[assetId], "soc") ?? null;
   const liveSocPct = socRaw !== null && socRaw !== undefined ? socRaw * 100 : null;
@@ -94,7 +95,7 @@ export function AssetRightSection({
     // Decay controls (Behaviour B): release the local hold after posting so
     // the slider follows the live sim value as the backend EMA-blends back.
     // Alpha knobs are config, not measurements — they retain local state.
-    if (key in DECAY_CONTROLS) {
+    if (key in DECAY_VALUE_KEY) {
       setLocalControlValues(prev => {
         const next = { ...prev };
         delete next[key];
@@ -108,7 +109,7 @@ export function AssetRightSection({
     // Decay controls (Behaviour B): the backend clears the inject field within
     // one tick after applying the offset. Read from live sim so the slider
     // follows the decaying value rather than the stale inject cache.
-    if (key in DECAY_CONTROLS) return DECAY_CONTROLS[key](sim);
+    if (key in DECAY_VALUE_KEY) return ownValue(DECAY_VALUE_KEY[key]);
     if (overrides != null) {
       const v = (overrides as Record<string, unknown>)[key];
       if (typeof v === "number" || typeof v === "boolean") return v;
@@ -116,29 +117,16 @@ export function AssetRightSection({
     // Fall back to the sim's actual current value so controls reflect reality
     // when no override is active (null override means "use sim default").
     if (key === "ev_plugged") {
-      const p = assetValue(sim?.assets?.["ev"], "plugged");
-      return p !== undefined ? p !== 0 : null;
+      const p = ownValue("plugged");
+      return p !== null ? p !== 0 : null;
     }
-    if (key === "ev_soc_target") {
-      const t = assetValue(sim?.assets?.["ev"], "soc_target");
-      return typeof t === "number" ? t : null;
-    }
-    // Persistent heater comfort-band overrides: fall back to live sim values.
-    if (key === "heater_temp_min_c") {
-      const v = assetValue(sim?.assets?.["heater"], "temp_min_c");
-      return typeof v === "number" ? v : null;
-    }
-    if (key === "heater_temp_max_c") {
-      const v = assetValue(sim?.assets?.["heater"], "temp_max_c");
-      return typeof v === "number" ? v : null;
-    }
-    return null;
+    return key in LIVE_VALUE_KEY ? ownValue(LIVE_VALUE_KEY[key]) : null;
   }
 
   // T_tank: live tank temperature for heater assets. Uses the existing
-  // DECAY_CONTROLS["heater_temp_c"] path via getValue so the slider tracks
+  // DECAY_VALUE_KEY["heater_temp_c"] path via getValue so the slider tracks
   // the live sim value at rest and the drag value while moving.
-  const tankC = assetId === "heater" ? getValue("heater_temp_c") : null;
+  const tankC = isHeater ? getValue("heater_temp_c") : null;
   const hasTank = typeof tankC === "number";
 
   return (
@@ -173,7 +161,7 @@ export function AssetRightSection({
 
         {/* T_tank lever — heater assets only. Tooltip shows full precision for
             observing thermal dynamics. One-shot inject (Behaviour A): slider
-            follows live sim temp_c after commit via DECAY_CONTROLS. */}
+            follows live sim temp_c after commit via DECAY_VALUE_KEY. */}
         {hasTank && (
           <Box>
             <Typography variant="caption">

@@ -17,12 +17,27 @@ export function makeAsset(fields: AssetFields = {}): AssetSnapshot {
     embodied_co2_g_kwh: null,
     step_rule: "CONTINUOUS",
     snap_to_zero_below_kw: 0,
+    roster_index: 0,
     ...fields,
   } as AssetSnapshot;
 }
 
+/** The ids a default profile gives each kind: an asset with one of these ids is of that type. */
+const DEFAULT_TYPED_IDS = ["ev", "heater", "pv", "battery", "base_load"];
+
+/** Assets by id, in the order written (`roster_index`). An asset with a default id that states no
+ * `asset_type` is of the type its id names, as a default profile's is. */
 export function makeAssets(assets: Record<string, AssetFields>): Record<string, AssetSnapshot> {
-  return Object.fromEntries(Object.entries(assets).map(([id, a]) => [id, makeAsset(a)]));
+  return Object.fromEntries(
+    Object.entries(assets).map(([id, a], i) => [
+      id,
+      makeAsset({
+        asset_type: DEFAULT_TYPED_IDS.includes(id) ? id : "unknown",
+        roster_index: i,
+        ...a,
+      }),
+    ]),
+  );
 }
 
 export function makeGrid(fields: Partial<GridSnapshot> = {}): GridSnapshot {

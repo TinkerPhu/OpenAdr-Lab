@@ -9,6 +9,7 @@ import type { ZoneDef } from "../../api/types";
 import { AssetLeftSection } from "./AssetLeftSection";
 import { AssetMidSection } from "./AssetMidSection";
 import { AssetRightSection } from "./AssetRightSection";
+import { assetTypeOf } from "../../api/assets";
 import type { SimSnapshot, SimInjectState } from "../../api/types";
 import {
   DEFAULT_WINDOW, EXTENDED_WINDOW, DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
@@ -51,7 +52,8 @@ export function AssetCell({
   onResetSoc,
 }: AssetCellProps) {
   const cellId = `asset:${assetId}`;
-  const color = ASSET_COLORS[assetId] ?? COLOR_ASSET_FALLBACK;
+  const color =
+    ASSET_COLORS[assetId] ?? ASSET_COLORS[assetTypeOf(simSnapshot, assetId)] ?? COLOR_ASSET_FALLBACK;
 
   // Display window: each cell clips its chart domain independently.
   // The shared useAllTimelines query on the page always fetches the widest
@@ -76,6 +78,7 @@ export function AssetCell({
       {/* Mid section — timeline graph */}
       <AssetMidSection
         assetId={assetId}
+        assetType={assetTypeOf(simSnapshot, assetId)}
         timePoints={timePoints}
         color={color}
         nowMs={nowMs}

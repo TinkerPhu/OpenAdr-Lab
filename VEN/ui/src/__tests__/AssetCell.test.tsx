@@ -50,6 +50,7 @@ function makeAssetSummary(
 ): AssetSummary {
   return {
     assetId,
+    assetType: "ev",
     label: "EV",
     color: "#2196F3",
     powerKw: 3.0,

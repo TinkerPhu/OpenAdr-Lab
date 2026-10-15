@@ -9,7 +9,7 @@ import type {
   UserRequestWithSession, EvSettings, EvUsageSimState, ArbiterSettings, ArbiterDiagnostics, SimSnapshot,
   AssetCapabilityView,
 } from "../api/types";
-import { makeGrid, makeAssets } from "./fixtures/sim";
+import { makeGrid, makeAssets, makeSim } from "./fixtures/sim";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
@@ -249,7 +249,8 @@ describe("DevicesPage", () => {
       deviation_arbiter_enabled: false,
       limit_enforcement_enabled: true,
     });
-    mockSimData.mockReturnValue(undefined);
+    // The VEN's roster: one EV and one heater, as a default profile has (W6: a card per asset).
+    mockSimData.mockReturnValue(makeSim({ ev: {}, heater: {} }));
     mockArbiterDiagnosticsData.mockReturnValue(emptyArbiterDiagnostics);
     mockEvUsageSimData.mockReturnValue(null);
   });
@@ -266,6 +267,7 @@ describe("DevicesPage", () => {
 
   // 1b. Specs table (R-59 UI follow-up): absent without sim data
   it("omits the device specs table when no sim data is available", () => {
+    mockSimData.mockReturnValue(undefined);
     renderPage();
     expect(screen.queryByTestId("asset-specs-table")).toBeNull();
   });
@@ -283,6 +285,40 @@ describe("DevicesPage", () => {
     expect(screen.getByTestId("asset-specs-table")).toBeInTheDocument();
     const row = screen.getByTestId("asset-specs-row-ev");
     expect(within(row).getByText(/60\.0 kWh/)).toBeInTheDocument();
+  });
+
+  // W6: one card per EV, each with its own settings and requests, titled with its asset id.
+  it("shows one card per EV, each with its own opportunistic-charging switch", () => {
+    mockSimData.mockReturnValue(
+      makeSim({ "car-a": { asset_type: "ev" }, heater: {}, "car-b": { asset_type: "ev" } }),
+    );
+    renderPage();
+    const cards = screen.getAllByTestId("ev-card");
+    expect(cards.map((c) => c.getAttribute("data-asset-id"))).toEqual(["car-a", "car-b"]);
+    expect(within(cards[1]).getByText("car-b")).toBeInTheDocument();
+    expect(within(cards[0]).getByTestId("ev-opportunistic-charging-switch")).toBeInTheDocument();
+    expect(within(cards[1]).getByTestId("ev-opportunistic-charging-switch")).toBeInTheDocument();
+  });
+
+  it("a request from the second EV's card names that EV", async () => {
+    mockSimData.mockReturnValue(
+      makeSim({ "car-a": { asset_type: "ev" }, "car-b": { asset_type: "ev" } }),
+    );
+    mockPostRequest.mockResolvedValue({});
+    renderPage();
+    const second = screen.getAllByTestId("ev-card")[1];
+    await userEvent.click(within(second).getByTestId("ev-plan-btn"));
+    await userEvent.click(screen.getByTestId("ev-dialog-confirm"));
+    await waitFor(() =>
+      expect(mockPostRequest).toHaveBeenCalledWith(expect.objectContaining({ asset_id: "car-b" })),
+    );
+  });
+
+  it("shows no EV card on a VEN without an EV", () => {
+    mockSimData.mockReturnValue(makeSim({ heater: {} }));
+    renderPage();
+    expect(screen.queryByTestId("ev-card")).toBeNull();
+    expect(screen.getByTestId("heater-idle-view")).toBeInTheDocument();
   });
 
   // 2. EV active request

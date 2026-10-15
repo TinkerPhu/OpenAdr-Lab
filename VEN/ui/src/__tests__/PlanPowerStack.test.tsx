@@ -4,6 +4,7 @@
  * backend-computed timeline (net_import_kw - net_export_kw), not from
  * net_import_kw alone.
  */
+import { makeSim } from "./fixtures/sim";
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { PlanPowerStack } from "../components/planner/PlanPowerStack";
@@ -37,6 +38,17 @@ const useAllTimelinesSpy = vi.fn<(hoursBack?: number, hoursForward?: number) => 
 vi.mock("../api/hooks", () => ({
   useAllTimelines: (hoursBack?: number, hoursForward?: number) =>
     useAllTimelinesSpy(hoursBack, hoursForward),
+  // The roster whose series the stack draws (W6): a default profile plus a shiftable load.
+  useSim: () => ({
+    data: makeSim({
+      base_load: {},
+      ev: {},
+      wm: { asset_type: "shiftable_load" },
+      heater: {},
+      battery: {},
+      pv: {},
+    }),
+  }),
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -139,6 +151,8 @@ describe("PlanPowerStack", () => {
 
     render(<PlanPowerStack plan={plan} />);
 
-    expect(capturedProps?.assetIds).toEqual(["base_load", "pv"]);
+    // Handed in stacking order (W6: `stackOrder`, generation first) — the order the chart
+    // drew before, when it moved PV to the front itself.
+    expect(capturedProps?.assetIds).toEqual(["pv", "base_load"]);
   });
 });
