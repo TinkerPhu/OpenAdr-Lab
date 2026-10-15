@@ -6,6 +6,8 @@ import { assetChartSpec } from "./assetChartSpecs";
 import type { ZoneDef } from "../../api/types";
 
 interface AssetMidSectionProps {
+  /** The asset's declared type (`asset_type`), which picks its chart declaration (W6). */
+  assetType: string;
   assetId: AssetId;
   timePoints: AssetTimelinePoint[];
   color: string;
@@ -18,6 +20,7 @@ interface AssetMidSectionProps {
 
 export function AssetMidSection({
   assetId,
+  assetType,
   timePoints,
   color,
   nowMs,
@@ -26,7 +29,7 @@ export function AssetMidSection({
   zones,
   xAxisTickIntervalMinutes,
 }: AssetMidSectionProps) {
-  const chartSpec = assetChartSpec(assetId);
+  const chartSpec = assetChartSpec(assetType);
 
   return (
     <Box

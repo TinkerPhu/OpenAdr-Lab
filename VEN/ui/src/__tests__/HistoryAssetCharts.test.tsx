@@ -38,6 +38,8 @@ const mockTicks = [
 
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
+  // No snapshot: each asset's chart takes the type its id names, as on a default profile.
+  useSim: () => ({ data: undefined }),
   useHistoryTicks: () => ({ data: mockTicks, refetch: vi.fn() }),
   useHistoryGrid: () => ({ data: [], refetch: vi.fn() }),
   useHistoryEvents: () => ({ data: { rows: [], total: 0 }, refetch: vi.fn() }),

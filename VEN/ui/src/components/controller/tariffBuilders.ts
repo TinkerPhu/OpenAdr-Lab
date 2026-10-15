@@ -2,8 +2,6 @@ import type { CapacitySnapshot as ApiCapacitySnapshot, TariffSnapshot as ApiTari
 import { NEAR_ZERO_KW } from "../../thresholds";
 import type { AssetTimelinePoint, TariffTimePoint } from "./types";
 
-const ASSET_IDS = ["ev", "heater", "pv", "battery", "base_load"] as const;
-
 // ─── Internal LOCF tariff lookup ─────────────────────────────────────────────
 
 type TariffLookupEntry = {
@@ -151,12 +149,14 @@ export function fillCostRateFromTariffs(
  *
  * Sign convention matches backend plan-slot allocations (negative = credit/revenue).
  *
- * Returns a new allTimelines record with enriched per-asset arrays; the grid and
+ * `assetIds` are the roster's assets (W6: every one, whatever its id or kind, shiftable loads
+ * included). Returns a new allTimelines record with enriched per-asset arrays; the grid and
  * any other non-asset keys are passed through unchanged.
  */
 export function enrichAllAssetTimelines(
   allTimelines: Record<string, AssetTimelinePoint[]>,
-  tariffs: ApiTariffSnapshot[]
+  tariffs: ApiTariffSnapshot[],
+  assetIds: readonly string[],
 ): Record<string, AssetTimelinePoint[]> {
   const lookup = buildTariffLookup(tariffs);
 
@@ -170,7 +170,7 @@ export function enrichAllAssetTimelines(
     infoByTs.set(gp.ts, { gridKw, totalConsumeKw: 0 });
   }
 
-  for (const assetId of ASSET_IDS) {
+  for (const assetId of assetIds) {
     for (const p of allTimelines[assetId] ?? []) {
       const info = infoByTs.get(p.ts);
       if (info) {
@@ -182,7 +182,7 @@ export function enrichAllAssetTimelines(
   // Enrich each asset's timeline.
   const result: Record<string, AssetTimelinePoint[]> = {};
 
-  for (const assetId of ASSET_IDS) {
+  for (const assetId of assetIds) {
     result[assetId] = (allTimelines[assetId] ?? []).map((p) => {
       const vals = p.values;
       if (!vals || vals["power_kw"] == null) return p;
@@ -238,7 +238,7 @@ export function enrichAllAssetTimelines(
 
   // Pass through grid and any other non-asset timelines unchanged.
   for (const key of Object.keys(allTimelines)) {
-    if (!(ASSET_IDS as readonly string[]).includes(key)) {
+    if (!assetIds.includes(key)) {
       result[key] = allTimelines[key];
     }
   }

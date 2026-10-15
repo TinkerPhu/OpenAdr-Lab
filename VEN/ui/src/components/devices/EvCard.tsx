@@ -70,6 +70,8 @@ const USAGE_MODE_DISPLAY: Record<EvUsageMode, { label: string; planningChip: str
 // ── Props ────────────────────────────────────────────────────────────────────
 
 export type EvCardProps = {
+  /** The EV this card shows and requests for (W6: one card per EV). */
+  assetId: string;
   /** Every active EV request, in window order. An EV may hold several queued
    *  sessions; showing only the first would hide plans the planner is serving. */
   requests: UserRequestWithSession[];
@@ -90,7 +92,7 @@ export type EvCardProps = {
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function EvCard(props: EvCardProps) {
-  const { requests, evSettings, usageSim, declaredTargetSocFrac, postRequest, deleteRequest, putEvSettings, isPosting, isDeleting } = props;
+  const { assetId, requests, evSettings, usageSim, declaredTargetSocFrac, postRequest, deleteRequest, putEvSettings, isPosting, isDeleting } = props;
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [targetSoc, setTargetSoc] = useState(80);
@@ -130,7 +132,7 @@ export function EvCard(props: EvCardProps) {
   function draftBody(replaceIds?: string[]): CreateUserRequestBody {
     const dt = new Date(departure);
     return {
-      asset_id: "ev",
+      asset_id: assetId,
       target_soc: targetSoc / 100,
       target_energy_kwh: null,
       desired_power_kw: 7.0,
@@ -168,8 +170,8 @@ export function EvCard(props: EvCardProps) {
   }
 
   return (
-    <Card sx={{ height: "100%" }} data-testid="ev-card">
-      <CardHeader title="EV Charging" />
+    <Card sx={{ height: "100%" }} data-testid="ev-card" data-asset-id={assetId}>
+      <CardHeader title="EV Charging" subheader={assetId} />
       <CardContent>
         {queued.length > 0 ? (
           <Box data-testid="ev-active-view">

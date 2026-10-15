@@ -55,6 +55,12 @@ setpoint_kw: number,
  */
 embodied_co2_g_kwh: number | null, 
 /**
+ * The asset's place in the profile's roster: the arbiter's tie-break between levers of
+ * equal cost, the order EVs are offered a surplus in, and the order the VEN UI lists assets
+ * in (W6).
+ */
+roster_index: number, 
+/**
  * For a stepped asset: the discrete levels it can actually draw,
  * ascending (including 0.0 when it can be switched off). Empty for a
  * continuously adjustable one.

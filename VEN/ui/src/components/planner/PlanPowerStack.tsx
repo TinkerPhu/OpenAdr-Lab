@@ -4,10 +4,10 @@ import type { AssetId } from "../controller/types";
 import { ASSET_COLORS } from "../controller/types";
 import { buildStackedFromAllTimelines, assetIdsWithTimelineData } from "../controller/stackedTimelines";
 import type { Plan } from "../../api/types";
-import { useAllTimelines } from "../../api/hooks";
+import { useAllTimelines, useSim } from "../../api/hooks";
+import { assetTypeOf, assetsInRosterOrder, stackOrder } from "../../api/assets";
 import { Box, Typography } from "@mui/material";
 
-const RENDER_ORDER: AssetId[] = ["base_load", "ev", "wm", "heater", "battery", "pv"];
 
 interface PlanPowerStackProps {
   plan: Plan | null | undefined;
@@ -35,6 +35,8 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
   // uses (net_import_kw - net_export_kw, correctly signed) — hoursBack: 0 keeps
   // this chart forecast-only, the one intentional difference from Controller's.
   const { data: allTimelinesResponse } = useAllTimelines(0, hoursForward);
+  // The roster (in order) and each asset's type decide which series stack where (W6).
+  const { data: sim } = useSim();
   const allTimelines = useMemo(
     () => allTimelinesResponse?.timelines ?? {},
     [allTimelinesResponse]
@@ -55,7 +57,13 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
   }
 
   const points = buildStackedFromAllTimelines(allTimelines);
-  const assetIds = assetIdsWithTimelineData(RENDER_ORDER, allTimelines);
+  const assetIds = stackOrder(
+    assetIdsWithTimelineData(
+      assetsInRosterOrder(sim).map(([id]) => id),
+      allTimelines,
+    ),
+    (id) => assetTypeOf(sim, id),
+  ) as AssetId[];
 
   const curtailedSlots = plan.slots.filter(
     (slot) => (slot.pv_forecast_kw - (slot.pv_used_kw ?? slot.pv_forecast_kw)) > 0.05,

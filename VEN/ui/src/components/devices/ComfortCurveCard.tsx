@@ -18,27 +18,30 @@ import {
   useDeleteComfortCurve,
   useSetComfortCurve,
 } from "../../api/hooks";
-import type { ComfortRate } from "../../api/types";
+import type { ComfortRate, SimSnapshot } from "../../api/types";
+import { assetsInRosterOrder } from "../../api/assets";
 import { CurveChart } from "../charts/CurveChart";
 
-/** What the curve's x axis means for each asset, declared next to the asset
- *  rather than branched on at the field (`declare-dont-branch`). For the EV it
- *  is state of charge — `ev-comfort-piecewise-core` prices every kWh from the
- *  current SoC to full, so "50 %" is the battery being half full, not a task
- *  being half done. */
-const CURVE_ASSETS = [
-  { id: "ev", fillLabel: "State of charge (%)" },
-  { id: "heater", fillLabel: "Fill (%)" },
-  { id: "battery", fillLabel: "Fill (%)" },
-] as const;
+/** The asset types a comfort curve prices, with what the curve's x axis means for each —
+ *  declared per type rather than branched on at the field (`declare-dont-branch`). For an EV
+ *  it is state of charge — `ev-comfort-piecewise-core` prices every kWh from the current SoC to
+ *  full, so "50 %" is the battery being half full, not a task being half done. */
+const FILL_LABEL_BY_TYPE: Record<string, string> = {
+  ev: "State of charge (%)",
+  heater: "Fill (%)",
+  battery: "Fill (%)",
+};
 
 const DEFAULT_FILL_LABEL = "Fill (%)";
 
 /** WP4.2 (BL-19): per-asset comfort-curve editor — a plain table of
  *  (fill %, bid €/kWh) points; POST installs an override, DELETE restores
  *  the built-in default. */
-export function ComfortCurveCard() {
-  const [assetId, setAssetId] = useState("ev");
+export function ComfortCurveCard({ sim }: { sim: SimSnapshot | undefined }) {
+  // Every asset of the roster whose type a curve prices, in roster order (W6).
+  const curveAssets = assetsInRosterOrder(sim).filter(([, a]) => a.asset_type in FILL_LABEL_BY_TYPE);
+  const [chosenId, setAssetId] = useState<string | null>(null);
+  const assetId = chosenId ?? curveAssets[0]?.[0] ?? "";
   const { data } = useComfortCurve(assetId);
   const setMut = useSetComfortCurve();
   const deleteMut = useDeleteComfortCurve();
@@ -54,8 +57,8 @@ export function ComfortCurveCard() {
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   }
 
-  const fillLabel =
-    CURVE_ASSETS.find((a) => a.id === assetId)?.fillLabel ?? DEFAULT_FILL_LABEL;
+  const assetType = curveAssets.find(([id]) => id === assetId)?.[1].asset_type ?? "";
+  const fillLabel = FILL_LABEL_BY_TYPE[assetType] ?? DEFAULT_FILL_LABEL;
   // The API refuses a rising curve and names the offending point; show that
   // rather than letting a failed save look like nothing happened.
   const saveError = setMut.error instanceof Error ? setMut.error.message : null;
@@ -84,9 +87,9 @@ export function ComfortCurveCard() {
           sx={{ mb: 2 }}
           data-testid="comfort-asset-select"
         >
-          {CURVE_ASSETS.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.id}
+          {curveAssets.map(([id]) => (
+            <option key={id} value={id}>
+              {id}
             </option>
           ))}
         </TextField>

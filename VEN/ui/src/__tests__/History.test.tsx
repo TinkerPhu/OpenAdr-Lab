@@ -77,6 +77,8 @@ vi.mock("../api/hooks", () => ({
     return { data: mockReportsPage.current, refetch: mockRefetch.reports };
   },
   useHistoryForecastAccuracy: () => ({ data: [], refetch: mockRefetch.forecastAccuracy }),
+  // No snapshot: each asset's chart takes the type its id names, as on a default profile.
+  useSim: () => ({ data: undefined }),
   useHealth: () => ({ data: mockHealthData.current }),
 }));
 
@@ -202,7 +204,8 @@ describe("HistoryPage", () => {
     expect(mockRefetch.events).toHaveBeenCalledTimes(1);
     expect(mockRefetch.reports).toHaveBeenCalledTimes(1);
     // One refetch per FORECAST_TRACKED_ASSETS entry (pv, base_load).
-    expect(mockRefetch.forecastAccuracy).toHaveBeenCalledTimes(2);
+    // One forecast-accuracy query for every asset (W6), no longer one per fixed id.
+    expect(mockRefetch.forecastAccuracy).toHaveBeenCalledTimes(1);
   });
 
   it("does not render a pager when a table's total fits on one page", () => {
@@ -274,7 +277,8 @@ describe("HistoryPage", () => {
     expect(mockRefetch.events).toHaveBeenCalledTimes(1);
     expect(mockRefetch.reports).toHaveBeenCalledTimes(1);
     // One refetch per FORECAST_TRACKED_ASSETS entry (pv, base_load).
-    expect(mockRefetch.forecastAccuracy).toHaveBeenCalledTimes(2);
+    // One forecast-accuracy query for every asset (W6), no longer one per fixed id.
+    expect(mockRefetch.forecastAccuracy).toHaveBeenCalledTimes(1);
   });
 });
 

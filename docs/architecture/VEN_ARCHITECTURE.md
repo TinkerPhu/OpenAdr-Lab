@@ -1406,6 +1406,20 @@ serde omits it (`#[ts(optional)]` beside `skip_serializing_if`); a request body'
 typed beside its fields, so they are `#[ts(skip)]` and the UI reads them through one helper,
 `api/assetValue.ts`.
 
+The UI lists assets per asset, never by a fixed id (W6). `/sim` carries each asset's declared
+`asset_type` and its `roster_index`, and one helper answers "which assets of this type, in roster
+order" (`api/assets.ts`: `assetsOfType`, `assetsInRosterOrder`, `assetTypeOf`, and `stackOrder`,
+the one stacking order of the power charts — generation nearest the axis, then by type, then
+roster). The Devices page renders one EV card and one heater card per asset, each titled with its
+asset id and running its own asset's hooks (`components/devices/AssetDeviceCards.tsx`); a card
+submits requests for its own asset, so the card is the asset picker. The Controller builds one
+summary per asset from a per-type table (`dataBuilders.ts::SUMMARY_BY_TYPE`; a second asset of a
+kind is labelled `EV · car-b`), its right-hand section reads the section's own asset, chart
+declarations are per type (`assetChartSpec(assetType)`), tariff enrichment covers every roster
+asset, the comfort-curve editor lists every curve-priced asset, and History queries forecast
+accuracy once for every asset. Tests: `assets.test.ts`, `Devices.test.tsx` (two EVs, a request
+from the second EV's card), `dataBuilders.test.ts` (two batteries), `ComfortCurveCard.test.tsx`.
+
 What `api/types.ts` still writes by hand, and why: the OpenADR objects (`Program`, `VtnEvent`, `Report`,
 `Interval`, ...) are aliases of openleadr-rs types ts-rs cannot derive on; `ZoneDef` comes from the shared
 `@lab/ui` package; and the UI-side models stated over a wire type for fields the client converts

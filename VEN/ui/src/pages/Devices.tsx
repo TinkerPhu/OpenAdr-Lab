@@ -7,19 +7,15 @@ import {
 } from "@mui/material";
 import {
   useRequests,
-  useEvSettings,
-  useEvUsageSim,
   usePostRequest,
   useDeleteRequest,
-  usePutEvSettings,
   useArbiterSettings,
   usePutArbiterSettings,
   useArbiterDiagnostics,
   useSim,
-  useAssetCapabilities,
 } from "../api/hooks";
-import { EvCard } from "../components/devices/EvCard";
-import { HeaterCard } from "../components/devices/HeaterCard";
+import { assetsOfType } from "../api/assets";
+import { EvDevice, HeaterDevice } from "../components/devices/AssetDeviceCards";
 import { ShiftableLoadsCard } from "../components/devices/ShiftableLoadsCard";
 import { ComfortCurveCard } from "../components/devices/ComfortCurveCard";
 import { ArbiterSettingsCard } from "../components/devices/ArbiterSettingsCard";
@@ -27,39 +23,25 @@ import { BaselineOverrideCard } from "../components/devices/BaselineOverrideCard
 import { AllRequestsSection } from "../components/devices/AllRequestsSection";
 import { AssetSpecsTable } from "../components/devices/AssetSpecsTable";
 
-/** The EV this page's EV card shows (one card until W6 renders one per EV). */
-const EV_ASSET_ID = "ev";
-
 export function DevicesPage() {
   const { data: allRequests = [], isLoading, isError, error } = useRequests();
   const { data: sim } = useSim();
-  const { data: evSettings } = useEvSettings(EV_ASSET_ID);
-  const { data: evUsageSim } = useEvUsageSim(EV_ASSET_ID);
   const { data: arbiterSettings } = useArbiterSettings();
   const { data: arbiterDiagnostics } = useArbiterDiagnostics(
     (arbiterSettings?.deviation_arbiter_enabled ?? false) ||
       (arbiterSettings?.limit_enforcement_enabled ?? false),
   );
-  // What each request form opens on, as the asset declares it (R-123).
-  const [heaterCapability, evCapability] = useAssetCapabilities(["heater", EV_ASSET_ID]);
   const postMut = usePostRequest();
   const deleteMut = useDeleteRequest();
-  const putEvMut = usePutEvSettings(EV_ASSET_ID);
   const putArbiterMut = usePutArbiterSettings();
-
-  // Every active EV request, in window order - an EV may hold several queued
-  // sessions, and `.find()` showed only whichever came first while the rest were
-  // invisible on screen despite being planned for (`ui-transparency`).
-  const evRequests = allRequests
-    .filter((r) => r.session_type === "ev" && r.status === "ACTIVE")
-    .sort((a, b) => {
-      const aw = a.session?.type === "ev" ? a.session.window_start : "";
-      const bw = b.session?.type === "ev" ? b.session.window_start : "";
-      return aw.localeCompare(bw);
-    });
-  const heaterRequest = allRequests.find(
-    (r) => r.session_type === "heater" && r.status === "ACTIVE",
-  );
+  // What every request-making card gets; each keeps its own asset's requests (W6).
+  const requestProps = {
+    requests: allRequests,
+    postRequest: postMut.mutateAsync,
+    deleteRequest: deleteMut.mutateAsync,
+    isPosting: postMut.isPending,
+    isDeleting: deleteMut.isPending,
+  };
   const shiftableActive = allRequests.filter(
     (r) => r.session_type === "shiftable_load" && r.status === "ACTIVE",
   );
@@ -75,29 +57,17 @@ export function DevicesPage() {
         <AssetSpecsTable sim={sim} />
       </Box>
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={4}>
-          <EvCard
-            requests={evRequests}
-            declaredTargetSocFrac={evCapability?.data?.default_target_soc_frac}
-            evSettings={evSettings}
-            usageSim={evUsageSim}
-            postRequest={postMut.mutateAsync}
-            deleteRequest={deleteMut.mutateAsync}
-            putEvSettings={putEvMut.mutate}
-            isPosting={postMut.isPending}
-            isDeleting={deleteMut.isPending}
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <HeaterCard
-            request={heaterRequest}
-            declaredTargetTempC={heaterCapability?.data?.default_target_temp_c}
-            postRequest={postMut.mutateAsync}
-            deleteRequest={deleteMut.mutateAsync}
-            isPosting={postMut.isPending}
-            isDeleting={deleteMut.isPending}
-          />
-        </Grid>
+        {/* One card per EV and per heater, in roster order, each titled with its asset id. */}
+        {assetsOfType(sim, "ev").map(([assetId]) => (
+          <Grid item xs={12} md={4} key={assetId}>
+            <EvDevice assetId={assetId} {...requestProps} />
+          </Grid>
+        ))}
+        {assetsOfType(sim, "heater").map(([assetId]) => (
+          <Grid item xs={12} md={4} key={assetId}>
+            <HeaterDevice assetId={assetId} {...requestProps} />
+          </Grid>
+        ))}
         <Grid item xs={12} md={4}>
           <ShiftableLoadsCard
             loads={shiftableActive}
@@ -108,7 +78,7 @@ export function DevicesPage() {
           />
         </Grid>
         <Grid item xs={12} md={4}>
-          <ComfortCurveCard />
+          <ComfortCurveCard sim={sim} />
         </Grid>
         <Grid item xs={12} md={4}>
           <ArbiterSettingsCard

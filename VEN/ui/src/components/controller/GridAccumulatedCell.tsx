@@ -1,3 +1,4 @@
+import { stackOrder } from "../../api/assets";
 import { useMemo, useState } from "react";
 import { Box, Divider, IconButton, Paper, Tooltip, Typography } from "@mui/material";
 import PushPinIcon from "@mui/icons-material/PushPin";
@@ -51,9 +52,13 @@ export function GridAccumulatedCell({
 
   // Configured roster narrowed to what actually has plotted data in this window —
   // see assetIdsWithTimelineData's doc comment for why (legend must match the graph).
-  const assetIds = assetIdsWithTimelineData(
-    assetSummaries.map((s) => s.assetId),
-    allTimelines
+  const typeOf = (id: string) => assetSummaries.find((s) => s.assetId === id)?.assetType ?? id;
+  const assetIds = stackOrder(
+    assetIdsWithTimelineData(
+      assetSummaries.map((s) => s.assetId),
+      allTimelines,
+    ),
+    typeOf,
   );
 
   return (

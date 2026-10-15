@@ -40,6 +40,8 @@ function fmtDate(iso: string): string {
 // ── Props ────────────────────────────────────────────────────────────────────
 
 export type HeaterCardProps = {
+  /** The heater this card shows and requests for (W6: one card per heater). */
+  assetId: string;
   request: UserRequestWithSession | undefined;
   /** The heater's own default target (`GET /capability/heater`); the form opens on it. */
   declaredTargetTempC?: number | null;
@@ -52,7 +54,7 @@ export type HeaterCardProps = {
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function HeaterCard(props: HeaterCardProps) {
-  const { request, declaredTargetTempC, postRequest, deleteRequest, isPosting, isDeleting } = props;
+  const { assetId, request, declaredTargetTempC, postRequest, deleteRequest, isPosting, isDeleting } = props;
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const { submit: submitRequest, error: submitError } = useSubmitRequest(postRequest);
@@ -67,7 +69,7 @@ export function HeaterCard(props: HeaterCardProps) {
   function handleConfirm() {
     const dt = new Date(readyBy);
     void submitRequest({
-      asset_id: "heater",
+      asset_id: assetId,
       target_soc: null,
       target_energy_kwh: null,
       desired_power_kw: null,

@@ -1,3 +1,4 @@
+import { assetsOfType } from "../api/assets";
 import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { Box, Chip, Grid, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
@@ -351,7 +352,9 @@ export function DashboardPage() {
         <Paper sx={{ p: 2 }} data-testid="dash-sim-card">
           <Stack direction="row" alignItems="center" spacing={1} mb={1}>
             <Typography variant="h6">Simulation</Typography>
-            {sim.data && <ModeBadge mode={"pv" in sim.data.assets ? "active" : undefined} />}
+            {sim.data && (
+              <ModeBadge mode={assetsOfType(sim.data, "pv").length > 0 ? "active" : undefined} />
+            )}
           </Stack>
           {sim.isError ? (
             <Typography color="text.secondary">Simulator not available</Typography>

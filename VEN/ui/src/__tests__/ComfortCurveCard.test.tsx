@@ -3,6 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ComfortCurveResponse } from "../api/types";
 import { ComfortCurveCard } from "../components/devices/ComfortCurveCard";
+import { makeSim } from "./fixtures/sim";
+
+/** A default roster: the curve assets come first in profile order. */
+const roster = makeSim({ ev: {}, heater: {}, battery: {}, pv: {} });
 
 const mockCurveData = vi.fn(
   (): ComfortCurveResponse => ({ source: "default", rates: [] }),
@@ -36,8 +40,23 @@ describe("ComfortCurveCard", () => {
     });
   });
 
+  // W6: every asset a curve prices, whatever its id, in roster order; nothing else.
+  it("offers every curve-priced asset of the roster, by its own id", () => {
+    const twoBatteries = makeSim({
+      "bat-a": { asset_type: "battery" },
+      pv: {},
+      "bat-b": { asset_type: "battery" },
+      ev: {},
+    });
+    render(<ComfortCurveCard sim={twoBatteries} />);
+    const options = Array.from(
+      screen.getByTestId("comfort-asset-select").querySelectorAll("option"),
+    ).map((o) => o.value);
+    expect(options).toEqual(["bat-a", "bat-b", "ev"]);
+  });
+
   it("renders the effective curve rows and the source chip", () => {
-    render(<ComfortCurveCard />);
+    render(<ComfortCurveCard sim={roster} />);
     expect(screen.getByTestId("comfort-source-chip")).toHaveTextContent("default");
     const rows = screen.getAllByTestId(/^comfort-row-/);
     expect(rows).toHaveLength(2);
@@ -48,7 +67,7 @@ describe("ComfortCurveCard", () => {
 
   it("edits the CO2 bid field and saves it as part of the override", async () => {
     const user = userEvent.setup();
-    render(<ComfortCurveCard />);
+    render(<ComfortCurveCard sim={roster} />);
     const co2 = screen.getByTestId("comfort-co2-0");
     await user.clear(co2);
     await user.type(co2, "250");
@@ -63,20 +82,20 @@ describe("ComfortCurveCard", () => {
   });
 
   it("renders a curve chart preview alongside the editable rows", () => {
-    render(<ComfortCurveCard />);
+    render(<ComfortCurveCard sim={roster} />);
     expect(screen.getByTestId("comfort-curve-chart")).toBeInTheDocument();
   });
 
   it("shows an empty-state placeholder instead of a chart when there are no points", () => {
     mockCurveData.mockReturnValue({ source: "default", rates: [] });
-    render(<ComfortCurveCard />);
+    render(<ComfortCurveCard sim={roster} />);
     expect(screen.getByTestId("comfort-curve-chart-empty")).toBeInTheDocument();
     expect(screen.queryByTestId("comfort-curve-chart")).not.toBeInTheDocument();
   });
 
   it("saves an edited curve as an override", async () => {
     const user = userEvent.setup();
-    render(<ComfortCurveCard />);
+    render(<ComfortCurveCard sim={roster} />);
     const bid = screen.getByTestId("comfort-bid-0");
     await user.clear(bid);
     await user.type(bid, "0.5");
@@ -91,7 +110,7 @@ describe("ComfortCurveCard", () => {
   });
 
   it("labels the EV's fill axis as state of charge and explains the marginal bid", () => {
-    render(<ComfortCurveCard />);
+    render(<ComfortCurveCard sim={roster} />);
     // `ev-comfort-piecewise-core`: for an EV the curve is a property of the
     // battery's fullness, and each point is a bid for the *next* kWh.
     expect(screen.getAllByLabelText("State of charge (%)")).toHaveLength(2);
@@ -103,14 +122,14 @@ describe("ComfortCurveCard", () => {
     mockSetError = new Error(
       "point 1: max_marginal_price 0.4 rises above the previous 0.1 — bids must not increase with fill",
     );
-    render(<ComfortCurveCard />);
+    render(<ComfortCurveCard sim={roster} />);
     expect(screen.getByTestId("comfort-save-error")).toHaveTextContent(
       "bids must not increase with fill",
     );
   });
 
   it("shows no rejection message when the last save succeeded", () => {
-    render(<ComfortCurveCard />);
+    render(<ComfortCurveCard sim={roster} />);
     expect(screen.queryByTestId("comfort-save-error")).not.toBeInTheDocument();
   });
 
@@ -120,7 +139,7 @@ describe("ComfortCurveCard", () => {
       rates: [{ fill: 0.9, max_marginal_price: 0.5, max_marginal_co2: 0 }],
     });
     const user = userEvent.setup();
-    render(<ComfortCurveCard />);
+    render(<ComfortCurveCard sim={roster} />);
     expect(screen.getByTestId("comfort-source-chip")).toHaveTextContent("override");
     await user.click(screen.getByTestId("comfort-reset-btn"));
     expect(mockDeleteCurve).toHaveBeenCalledWith("ev");

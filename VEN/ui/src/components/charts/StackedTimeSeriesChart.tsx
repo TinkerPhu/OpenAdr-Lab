@@ -145,13 +145,9 @@ export function StackedTimeSeriesChart({
           { ts: tMax, ...emptyPt(assetIds) } as StackedAreaPoint,
         ];
 
-  // pv first so it sits closest to the X axis in both stacks — PV is generation
-  // (negative/export side), so this puts it at the base of the export stack with
-  // every consuming asset drawn on top of it.
-  const renderOrder: AssetId[] = [
-    ...assetIds.filter((id) => id === "pv"),
-    ...assetIds.filter((id) => id !== "pv"),
-  ];
+  // Callers hand the series in stacking order (`api/assets.ts::stackOrder`): generation first,
+  // so it sits closest to the X axis with every consuming asset drawn on top of it.
+  const renderOrder: AssetId[] = assetIds;
 
   // Domain floor uses the summed stack top/bottom per point (not individual series), since
   // that is what the chart actually renders — see MIN_POWER_SPAN_KW in axisDomain.ts.

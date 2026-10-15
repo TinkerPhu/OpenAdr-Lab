@@ -136,8 +136,8 @@ pub struct AssetSnapshot {
     #[serde(skip)]
     pub arbiter_lever: Option<crate::entities::asset::ArbiterLever>,
     /// The asset's place in the profile's roster: the arbiter's tie-break between levers of
-    /// equal cost, and the order EVs are offered a surplus in.
-    #[serde(skip)]
+    /// equal cost, the order EVs are offered a surplus in, and the order the VEN UI lists assets
+    /// in (W6).
     pub roster_index: usize,
 }
 
