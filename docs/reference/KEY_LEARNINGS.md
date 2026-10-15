@@ -3449,3 +3449,13 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
   tie-break. Re-collecting them (here: by roster instead of by lever kind) silently changes which of
   two equal-cost options wins. Keep the old order as the first key and add the new one after it,
   and pin the tie in a test.
+
+## Counting fixed ids undercounts single-instance code (2026-10-15)
+
+- `ids::ASSET_*` lookups are only the visible half of "one asset of each kind". The other half
+  names no id: `asset_configs.iter().find_map(downcast_ref::<Kind>)`, a single state field that
+  belongs to one asset (a smoothing state, an anchor timestamp), a site-level profile section that
+  describes one device, a broadcast tick input. Before estimating a multi-instance change, grep for
+  `find_map(|cfg| cfg.as_any().downcast_ref` and for per-kind singular fields, not only for ids.
+- A test-fixture `as` cast to a library result type hides drift in the data it carries; a typed
+  helper (`fn result(data: WireType)`) keeps the fixture checked against the generated type.

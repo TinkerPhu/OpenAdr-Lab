@@ -15783,3 +15783,35 @@ acts on a one-asset site; candidates are built kind by kind in the old order, th
 first opportunistic loop dropped every EV from the projection, including one the plan allocates;
 only the EVs the overlay may steer leave it now. The comms-loss clamp now also bounds a V2G EV's
 discharge (declared rated export), which the id table left at 0.
+
+## W5b: PV, base load and heaters per asset (refactor/pv-base-load-per-asset, refactor/pv-arrays-per-asset)
+
+**What.** Part 1 (no profile change): the plan keeps each forecast participant's own power
+(`PlanTimeSlot::forecast_by_asset`, `pv_used_kw` now their sum), the timeline and accuracy samples
+read it per asset; each base load's trailing window, capacity events and recorder entry work under
+its own id; the residual baseline reads "has a state of charge"; the heater anchor and the
+adoption gate's switch count are per heater; `/assets/{asset_id}/ev-usage-sim`,
+`/sim/config/battery/{asset_id}`; injections by asset type; the comms-loss PV ceiling sums the
+arrays. Part 2 (breaking profile change, user decision E1): a PV asset carries its own `weather:`
+block and `measurement:` switch, a base load its `measurement:`; the site-level sections are
+refused with the new place and every profile is migrated. The tick resolves feeds per asset
+(`AssetTickFeeds`), each base load has its own smoothing state, the site generation limit is
+shared over the arrays by their AC ceilings, the previews and the arbiter's projection are per
+asset (`LiveKwByAsset`), `/weather` derives one series per array and `/measurement` names the
+measured asset.
+
+**Why.** Two arrays facing east and west would have received the same weather estimate and the
+same measured kW, and each would have clamped to the whole site generation limit: the site would
+have counted its PV twice. With each array's own geometry, the east array's forecast peaks in the
+morning and the west array's in the afternoon (`east_and_west_arrays_derive_their_own_forecasts`).
+
+**How it was proven.** Plans golden byte-identical apart from the added field (checked line by
+line); single-array behaviour unchanged across all existing simulator, arbiter, peek and tick
+tests; new tests per spec scenario; BDD: `/weather` derives per array, the measured PV feed names
+its asset.
+
+**Issues.** The fixed-id count understated the work: PV and base load were single-instance by
+construction in places that never named an id (`find_map(downcast_ref::<PvInverter>)`, one
+smoothing state, one site-level section). Profile validation still allows one asset of each kind;
+lifting it is a separate step. Typing the weather UI fixtures against the generated wire type
+caught a stale `sky_condition` literal the old cast had hidden.

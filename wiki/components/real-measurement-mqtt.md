@@ -2,7 +2,7 @@
 title: Real-Measurement MQTT Feeds
 type: component
 created: 2026-08-03
-updated: 2026-08-09
+updated: 2026-10-15
 synced_commit: 4c4f149
 sources: [docs/architecture/real_measurement_mqtt.md, VEN/src/measurement.rs, VEN/src/measurement_translation.rs, VEN/src/controller/measurement_port.rs, VEN/src/entities/measurement.rs, VEN/src/assets/pv.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/mod.rs, VEN/src/tasks/sim_tick/context.rs, VEN/src/routes/measurement.rs, VEN/ui/src/pages/Measurement.tsx, tests/features/real_measurement_mqtt.feature, VEN/docker-compose.yml, VEN/profiles/ven-1.yaml]
 tags: [measurement, pv, baseload, mqtt, ven, real-hardware]
@@ -56,6 +56,12 @@ alongside the env var — both must allow a signal for it to take effect — aft
 pointed out mid-design that env-var-only gating doesn't match how `weather_pv:` already
 works. No `VEN_NAME` branching anywhere; presence is purely config-driven, same principle as
 weather.
+
+Since W5b the profile gate is the measured asset's own `measurement: {enabled: true}` (and the
+weather geometry each PV asset's own `weather:` block); the old site-level sections are refused
+with the new place (`VEN/src/profile/validate.rs`). The reading reaches only that asset
+(`simulator::AssetTickFeeds`), and `GET /measurement` names it as `asset_id` — see
+[[weather-forecast]] and [[simulator]].
 
 ## Precedence reuses (and depended on) the weather-blend fix
 
