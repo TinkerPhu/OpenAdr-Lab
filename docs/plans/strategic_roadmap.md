@@ -44,6 +44,9 @@ SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort*
 - `docs/plans/mqtt_notifier_conformance.md` — planned, not scheduled: make the VTN's MQTT notifier
   binding conform to 3.1 (TLS for every broker client, bearer-token login, per-client topic
   access). Records seven verified gaps, among them that the announced login cannot work today.
+- `docs/plans/ci-node3-handoff.md` — planned: Node3 as build/test/deploy node. Sessions hand a
+  pushed branch to a runner through a ticket board on Node3 and are resumed with the result
+  (`ci-next`); the runner is the merge queue; deploy ships release images built once on Node3.
 
 ---
 
