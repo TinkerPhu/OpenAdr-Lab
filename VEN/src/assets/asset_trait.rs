@@ -221,7 +221,12 @@ pub trait Asset: Send + Sync {
     /// The simulated-origin charge sessions this asset's configured usage schedule predicts in
     /// `[now, now + window]` (one per trip), for the session queue. Empty for every asset
     /// without a plan-ahead schedule. Only the EV has one.
-    fn planned_usage_sessions(&self, _now: DateTime<Utc>, _window: Duration) -> Vec<EvSession> {
+    fn planned_usage_sessions(
+        &self,
+        _asset_id: &str,
+        _now: DateTime<Utc>,
+        _window: Duration,
+    ) -> Vec<EvSession> {
         Vec::new()
     }
 

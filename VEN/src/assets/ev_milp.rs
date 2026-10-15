@@ -913,6 +913,7 @@ mod milp_context_trait_tests {
         // A real request: 40 % by 04:00 — a different target AND deadline than
         // the forecast's (80 % by 08:00).
         let session = EvSession {
+            asset_id: "ev".into(),
             id: uuid::Uuid::new_v4(),
             target_soc_frac: 0.40,
             window_start: now,
@@ -1064,6 +1065,7 @@ mod milp_context_trait_tests {
         });
         let now = Utc::now();
         let session = EvSession {
+            asset_id: "ev".into(),
             id: uuid::Uuid::new_v4(),
             target_soc_frac: 0.3,
             window_start: Utc::now(),
@@ -1208,6 +1210,7 @@ mod milp_context_trait_tests {
         });
         let now = Utc::now();
         let session = EvSession {
+            asset_id: "ev".into(),
             id: uuid::Uuid::new_v4(),
             target_soc_frac: 0.3,
             window_start: now,

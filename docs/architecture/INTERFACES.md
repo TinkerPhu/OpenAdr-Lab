@@ -70,17 +70,9 @@ No authentication. CORS: any origin.
 | GET | `/user-requests` | List user override requests |
 | POST | `/user-requests` | Create user request |
 | DELETE | `/user-requests/:id` | Remove user request |
-| GET | `/ev-session` | Current EV session |
-| POST | `/ev-session` | Start EV session |
-| DELETE | `/ev-session` | End EV session |
-| GET | `/ev-settings` | EV charging settings |
-| PUT | `/ev-settings` | Update EV settings |
-| GET | `/heater-target` | Heater target temperature |
-| POST | `/heater-target` | Set heater target |
-| DELETE | `/heater-target` | Clear heater target |
-| GET | `/shiftable-loads` | List shiftable loads |
-| POST | `/shiftable-loads` | Register shiftable load |
-| DELETE | `/shiftable-loads/:id` | Remove shiftable load |
+| GET | `/ev-session` | Every EV's queued sessions, each naming its EV (`asset_id`) |
+| GET | `/assets/:asset_id/ev-settings` | That EV's charging settings (404 for an asset that is not an EV) |
+| PUT | `/assets/:asset_id/ev-settings` | Update that EV's settings |
 | GET | `/baseline-override` | Baseline override state |
 | POST | `/baseline-override` | Set baseline override |
 | DELETE | `/baseline-override` | Clear baseline override |

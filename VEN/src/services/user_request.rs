@@ -63,6 +63,7 @@ impl UserRequestService {
         }
         let session = EvSession {
             id: Uuid::new_v4(),
+            asset_id: req.asset_id.clone(),
             target_soc_frac,
             window_start,
             expected_trip_distance_km,
@@ -117,6 +118,7 @@ impl UserRequestService {
             .ok_or(RequestError::NoDeadlines)?;
         let target = HeaterTarget {
             id: Uuid::new_v4(),
+            asset_id: req.asset_id.clone(),
             target_temp_c,
             ready_by,
             mode: req.mode.clone(),
@@ -414,6 +416,7 @@ pub(crate) mod tests {
     async fn test_cancel_sets_cancelled_and_clears_ev_session() {
         let state = AppState::new();
         let ev_session = EvSession {
+            asset_id: "ev".into(),
             mode: Default::default(),
             origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
             id: Uuid::new_v4(),
@@ -445,8 +448,8 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert_eq!(cancelled.status, UserRequestStatus::Cancelled);
-        // The cancelled request's own session must be gone from the queue.
-        assert!(state.ev_sessions().await.is_empty());
+        // The cancelled request's own session must be gone from its EV's queue.
+        assert!(state.ev_sessions_of("ev").await.is_empty());
     }
 
     /// A shiftable-load request as `create_shiftable` builds it, for the asset `asset_id`.
@@ -692,6 +695,10 @@ pub(crate) mod tests {
         assert!((req.target_energy_kwh - 24.0).abs() < 0.01);
         assert_eq!(req.session_id, Some(session.id));
         assert!((session.target_soc_frac - 0.9).abs() < 0.01);
+        assert_eq!(
+            session.asset_id, req.asset_id,
+            "W4: the session keeps its asset"
+        );
     }
 
     /// A mode given in the body must land on both the UserRequest and the EvSession.
@@ -767,6 +774,10 @@ pub(crate) mod tests {
             UserRequestService::create_heater(body, &[heater_slice()], now).unwrap();
         assert_eq!(req.mode, UserRequestMode::ByDeadline);
         assert_eq!(target.mode, UserRequestMode::ByDeadline);
+        assert_eq!(
+            target.asset_id, req.asset_id,
+            "W4: the target keeps its asset"
+        );
     }
 
     #[test]

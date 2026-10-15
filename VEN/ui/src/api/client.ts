@@ -499,15 +499,18 @@ export class VenApi {
 
   // ── Device Sessions ───────────────────────────────────────────────────────
 
-  async evSettings(): Promise<EvSettings> {
-    const r = await this.getReq("/ev-settings");
-    if (!r.ok) throw new Error(`ev-settings ${r.status}`);
+  /** One EV's overlay settings (W4: per asset). */
+  async evSettings(assetId: string): Promise<EvSettings> {
+    const path = `/assets/${encodeURIComponent(assetId)}/ev-settings`;
+    const r = await this.getReq(path);
+    if (!r.ok) throw new Error(`${path} ${r.status}`);
     return r.json();
   }
 
-  async putEvSettings(body: UpdateEvSettingsBody): Promise<EvSettings> {
-    const r = await this.jsonReq("PUT", "/ev-settings", body);
-    if (!r.ok) throw new Error(`PUT /ev-settings ${r.status}`);
+  async putEvSettings(assetId: string, body: UpdateEvSettingsBody): Promise<EvSettings> {
+    const path = `/assets/${encodeURIComponent(assetId)}/ev-settings`;
+    const r = await this.jsonReq("PUT", path, body);
+    if (!r.ok) throw new Error(`PUT ${path} ${r.status}`);
     return r.json();
   }
 

@@ -360,7 +360,7 @@ mod tests {
     async fn submit_an_ev_request_queues_its_session() {
         let f = fixture();
         let req = f.submit(ev_body(f.now, Some(0.9))).await.unwrap();
-        let sessions = f.state.ev_sessions().await;
+        let sessions = f.state.ev_sessions_of("ev").await;
         assert!(sessions.iter().any(|s| Some(s.id) == req.session_id));
         assert_eq!(f.transitions(req.id).await.len(), 1);
     }
@@ -387,7 +387,7 @@ mod tests {
         let req = f.submit(heater_body(f.now, None)).await.unwrap();
         let target = f
             .state
-            .heater_target()
+            .heater_target("heater")
             .await
             .expect("the heater target is set");
         assert_eq!(target.target_temp_c, 21.0);
@@ -420,7 +420,7 @@ mod tests {
         let req = f.submit(ev_req).await.expect("the EV path serves ev2");
         assert!(f
             .state
-            .ev_sessions()
+            .ev_sessions_of("ev2")
             .await
             .iter()
             .any(|s| Some(s.id) == req.session_id));
@@ -431,7 +431,10 @@ mod tests {
             .await
             .expect("the heater path serves boiler-2");
         assert_eq!(
-            f.state.heater_target().await.map(|t| t.target_temp_c),
+            f.state
+                .heater_target("boiler-2")
+                .await
+                .map(|t| t.target_temp_c),
             Some(21.0)
         );
 
@@ -534,7 +537,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            f.state.heater_target().await.map(|t| t.id),
+            f.state.heater_target("heater").await.map(|t| t.id),
             second.session_id
         );
     }
@@ -568,8 +571,8 @@ mod tests {
             );
         }
         assert!(f.trigger_rx.has_changed().unwrap());
-        assert!(f.state.ev_sessions().await.is_empty());
-        assert!(f.state.heater_target().await.is_none());
+        assert!(f.state.ev_sessions_of("ev").await.is_empty());
+        assert!(f.state.heater_target("heater").await.is_none());
     }
 
     /// R-130: a request's status crosses the wire in the one spelling `/user-requests` uses.

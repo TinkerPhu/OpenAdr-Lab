@@ -47,16 +47,18 @@ impl AppState {
                     // request must not clear a session another request owns. The
                     // single slot made that impossible to express, so this is a
                     // correctness fix, not just a migration.
+                    // A session id is unique across every EV's queue (W4), so only the queue
+                    // that holds it changes.
                     if let Some(sid) = session_id {
-                        hems.ev_sessions.remove(sid);
+                        for queue in hems.ev_sessions.values_mut() {
+                            queue.remove(sid);
+                        }
                     }
                 }
                 Some(SessionType::Heater) => {
                     // By id too: a request displaced by a newer heater request no longer
                     // owns the target, and cancelling it must not clear the newer one's.
-                    if hems.heater_target.as_ref().map(|t| t.id) == session_id {
-                        hems.heater_target = None;
-                    }
+                    hems.heater_targets.retain(|_, t| Some(t.id) != session_id);
                 }
                 Some(SessionType::ShiftableLoad) => {
                     if let Some(sid) = session_id {
@@ -73,8 +75,8 @@ impl AppState {
         }
     }
 
-    /// Set the heater's target. The heater has one target, so the request that owned the
-    /// previous one is cancelled with it, in the same critical section (the pairing
+    /// Set a heater's target (the heater `target.asset_id` names). A heater has one target, so
+    /// the request that owned its previous one is cancelled with it, in the same critical section (the pairing
     /// `replace_ev_sessions` makes for a displaced EV session). Returns that request.
     pub async fn replace_heater_target(
         &self,
@@ -82,7 +84,10 @@ impl AppState {
         now: DateTime<Utc>,
     ) -> Option<UserRequest> {
         let mut hems = self.hems.write().await;
-        let displaced_id = hems.heater_target.replace(target).map(|t| t.id);
+        let displaced_id = hems
+            .heater_targets
+            .insert(target.asset_id.clone(), target)
+            .map(|t| t.id);
         let req = hems
             .user_requests
             .iter_mut()
@@ -121,13 +126,17 @@ impl AppState {
         let mut hems = self.hems.write().await;
         let mut ended: Vec<uuid::Uuid> = hems
             .ev_sessions
-            .expire(now)
-            .into_iter()
+            .values_mut()
+            .flat_map(|q| q.expire(now))
             .map(|s| s.id)
             .collect();
-        if let Some(target) = hems.heater_target.take_if(|t| t.ready_by <= now) {
-            ended.push(target.id);
-        }
+        hems.heater_targets.retain(|_, t| {
+            let passed = t.ready_by <= now;
+            if passed {
+                ended.push(t.id);
+            }
+            !passed
+        });
         let mut completed = Vec::new();
         for req in hems.user_requests.iter_mut() {
             if !req.is_finished() && req.session_id.is_some_and(|sid| ended.contains(&sid)) {

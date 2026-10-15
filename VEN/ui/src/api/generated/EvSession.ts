@@ -10,6 +10,10 @@ import type { UserRequestMode } from "./UserRequestMode";
  */
 export type EvSession = { id: string, 
 /**
+ * The EV this session is for: the asset its request named (W4). Only that EV plans with it.
+ */
+asset_id: string, 
+/**
  * Target SoC (0.0–1.0). E.g. 0.80 = "charge to 80%".
  */
 target_soc: number, 

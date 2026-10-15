@@ -554,11 +554,11 @@ export function useDeleteRequest() {
   });
 }
 
-export function useEvSettings() {
+export function useEvSettings(assetId: string) {
   const { api } = useVenContext();
   return useQuery({
-    queryKey: ["ev_settings", api.baseUrl],
-    queryFn: () => api.evSettings(),
+    queryKey: ["ev_settings", api.baseUrl, assetId],
+    queryFn: () => api.evSettings(assetId),
     refetchInterval: 10_000,
   });
 }
@@ -572,11 +572,11 @@ export function useEvUsageSim() {
   });
 }
 
-export function usePutEvSettings() {
+export function usePutEvSettings(assetId: string) {
   const { api } = useVenContext();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: UpdateEvSettingsBody) => api.putEvSettings(body),
+    mutationFn: (body: UpdateEvSettingsBody) => api.putEvSettings(assetId, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ev_settings"] });
     },

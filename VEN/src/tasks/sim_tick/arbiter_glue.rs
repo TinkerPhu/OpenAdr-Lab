@@ -132,14 +132,19 @@ pub(crate) async fn resolve_overlay_enabled(
     // empty, so the old emptiness test would pause opportunistic charging forever,
     // including in the gaps between sessions when the car is sitting at home and
     // free to soak up surplus.
-    let ev_settings_tick = state.ev_settings().await;
-    let session_active = state.current_ev_session(now).await.is_some();
+    // The EV the arbiter's EV lever drives, by id until W5 makes the lever per asset.
+    let ev_id = crate::ids::ASSET_EV;
+    let ev_settings_tick = state.ev_settings(ev_id).await;
+    let session_active = state.current_ev_session(ev_id, now).await.is_some();
     if ev_settings_tick.paused_by_active_session != session_active {
         state
-            .set_ev_settings(crate::state::EvSettings {
-                paused_by_active_session: session_active,
-                ..ev_settings_tick.clone()
-            })
+            .set_ev_settings(
+                ev_id,
+                crate::state::EvSettings {
+                    paused_by_active_session: session_active,
+                    ..ev_settings_tick.clone()
+                },
+            )
             .await;
     }
     ev_settings_tick.opportunistic_charging_enabled && !session_active
@@ -261,6 +266,7 @@ mod tests {
         departure_time: DateTime<Utc>,
     ) -> crate::entities::device_session::EvSession {
         crate::entities::device_session::EvSession {
+            asset_id: "ev".into(),
             id: uuid::Uuid::new_v4(),
             target_soc_frac: 0.8,
             window_start: ts(-1000),
@@ -290,8 +296,8 @@ mod tests {
         let enabled = resolve_overlay_enabled(&state, ts(0)).await;
 
         assert!(!enabled, "a live session must still suppress the overlay");
-        assert!(state.current_ev_session(ts(0)).await.is_some());
-        assert!(state.ev_settings().await.paused_by_active_session);
+        assert!(state.current_ev_session("ev", ts(0)).await.is_some());
+        assert!(state.ev_settings("ev").await.paused_by_active_session);
     }
 
     /// The trap the queue would otherwise spring: with a rolling schedule the queue
@@ -310,7 +316,7 @@ mod tests {
             enabled,
             "a session queued for later must not suppress the overlay now"
         );
-        assert!(!state.ev_settings().await.paused_by_active_session);
+        assert!(!state.ev_settings("ev").await.paused_by_active_session);
         assert_eq!(
             state.ev_sessions().await.len(),
             1,
@@ -330,10 +336,13 @@ mod tests {
             .await
             .unwrap();
         state
-            .set_ev_settings(crate::state::EvSettings {
-                opportunistic_charging_enabled: true,
-                paused_by_active_session: true,
-            })
+            .set_ev_settings(
+                "ev",
+                crate::state::EvSettings {
+                    opportunistic_charging_enabled: true,
+                    paused_by_active_session: true,
+                },
+            )
             .await;
 
         let enabled = resolve_overlay_enabled(&state, ts(0)).await;
@@ -342,6 +351,6 @@ mod tests {
             enabled,
             "an expired session must no longer suppress the overlay"
         );
-        assert!(!state.ev_settings().await.paused_by_active_session);
+        assert!(!state.ev_settings("ev").await.paused_by_active_session);
     }
 }

@@ -35,7 +35,7 @@ function makeEvRequest(overrides: Partial<UserRequestWithSession> = {}): UserReq
     budget_eur: null,
     created_at: "2026-04-04T08:00:00Z",
     updated_at: "2026-04-04T10:00:00Z",
-    session: { type: "ev", origin: "USER_REQUEST", comfort_rates: [], id: "sess-ev-01", target_soc: 0.9, departure_time: departure,
+    session: { type: "ev", asset_id: "ev", origin: "USER_REQUEST", comfort_rates: [], id: "sess-ev-01", target_soc: 0.9, departure_time: departure,
       window_start: "2026-04-04T08:00:00Z", expected_trip_distance_km: null,
       expected_return_time: null, soft_deadline: false, mode: "BY_DEADLINE", budget_eur: null, created_at: "2026-04-04T08:00:00Z", updated_at: "2026-04-04T10:00:00Z" },
     ...overrides,
@@ -52,7 +52,7 @@ function makeHeaterRequest(overrides: Partial<UserRequestWithSession> = {}): Use
     session_id: "sess-htr-01",
     session_type: "heater",
     comfort_rates: [],
-    session: { type: "heater", comfort_rates: [], id: "sess-htr-01", target_temp_c: 21, ready_by: readyBy, mode: "BY_DEADLINE", created_at: "2026-04-04T08:00:00Z", updated_at: "2026-04-04T10:00:00Z" },
+    session: { type: "heater", asset_id: "heater", comfort_rates: [], id: "sess-htr-01", target_temp_c: 21, ready_by: readyBy, mode: "BY_DEADLINE", created_at: "2026-04-04T08:00:00Z", updated_at: "2026-04-04T10:00:00Z" },
     deadlines: [{ latest_end: readyBy, max_total_cost_eur: null, max_marginal_rate_eur_kwh: null, min_completion: 1.0 }],
     ...overrides,
   };

@@ -9,6 +9,10 @@ import type { UserRequestMode } from "./UserRequestMode";
  */
 export type HeaterTarget = { id: string, 
 /**
+ * The heater this target is for: the asset its request named (W4).
+ */
+asset_id: string, 
+/**
  * Desired water/room temperature in °C.
  */
 target_temp_c: number, 

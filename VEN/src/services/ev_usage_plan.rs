@@ -6,7 +6,8 @@
 use crate::entities::device_session::EvSession;
 use crate::state::AppState;
 
-/// Queue each of `planned` that is not already queued; returns how many were added.
+/// Queue each of `planned` in its own EV's queue (`asset_id`) unless already queued; returns
+/// how many were added.
 ///
 /// Idempotent by construction: it runs every tick, and re-deriving a trip already queued
 /// must change nothing. A session that clashes with a stated one is skipped, never forced -
@@ -17,8 +18,8 @@ pub async fn install_planned_sessions(state: &AppState, planned: Vec<EvSession>)
     let mut added = 0;
     for session in planned {
         if queued
-            .iter()
-            .any(|s| s.departure_time == session.departure_time)
+            .get(&session.asset_id)
+            .is_some_and(|q| q.iter().any(|s| s.departure_time == session.departure_time))
         {
             continue;
         }
@@ -49,6 +50,7 @@ mod tests {
 
     fn simulated(from_h: i64, to_h: i64) -> EvSession {
         EvSession::simulated(
+            "ev",
             0.8,
             now() + Duration::hours(from_h),
             now() + Duration::hours(to_h),
@@ -62,7 +64,7 @@ mod tests {
         let added =
             install_planned_sessions(&state, vec![simulated(0, 2), simulated(10, 12)]).await;
         assert_eq!(added, 2);
-        let queued = state.ev_sessions().await;
+        let queued = state.ev_sessions_of("ev").await;
         assert_eq!(queued.len(), 2);
         assert!(queued
             .iter()
@@ -74,10 +76,20 @@ mod tests {
     async fn install_planned_sessions_is_idempotent() {
         let state = AppState::new();
         install_planned_sessions(&state, vec![simulated(0, 2), simulated(10, 12)]).await;
-        let first: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
+        let first: Vec<_> = state
+            .ev_sessions_of("ev")
+            .await
+            .iter()
+            .map(|s| s.id)
+            .collect();
         let added =
             install_planned_sessions(&state, vec![simulated(0, 2), simulated(10, 12)]).await;
-        let second: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
+        let second: Vec<_> = state
+            .ev_sessions_of("ev")
+            .await
+            .iter()
+            .map(|s| s.id)
+            .collect();
         assert_eq!(added, 0);
         assert_eq!(first, second, "a second pass must change nothing");
     }
@@ -94,7 +106,7 @@ mod tests {
             install_planned_sessions(&state, vec![simulated(1, 2), simulated(10, 12)]).await;
 
         assert_eq!(added, 1);
-        let queued = state.ev_sessions().await;
+        let queued = state.ev_sessions_of("ev").await;
         assert!(
             queued.iter().any(|s| s.id == stated.id),
             "the stated session is untouched"

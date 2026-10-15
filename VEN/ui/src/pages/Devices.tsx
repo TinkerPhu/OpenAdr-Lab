@@ -27,10 +27,13 @@ import { BaselineOverrideCard } from "../components/devices/BaselineOverrideCard
 import { AllRequestsSection } from "../components/devices/AllRequestsSection";
 import { AssetSpecsTable } from "../components/devices/AssetSpecsTable";
 
+/** The EV this page's EV card shows (one card until W6 renders one per EV). */
+const EV_ASSET_ID = "ev";
+
 export function DevicesPage() {
   const { data: allRequests = [], isLoading, isError, error } = useRequests();
   const { data: sim } = useSim();
-  const { data: evSettings } = useEvSettings();
+  const { data: evSettings } = useEvSettings(EV_ASSET_ID);
   const { data: evUsageSim } = useEvUsageSim();
   const { data: arbiterSettings } = useArbiterSettings();
   const { data: arbiterDiagnostics } = useArbiterDiagnostics(
@@ -38,10 +41,10 @@ export function DevicesPage() {
       (arbiterSettings?.limit_enforcement_enabled ?? false),
   );
   // What each request form opens on, as the asset declares it (R-123).
-  const [heaterCapability, evCapability] = useAssetCapabilities(["heater", "ev"]);
+  const [heaterCapability, evCapability] = useAssetCapabilities(["heater", EV_ASSET_ID]);
   const postMut = usePostRequest();
   const deleteMut = useDeleteRequest();
-  const putEvMut = usePutEvSettings();
+  const putEvMut = usePutEvSettings(EV_ASSET_ID);
   const putArbiterMut = usePutArbiterSettings();
 
   // Every active EV request, in window order - an EV may hold several queued

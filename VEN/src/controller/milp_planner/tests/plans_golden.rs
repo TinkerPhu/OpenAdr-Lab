@@ -35,6 +35,7 @@ fn plan_only_scenarios() -> Vec<Fixture> {
     let mut out = Vec::new();
 
     let target = HeaterTarget {
+        asset_id: "heater".into(),
         id: uuid::Uuid::from_u128(3),
         target_temp_c: 20.5,
         ready_by: now + Duration::minutes(90),

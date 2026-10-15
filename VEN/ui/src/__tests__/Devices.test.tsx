@@ -39,6 +39,7 @@ function makeEvRequest(overrides: Partial<UserRequestWithSession> = {}): UserReq
     updated_at: "2026-04-11T06:00:00Z",
     session: {
       type: "ev",
+      asset_id: "ev",
       origin: "USER_REQUEST",
       comfort_rates: [],
       id: "sess-ev-001",
@@ -83,6 +84,7 @@ function makeHeaterRequest(overrides: Partial<UserRequestWithSession> = {}): Use
     updated_at: "2026-04-11T06:00:00Z",
     session: {
       type: "heater",
+      asset_id: "heater",
       comfort_rates: [],
       id: "sess-ht-001",
       target_temp_c: 55,
@@ -299,7 +301,7 @@ describe("DevicesPage", () => {
       makeEvRequest({
         id: "ur-ev-mon",
         session: {
-          type: "ev", origin: "USER_REQUEST", comfort_rates: [], id: "sess-mon", target_soc: 0.8,
+          type: "ev", asset_id: "ev", origin: "USER_REQUEST", comfort_rates: [], id: "sess-mon", target_soc: 0.8,
           window_start: "2026-04-06T18:00:00Z", departure_time: "2026-04-07T07:00:00Z",
           expected_trip_distance_km: 120, expected_return_time: "2026-04-07T17:00:00Z",
           soft_deadline: false, mode: "BY_DEADLINE",
@@ -309,7 +311,7 @@ describe("DevicesPage", () => {
       makeEvRequest({
         id: "ur-ev-wed",
         session: {
-          type: "ev", origin: "USER_REQUEST", comfort_rates: [], id: "sess-wed", target_soc: 0.9,
+          type: "ev", asset_id: "ev", origin: "USER_REQUEST", comfort_rates: [], id: "sess-wed", target_soc: 0.9,
           window_start: "2026-04-07T18:00:00Z", departure_time: "2026-04-08T07:00:00Z",
           expected_trip_distance_km: null, expected_return_time: null,
           soft_deadline: false, mode: "BY_DEADLINE",

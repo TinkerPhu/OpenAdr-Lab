@@ -209,6 +209,7 @@ impl EvCharger {
     /// session there would be a second, competing copy of the same goal.
     pub(super) fn planned_usage_sessions(
         &self,
+        asset_id: &str,
         now: DateTime<Utc>,
         window: Duration,
     ) -> Vec<EvSession> {
@@ -222,6 +223,7 @@ impl EvCharger {
             .into_iter()
             .map(|(window_open, trip)| {
                 EvSession::simulated(
+                    asset_id,
                     self.soc_target_profile,
                     window_open.max(now),
                     trip.leave_at,
@@ -467,8 +469,12 @@ mod usage_sim_tests {
     fn planned_usage_sessions_has_one_session_per_predicted_trip_in_the_window() {
         let ev = ev_with_schedule(Some(plan_ahead_cfg(EvUsageMode::Simulated, true, 1.0)));
         let now = monday_6am();
-        let sessions = ev.planned_usage_sessions(now, Duration::days(7));
+        let sessions = ev.planned_usage_sessions("car", now, Duration::days(7));
         assert_eq!(sessions.len(), 7, "one per day of the rolling week");
+        assert!(
+            sessions.iter().all(|s| s.asset_id == "car"),
+            "W4: under its own id"
+        );
         assert!(sessions
             .iter()
             .all(|s| s.origin == crate::entities::device_session::EvSessionOrigin::SimulatedUsage));
@@ -492,7 +498,7 @@ mod usage_sim_tests {
     fn planned_usage_sessions_open_a_later_window_at_the_previous_return() {
         let ev = ev_with_schedule(Some(plan_ahead_cfg(EvUsageMode::Simulated, true, 1.0)));
         let now = monday_6am();
-        let sessions = ev.planned_usage_sessions(now, Duration::days(7));
+        let sessions = ev.planned_usage_sessions("ev", now, Duration::days(7));
         assert_eq!(sessions[0].window_start, now, "the imminent one starts now");
         assert_eq!(
             sessions[1].window_start,
@@ -507,7 +513,7 @@ mod usage_sim_tests {
         // second copy of the same goal.
         let ev = ev_with_schedule(Some(plan_ahead_cfg(EvUsageMode::Forecast, true, 1.0)));
         assert!(ev
-            .planned_usage_sessions(monday_6am(), Duration::days(7))
+            .planned_usage_sessions("ev", monday_6am(), Duration::days(7))
             .is_empty());
     }
 
@@ -515,18 +521,18 @@ mod usage_sim_tests {
     fn planned_usage_sessions_are_empty_when_plan_ahead_is_disabled() {
         let ev = ev_with_schedule(Some(plan_ahead_cfg(EvUsageMode::Simulated, false, 1.0)));
         assert!(ev
-            .planned_usage_sessions(monday_6am(), Duration::days(7))
+            .planned_usage_sessions("ev", monday_6am(), Duration::days(7))
             .is_empty());
     }
 
     #[test]
     fn planned_usage_sessions_are_empty_without_a_schedule_or_predicted_trip() {
         assert!(ev_with_schedule(None)
-            .planned_usage_sessions(monday_6am(), Duration::days(7))
+            .planned_usage_sessions("ev", monday_6am(), Duration::days(7))
             .is_empty());
         let never = ev_with_schedule(Some(plan_ahead_cfg(EvUsageMode::Simulated, true, 0.0)));
         assert!(never
-            .planned_usage_sessions(monday_6am(), Duration::days(7))
+            .planned_usage_sessions("ev", monday_6am(), Duration::days(7))
             .is_empty());
     }
 
