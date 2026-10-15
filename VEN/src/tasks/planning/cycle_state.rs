@@ -12,15 +12,17 @@ use crate::entities::planner_params::PlannerObjective;
 use crate::entities::sim_inject::SimInjectState;
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use crate::state::AppState;
+use std::collections::BTreeMap;
 
 /// The world as one plan cycle found it.
 pub(crate) struct CycleState {
     pub rates: Vec<TariffSnapshot>,
-    /// Every queued EV session. The *whole* queue rather than one session,
-    /// because picking "the current one" needs a clock and this reader
+    /// Every EV's queued sessions by asset id (W4). The *whole* queues rather than one
+    /// session, because picking "the current one" needs a clock and this reader
     /// deliberately has none - `cycle.rs` has `now` and derives it there.
-    pub ev_sessions: EvSessionQueue,
-    pub heat_tgt: Option<HeaterTarget>,
+    pub ev_sessions: BTreeMap<String, EvSessionQueue>,
+    /// Every heater's target by asset id (W4).
+    pub heater_targets: BTreeMap<String, HeaterTarget>,
     pub bl_override: Option<BaselineOverride>,
     pub obj: PlannerObjective,
     pub inject_snap: SimInjectState,
@@ -42,7 +44,7 @@ pub(crate) async fn read_cycle_state(
     CycleState {
         rates: state.planned_tariffs().await,
         ev_sessions: state.ev_sessions().await,
-        heat_tgt: state.heater_target().await,
+        heater_targets: state.heater_targets().await,
         bl_override: state.baseline_override().await,
         obj: *active_objective.read().await,
         pv_forecast_override: inject_snap.pv_plan_kw,

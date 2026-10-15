@@ -24,3 +24,17 @@ Feature: EV user-request modes (WP4.1, BL-28)
     Then the recomputed plan has no "ev" allocations
     And the mode EV session is deleted
     And the sim inject state is reset
+
+  # W4: each EV has its own settings, at its own asset path.
+  Scenario: An EV's opportunistic charging is switched off and on at its own settings
+    When I turn opportunistic charging off for EV "ev"
+    And I GET /assets/ev/ev-settings from the VEN
+    Then the response status is 200
+    And the response JSON field "opportunistic_charging_enabled" is false
+    When I turn opportunistic charging on for EV "ev"
+    And I GET /assets/ev/ev-settings from the VEN
+    Then the response JSON field "opportunistic_charging_enabled" is true
+
+  Scenario: An asset that is not an EV has no EV settings
+    When I GET /assets/heater/ev-settings from the VEN
+    Then the response status is 404

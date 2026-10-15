@@ -127,15 +127,7 @@ fn heater_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() {
     }
     let mut sim = make_snap_from_profile(&profile);
     set_heater_temp(&mut sim, 19.0);
-    let target = crate::entities::device_session::HeaterTarget {
-        mode: Default::default(),
-        id: uuid::Uuid::new_v4(),
-        target_temp_c: 20.0,
-        ready_by: now + Duration::hours(1),
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let target = heater_target_at(now, 20.0, now + Duration::hours(1));
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(&profile, &sim, now, None, Some(&target), &tariffs),
@@ -256,15 +248,7 @@ fn decision_matrix_and_session_flexibility_totals_agree_in_sign_across_asset_typ
     set_ev_plugged(&mut sim, true);
     set_ev_soc(&mut sim, 0.1);
     let ev_session = ev_session_until(now, 0.8, now + Duration::hours(2));
-    let heater_target = crate::entities::device_session::HeaterTarget {
-        mode: Default::default(),
-        id: uuid::Uuid::new_v4(),
-        target_temp_c: 20.0,
-        ready_by: now + Duration::hours(1),
-        comfort_rates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
+    let heater_target = heater_target_at(now, 20.0, now + Duration::hours(1));
     let tariffs = make_tariffs(0.25, 0.08, 300.0);
     let plan = run_planner(
         build_asset_contexts(

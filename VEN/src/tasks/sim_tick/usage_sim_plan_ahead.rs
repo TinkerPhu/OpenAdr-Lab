@@ -9,7 +9,6 @@
 use chrono::{DateTime, Duration, Utc};
 use tokio::sync::Mutex;
 
-use crate::ids::ASSET_EV;
 use crate::services::ev_usage_plan::install_planned_sessions;
 use crate::simulator::SimState;
 use crate::state::AppState;
@@ -38,12 +37,15 @@ pub(crate) async fn sync_plan_ahead_session(
     // What the EV predicts is read under the simulator lock and the lock is released before
     // anything awaits: installing the sessions awaits on `AppState`, and the lock must never be
     // held across that.
-    let planned = {
+    // Every asset that predicts a usage schedule (an EV with plan-ahead engaged), each under its
+    // own roster id (W4): no asset is looked up by a fixed id.
+    let planned: Vec<_> = {
         let sim = sim.lock().await;
-        let Some((_, ev)) = sim.find_asset(ASSET_EV) else {
-            return;
-        };
-        ev.planned_usage_sessions(now, Duration::days(ROLLING_WINDOW_DAYS))
+        sim.iter_assets()
+            .flat_map(|(entry, cfg)| {
+                cfg.planned_usage_sessions(&entry.id, now, Duration::days(ROLLING_WINDOW_DAYS))
+            })
+            .collect()
     };
     install_planned_sessions(state, planned).await;
 }
@@ -70,7 +72,12 @@ mod tests {
     }
 
     fn sim_with_plan_ahead() -> SimState {
+        sim_with_plan_ahead_for("ev")
+    }
+
+    fn sim_with_plan_ahead_for(id: &str) -> SimState {
         let params = EvParams {
+            id: id.to_string(),
             usage_sim: Some(EvUsageSimParams {
                 mode: EvUsageMode::Simulated,
                 engage_charge_planning: true,
@@ -96,17 +103,40 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
 
         sync_plan_ahead_session(&state, &sim, now).await;
-        let first: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
+        let first: Vec<_> = state
+            .ev_sessions_of("ev")
+            .await
+            .iter()
+            .map(|s| s.id)
+            .collect();
         sync_plan_ahead_session(&state, &sim, now).await;
-        let second: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
+        let second: Vec<_> = state
+            .ev_sessions_of("ev")
+            .await
+            .iter()
+            .map(|s| s.id)
+            .collect();
 
         assert_eq!(first.len(), 7, "one per day of the rolling week");
         assert_eq!(first, second, "a second tick must change nothing");
         assert!(state
-            .ev_sessions()
+            .ev_sessions_of("ev")
             .await
             .iter()
             .all(|s| s.origin == EvSessionOrigin::SimulatedUsage));
+    }
+
+    /// W4: an EV is found by what it predicts, not by the id "ev": one named `car` gets its
+    /// simulated sessions in its own queue.
+    #[tokio::test]
+    async fn an_ev_with_another_id_gets_its_simulated_sessions() {
+        let state = AppState::new();
+        let sim = Mutex::new(sim_with_plan_ahead_for("car"));
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
+        sync_plan_ahead_session(&state, &sim, now).await;
+        let queued = state.ev_sessions_of("car").await;
+        assert_eq!(queued.len(), 7);
+        assert!(queued.iter().all(|s| s.asset_id == "car"));
     }
 
     #[tokio::test]

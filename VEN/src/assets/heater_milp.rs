@@ -1032,6 +1032,7 @@ mod milp_context_trait_tests {
         });
         let now = Utc::now();
         let target = HeaterTarget {
+            asset_id: "heater".into(),
             id: uuid::Uuid::new_v4(),
             target_temp_c: 22.0,
             ready_by: now + chrono::Duration::hours(1),
@@ -1106,6 +1107,7 @@ mod milp_context_trait_tests {
         });
         let now = Utc::now();
         let target = HeaterTarget {
+            asset_id: "heater".into(),
             id: uuid::Uuid::new_v4(),
             target_temp_c: 22.0,
             ready_by: now + chrono::Duration::hours(1),

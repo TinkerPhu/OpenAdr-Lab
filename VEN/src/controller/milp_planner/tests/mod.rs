@@ -13,7 +13,6 @@ use crate::controller::sim_snapshot::{AssetSnapshot, SimSnapshot};
 use crate::entities::asset_params::{
     AssetParams, BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
 };
-use crate::entities::device_session::HeaterTarget;
 use crate::entities::grid_signals::GridSignals;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::entities::tariff_snapshot::TariffSnapshot;
@@ -618,8 +617,8 @@ fn live_forecast_contexts(
         n,
         &cum_s,
         now,
-        &[],
-        None,
+        &std::collections::BTreeMap::new(),
+        &std::collections::BTreeMap::new(),
         &profile.planner,
         &std::collections::HashMap::new(),
         &[],

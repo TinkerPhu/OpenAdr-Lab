@@ -17,7 +17,10 @@ use crate::entities::user_request::UserRequest;
 use crate::entities::{sim_inject::SimInjectState, tariff_snapshot::TariffSnapshot};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 use tokio::sync::RwLock;
 
 mod arbiter;
@@ -108,14 +111,16 @@ pub struct HemsState {
     pub site_headroom: Option<SiteHeadroom>,
     pub site_headroom_forecast: Vec<crate::entities::plan::SiteHeadroomForecastSlot>, // state/site_headroom_forecast.rs
     pub capacity_curves: Option<(CapacityCurve, CapacityCurve)>, // (import, export) — state/capacity_curves.rs
-    /// The EV's charging sessions: ordered, non-overlapping, possibly several.
-    /// `EvSessionQueue` owns that invariant - see its doc comment for why the
+    /// Each EV's charging sessions by asset id (W4): ordered, non-overlapping, possibly
+    /// several. `EvSessionQueue` owns that invariant per EV - see its doc comment for why the
     /// three producers cannot be trusted with a bare `Vec`.
-    pub ev_sessions: EvSessionQueue,
-    pub heater_target: Option<HeaterTarget>,
+    pub ev_sessions: BTreeMap<String, EvSessionQueue>,
+    /// Each heater's target by asset id (W4); a heater has at most one.
+    pub heater_targets: BTreeMap<String, HeaterTarget>,
     pub shiftable_loads: Vec<ShiftableLoad>,
     pub baseline_override: Option<BaselineOverride>,
-    pub ev_settings: EvSettings,
+    /// Each EV's settings by asset id (W4); an EV without a record reads `EvSettings::default`.
+    pub ev_settings: BTreeMap<String, EvSettings>,
     /// Deviation-arbiter rollout gate, default `false` (see `state::arbiter`).
     pub deviation_arbiter_enabled: bool,
     /// Arbiter limit-enforcement pass (GB-47), default `true` (see `state::arbiter`).
@@ -193,10 +198,6 @@ impl AppState {
             polling: Arc::new(RwLock::new(PollingState::default())),
             ctrl_sim: Arc::new(RwLock::new(ControllerSimState::default())),
             hems: Arc::new(RwLock::new(HemsState {
-                ev_settings: EvSettings {
-                    opportunistic_charging_enabled: true,
-                    paused_by_active_session: false,
-                },
                 limit_enforcement_enabled: true,
                 ..HemsState::default()
             })),
@@ -397,8 +398,14 @@ impl AppState {
         self.hems.write().await.site_headroom = Some(env);
     }
 
-    pub async fn heater_target(&self) -> Option<HeaterTarget> {
-        self.hems.read().await.heater_target.clone()
+    /// The target of heater `asset_id`, if it has one.
+    pub async fn heater_target(&self, asset_id: &str) -> Option<HeaterTarget> {
+        self.hems.read().await.heater_targets.get(asset_id).cloned()
+    }
+
+    /// Every heater's target, by asset id.
+    pub async fn heater_targets(&self) -> BTreeMap<String, HeaterTarget> {
+        self.hems.read().await.heater_targets.clone()
     }
 
     pub async fn shiftable_loads(&self) -> Vec<ShiftableLoad> {
@@ -432,12 +439,23 @@ impl AppState {
         self.hems.write().await.baseline_override = ovr;
     }
 
-    pub async fn ev_settings(&self) -> EvSettings {
-        self.hems.read().await.ev_settings.clone()
+    /// EV `asset_id`'s settings, `EvSettings::default` until they are first set.
+    pub async fn ev_settings(&self, asset_id: &str) -> EvSettings {
+        self.hems
+            .read()
+            .await
+            .ev_settings
+            .get(asset_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
-    pub async fn set_ev_settings(&self, s: EvSettings) {
-        self.hems.write().await.ev_settings = s;
+    pub async fn set_ev_settings(&self, asset_id: &str, s: EvSettings) {
+        self.hems
+            .write()
+            .await
+            .ev_settings
+            .insert(asset_id.to_string(), s);
     }
 }
 
@@ -532,6 +550,7 @@ mod tests {
     fn ev_sess(id: Uuid, from: i64, to: i64) -> crate::entities::device_session::EvSession {
         let now = Utc::now();
         crate::entities::device_session::EvSession {
+            asset_id: "ev".into(),
             mode: Default::default(),
             origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
             id,
@@ -610,7 +629,7 @@ mod tests {
         // The refusal carries the current conflict set so a re-prompt is truthful.
         assert_eq!(refusal.conflicts.len(), 2);
 
-        assert_eq!(state.ev_sessions().await.len(), 2, "queue untouched");
+        assert_eq!(state.ev_sessions_of("ev").await.len(), 2, "queue untouched");
         let requests = state.user_requests().await;
         assert_eq!(
             requests.iter().find(|r| r.id == req_id).unwrap().status,
@@ -640,7 +659,12 @@ mod tests {
             "cancel returns true"
         );
 
-        let left: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
+        let left: Vec<_> = state
+            .ev_sessions_of("ev")
+            .await
+            .iter()
+            .map(|s| s.id)
+            .collect();
         assert_eq!(
             left,
             vec![a, c],
@@ -667,7 +691,11 @@ mod tests {
             err.conflicts.iter().map(|s| s.id).collect::<Vec<_>>(),
             vec![first]
         );
-        assert_eq!(state.ev_sessions().await.len(), 1, "nothing was added");
+        assert_eq!(
+            state.ev_sessions_of("ev").await.len(),
+            1,
+            "nothing was added"
+        );
     }
 
     #[tokio::test]
@@ -682,14 +710,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            state.current_ev_session(now).await.map(|s| s.id),
+            state.current_ev_session("ev", now).await.map(|s| s.id),
             Some(live)
         );
         // Two sessions queued, yet nothing is current in the gap between them -
         // which is what keeps opportunistic charging from pausing forever.
         assert!(
             state
-                .current_ev_session(now + Duration::hours(3))
+                .current_ev_session("ev", now + Duration::hours(3))
                 .await
                 .is_none(),
             "the gap between sessions has no current session"
@@ -715,8 +743,53 @@ mod tests {
             state.settle_requests(Utc::now()).await.is_empty(),
             "no request owned them"
         );
-        let left: Vec<_> = state.ev_sessions().await.iter().map(|s| s.id).collect();
+        let left: Vec<_> = state
+            .ev_sessions_of("ev")
+            .await
+            .iter()
+            .map(|s| s.id)
+            .collect();
         assert_eq!(left, vec![live]);
+    }
+
+    /// W4: each EV has its own queue, so overlapping sessions of two EVs are no conflict.
+    #[tokio::test]
+    async fn sessions_of_two_evs_do_not_conflict() {
+        let state = AppState::new();
+        let for_ev = |asset_id: &str| crate::entities::device_session::EvSession {
+            asset_id: asset_id.into(),
+            ..ev_sess(Uuid::new_v4(), 0, 4)
+        };
+        state.insert_ev_session(for_ev("ev-a")).await.unwrap();
+        state
+            .insert_ev_session(for_ev("ev-b"))
+            .await
+            .expect("another EV's window is no clash");
+        assert_eq!(state.ev_sessions_of("ev-a").await.len(), 1);
+        assert_eq!(state.ev_sessions_of("ev-b").await.len(), 1);
+        assert!(
+            state.insert_ev_session(for_ev("ev-a")).await.is_err(),
+            "the same EV still cannot be in two sessions at once"
+        );
+    }
+
+    /// W4: cancelling a request removes its session from its own EV and no other.
+    #[tokio::test]
+    async fn cancel_removes_the_session_from_its_own_ev_only() {
+        let state = AppState::new();
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let session = |id: Uuid, asset_id: &str| crate::entities::device_session::EvSession {
+            asset_id: asset_id.into(),
+            ..ev_sess(id, 0, 4)
+        };
+        state.insert_ev_session(session(a, "ev-a")).await.unwrap();
+        state.insert_ev_session(session(b, "ev-b")).await.unwrap();
+        let req = make_request(Some(SessionType::Ev), Some(a));
+        let req_id = req.id;
+        state.upsert_request(req).await;
+        assert!(state.cancel_request(req_id, Utc::now()).await);
+        assert!(state.ev_sessions_of("ev-a").await.is_empty());
+        assert_eq!(state.ev_sessions_of("ev-b").await.len(), 1);
     }
 
     #[tokio::test]
@@ -726,7 +799,7 @@ mod tests {
         state.insert_ev_session(ev_sess(id, 0, 2)).await.unwrap();
 
         assert_eq!(state.remove_ev_session(id).await.map(|s| s.id), Some(id));
-        assert!(state.ev_sessions().await.is_empty());
+        assert!(state.ev_sessions_of("ev").await.is_empty());
         assert!(
             state.remove_ev_session(id).await.is_none(),
             "removing twice is not an error"
@@ -737,6 +810,7 @@ mod tests {
         HeaterTarget {
             mode: Default::default(),
             id,
+            asset_id: "heater".into(),
             target_temp_c: 21.0,
             ready_by: Utc::now() + Duration::hours(ready_in_h),
             comfort_rates: vec![],
@@ -792,7 +866,7 @@ mod tests {
         let completed = state.settle_requests(Utc::now()).await;
 
         assert_eq!(completed.len(), 1);
-        assert!(state.heater_target().await.is_none());
+        assert!(state.heater_target("heater").await.is_none());
         assert_eq!(
             state.user_requests().await[0].status,
             UserRequestStatus::Completed
@@ -811,7 +885,7 @@ mod tests {
             .await;
 
         assert!(state.settle_requests(Utc::now()).await.is_empty());
-        assert!(state.heater_target().await.is_some());
+        assert!(state.heater_target("heater").await.is_some());
     }
 
     /// R-137: finished requests do not pile up for the life of the VEN.
@@ -857,10 +931,16 @@ mod tests {
             state.user_requests().await[0].status,
             UserRequestStatus::Cancelled
         );
-        assert_eq!(state.heater_target().await.map(|t| t.id), Some(second));
+        assert_eq!(
+            state.heater_target("heater").await.map(|t| t.id),
+            Some(second)
+        );
         // Cancelling the displaced request again must not clear the newer request's target.
         state.cancel_request(first_req.id, Utc::now()).await;
-        assert_eq!(state.heater_target().await.map(|t| t.id), Some(second));
+        assert_eq!(
+            state.heater_target("heater").await.map(|t| t.id),
+            Some(second)
+        );
     }
 
     /// The tick's accounting changes the list in place: a request submitted while the tick
@@ -893,7 +973,7 @@ mod tests {
         let found = state.cancel_request(req_id, Utc::now()).await;
         assert!(found, "cancel should return true");
         assert!(
-            state.heater_target().await.is_none(),
+            state.heater_target("heater").await.is_none(),
             "heater_target cleared"
         );
         let requests = state.user_requests().await;

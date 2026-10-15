@@ -326,6 +326,7 @@ mod tests {
         budget_eur: Option<f64>,
     ) -> EvSession {
         EvSession {
+            asset_id: "ev".into(),
             id: uuid::Uuid::from_u128(id),
             mode,
             origin: EvSessionOrigin::UserRequest,

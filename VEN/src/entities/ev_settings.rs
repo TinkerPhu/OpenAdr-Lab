@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// User-controllable settings for the opportunistic EV charging overlay.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct EvSettings {
     /// When true (default), the dispatcher routes live PV surplus to the EV when
     /// no EvSession is active. Automatically paused while an EvSession exists.
@@ -18,6 +18,18 @@ pub struct EvSettings {
     /// Derived: true while any EvSession is active. Set by tick loop, not user-settable.
     #[serde(default)]
     pub paused_by_active_session: bool,
+}
+
+/// An EV's settings before its user changes them: opportunistic charging on, nothing paused.
+/// The same value a snapshot written before the fields existed restores to, and what an EV
+/// without its own record reads (`AppState::ev_settings`).
+impl Default for EvSettings {
+    fn default() -> Self {
+        Self {
+            opportunistic_charging_enabled: opportunistic_charging_default(),
+            paused_by_active_session: false,
+        }
+    }
 }
 
 /// Opportunistic charging is on unless the user turns it off, so a snapshot
@@ -35,6 +47,15 @@ mod tests {
         let s: EvSettings = serde_json::from_str("{}").unwrap();
         assert!(s.opportunistic_charging_enabled);
         assert!(!s.paused_by_active_session);
+    }
+
+    /// W4: an EV without its own record reads `Default`, which must be the same value a
+    /// snapshot without the fields restores to.
+    #[test]
+    fn default_matches_the_serde_default() {
+        let d = EvSettings::default();
+        assert!(d.opportunistic_charging_enabled);
+        assert!(!d.paused_by_active_session);
     }
 
     #[test]

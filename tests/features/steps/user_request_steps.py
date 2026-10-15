@@ -3,7 +3,7 @@
 import time
 from datetime import datetime, timedelta, timezone
 from behave import given, when, then
-from features.helpers.api_client import ven_get, ven_post, ven_delete
+from features.helpers.api_client import ven_get, ven_post, ven_put, ven_delete
 from features.helpers.wait import poll_until
 
 
@@ -357,6 +357,25 @@ def step_given_scheduled_interruptible_ev_session(context):
         time.sleep(2)
 
     # Proceed anyway — flexibility check may still pass if plan is partial
+
+
+@when('I turn opportunistic charging {state} for EV "{asset_id}"')
+def step_set_ev_opportunistic(context, state, asset_id):
+    assert state in ("on", "off"), state
+    r = ven_put(
+        f"/assets/{asset_id}/ev-settings",
+        json={"opportunistic_charging_enabled": state == "on"},
+    )
+    assert r.status_code == 200, f"PUT ev-settings {r.status_code}: {r.text[:200]}"
+
+
+@then('the response JSON field "{field_path}" is false')
+def step_response_json_field_is_false(context, field_path):
+    data = context.last_response_json
+    for p in field_path.split("."):
+        assert isinstance(data, dict), f"Expected dict at '{p}', got {type(data)}: {data}"
+        data = data.get(p)
+    assert data is False, f"Field '{field_path}' is not false: {data!r}"
 
 
 @then('the response JSON field "{field_path}" is true')

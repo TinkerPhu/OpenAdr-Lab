@@ -33,6 +33,8 @@ fn default_ev_session_origin() -> EvSessionOrigin {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct EvSession {
     pub id: Uuid,
+    /// The EV this session is for: the asset its request named (W4). Only that EV plans with it.
+    pub asset_id: String,
     /// Target SoC (0.0–1.0). E.g. 0.80 = "charge to 80%".
     #[serde(rename = "target_soc")]
     pub target_soc_frac: f64,
@@ -101,6 +103,7 @@ impl EvSession {
     /// budget and no comfort curve. It stands in for a user, so the queue refuses it
     /// wherever a stated session already covers the window.
     pub fn simulated(
+        asset_id: &str,
         target_soc_frac: f64,
         window_start: DateTime<Utc>,
         departure_time: DateTime<Utc>,
@@ -108,6 +111,7 @@ impl EvSession {
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
+            asset_id: asset_id.to_string(),
             target_soc_frac,
             window_start,
             departure_time,
@@ -427,6 +431,8 @@ impl EvSessionQueue {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct HeaterTarget {
     pub id: Uuid,
+    /// The heater this target is for: the asset its request named (W4).
+    pub asset_id: String,
     /// Desired water/room temperature in °C.
     pub target_temp_c: f64,
     /// When the target temperature must be reached.
@@ -476,6 +482,7 @@ mod tests {
     fn test_ev_session_deserialize_missing_mode_defaults_by_deadline() {
         let json = r#"{
             "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "asset_id": "ev",
             "target_soc": 0.8,
             "window_start": "2026-07-11T20:00:00Z",
             "departure_time": "2026-07-12T06:00:00Z",
@@ -490,6 +497,7 @@ mod tests {
     #[test]
     fn test_ev_session_serde_roundtrip_preserves_mode() {
         let session = EvSession {
+            asset_id: "ev".into(),
             id: Uuid::new_v4(),
             target_soc_frac: 0.9,
             window_start: Utc::now(),
@@ -514,6 +522,7 @@ mod tests {
     fn test_heater_target_deserialize_missing_mode_defaults_by_deadline() {
         let json = r#"{
             "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "asset_id": "heater",
             "target_temp_c": 55.0,
             "ready_by": "2026-07-12T06:00:00Z",
             "created_at": "2026-07-11T20:00:00Z",
@@ -549,6 +558,7 @@ mod tests {
     /// A session occupying `[from, to)`, firm, user-created.
     fn sess(from: i64, to: i64) -> EvSession {
         EvSession {
+            asset_id: "ev".into(),
             id: Uuid::new_v4(),
             target_soc_frac: 0.8,
             window_start: ts(from),

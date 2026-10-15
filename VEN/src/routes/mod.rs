@@ -119,7 +119,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/flexibility/forecast", get(hems::get_flexibility_forecast))
         .route("/flexibility/capacity", get(hems::get_capacity_curves))
         .route(
-            "/ev-settings",
+            "/assets/:asset_id/ev-settings",
             get(hems::get_ev_settings).put(hems::put_ev_settings),
         )
         .route(

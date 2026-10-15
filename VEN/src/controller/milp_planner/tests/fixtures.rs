@@ -48,6 +48,26 @@ pub(super) fn make_phase1_weights() -> Phase1Weights {
     }
 }
 
+/// A heater target of `target_temp_c` by `ready_by` for the heater `"heater"`, stated at `now`:
+/// BY_DEADLINE, no comfort curve. A test that needs another id names it through struct-update
+/// syntax.
+pub(super) fn heater_target_at(
+    now: DateTime<Utc>,
+    target_temp_c: f64,
+    ready_by: DateTime<Utc>,
+) -> crate::entities::device_session::HeaterTarget {
+    crate::entities::device_session::HeaterTarget {
+        asset_id: "heater".into(),
+        mode: Default::default(),
+        id: uuid::Uuid::new_v4(),
+        target_temp_c,
+        ready_by,
+        comfort_rates: vec![],
+        created_at: now,
+        updated_at: now,
+    }
+}
+
 /// A user-requested EV session from `now` to `departure_time`: firm deadline, no trip, no
 /// budget, no comfort curve. A test that needs another mode or a budget names it through
 /// struct-update syntax.
@@ -57,6 +77,7 @@ pub(super) fn ev_session_until(
     departure_time: DateTime<Utc>,
 ) -> crate::entities::device_session::EvSession {
     crate::entities::device_session::EvSession {
+        asset_id: "ev".into(),
         mode: Default::default(),
         origin: crate::entities::device_session::EvSessionOrigin::UserRequest,
         id: uuid::Uuid::new_v4(),

@@ -104,8 +104,8 @@ pub(super) async fn assemble_solve_request(a: SolveAssembly<'_>, st: CycleState)
         n_slots,
         &cum_s,
         a.now,
-        st.ev_sessions.as_slice(), // the EV decides what it can serve
-        st.heat_tgt.as_ref(),
+        &st.ev_sessions, // each EV gets its own queue; it decides what it can serve
+        &st.heater_targets,
         a.planner,
         &c_terminal_eur_kwh_by_asset,
         &heater_anchor,

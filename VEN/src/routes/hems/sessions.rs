@@ -141,8 +141,14 @@ pub async fn get_requests(State(state): State<AppState>) -> impl IntoResponse {
     // The whole queue: each request resolves to the session it owns, by id. Matching
     // against one global session meant that with several queued, only whichever
     // happened to be stored could ever be shown - the rest reported no session at all.
-    let ev = state.ev_sessions().await;
-    let heater = state.heater_target().await;
+    // Every EV's queue and every heater's target (W4); a session id is unique across them.
+    let ev: Vec<_> = state
+        .ev_sessions()
+        .await
+        .into_values()
+        .flat_map(|q| q.iter().cloned().collect::<Vec<_>>())
+        .collect();
+    let heater: Vec<_> = state.heater_targets().await.into_values().collect();
     let loads = state.shiftable_loads().await;
 
     let enriched: Vec<UserRequestWithSession> = requests
@@ -156,8 +162,8 @@ pub async fn get_requests(State(state): State<AppState>) -> impl IntoResponse {
                         .cloned()
                         .map(SessionDetail::Ev),
                     Some(SessionType::Heater) => heater
-                        .as_ref()
-                        .filter(|t| t.id == sid)
+                        .iter()
+                        .find(|t| t.id == sid)
                         .cloned()
                         .map(SessionDetail::Heater),
                     Some(SessionType::ShiftableLoad) => loads
@@ -170,7 +176,7 @@ pub async fn get_requests(State(state): State<AppState>) -> impl IntoResponse {
                         if let Some(s) = ev.iter().find(|s| s.id == sid) {
                             return Some(SessionDetail::Ev(s.clone()));
                         }
-                        if let Some(t) = heater.as_ref().filter(|t| t.id == sid) {
+                        if let Some(t) = heater.iter().find(|t| t.id == sid) {
                             return Some(SessionDetail::Heater(t.clone()));
                         }
                         loads

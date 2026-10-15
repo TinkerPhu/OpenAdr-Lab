@@ -1,4 +1,5 @@
-//! `AppState` accessors for the EV's charging-session queue. Split out of
+//! `AppState` accessors for each EV's charging-session queue (W4: one queue per EV, keyed by
+//! the session's own asset id). Split out of
 //! `state/mod.rs` once that file crossed the `VEN/src/` 500-production-line cap,
 //! following the same precedent as `grid_signals.rs` and `obligations.rs` — an
 //! `impl AppState` block may live in another file as long as the type does not.
@@ -7,6 +8,8 @@
 //! way a session enters the queue, so no producer can write an overlapping queue
 //! even by accident. See `EvSessionQueue` for why that invariant is enforced by
 //! construction rather than by convention.
+
+use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 
@@ -17,18 +20,38 @@ use crate::entities::device_session::{
 use super::AppState;
 
 impl AppState {
-    /// Every queued EV charging session, in window order.
-    pub async fn ev_sessions(&self) -> EvSessionQueue {
+    /// Every EV's queued sessions by asset id, each queue in window order.
+    pub async fn ev_sessions(&self) -> BTreeMap<String, EvSessionQueue> {
         self.hems.read().await.ev_sessions.clone()
     }
 
-    /// The session whose charging window contains `now`, if any.
+    /// EV `asset_id`'s queued sessions, in window order (empty when it has none).
+    pub async fn ev_sessions_of(&self, asset_id: &str) -> EvSessionQueue {
+        self.hems
+            .read()
+            .await
+            .ev_sessions
+            .get(asset_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// EV `asset_id`'s session whose charging window contains `now`, if any.
     ///
     /// This is what callers asking "is a session active" want. Not "is the queue
     /// non-empty": under the rolling simulated schedule the queue is almost never
     /// empty, and conflating the two would pause opportunistic charging forever.
-    pub async fn current_ev_session(&self, now: DateTime<Utc>) -> Option<EvSession> {
-        self.hems.read().await.ev_sessions.current(now).cloned()
+    pub async fn current_ev_session(
+        &self,
+        asset_id: &str,
+        now: DateTime<Utc>,
+    ) -> Option<EvSession> {
+        self.hems
+            .read()
+            .await
+            .ev_sessions
+            .get(asset_id)
+            .and_then(|q| q.current(now).cloned())
     }
 
     /// Queue a session, or report every queued session it overlaps.
@@ -37,7 +60,11 @@ impl AppState {
     /// way in, so no producer can write an overlapping queue even by accident.
     pub async fn insert_ev_session(&self, session: EvSession) -> Result<(), EvSessionClash> {
         let mut hems = self.hems.write().await;
-        match hems.ev_sessions.insert(session) {
+        let queue = hems
+            .ev_sessions
+            .entry(session.asset_id.clone())
+            .or_default();
+        match queue.insert(session) {
             Ok(()) => Ok(()),
             // Resolved under the same guard that detected the clash, so what a
             // caller reports cannot have drifted from what was refused.
@@ -46,15 +73,20 @@ impl AppState {
                 conflicts: conflict
                     .conflicts
                     .iter()
-                    .filter_map(|id| hems.ev_sessions.iter().find(|s| s.id == *id).cloned())
+                    .filter_map(|id| queue.iter().find(|s| s.id == *id).cloned())
                     .collect(),
             }),
         }
     }
 
-    /// Remove one session by id, returning it when it was queued.
+    /// Remove one session by id from whichever EV's queue holds it, returning it when queued.
     pub async fn remove_ev_session(&self, id: uuid::Uuid) -> Option<EvSession> {
-        self.hems.write().await.ev_sessions.remove(id)
+        self.hems
+            .write()
+            .await
+            .ev_sessions
+            .values_mut()
+            .find_map(|q| q.remove(id))
     }
 
     /// Displace exactly the named sessions and queue `session`, atomically.
@@ -71,8 +103,13 @@ impl AppState {
         now: DateTime<Utc>,
     ) -> Result<Vec<EvSession>, EvReplaceRefusal> {
         let mut hems = self.hems.write().await;
-        let clashing = hems.ev_sessions.conflicts(&session);
-        match hems.ev_sessions.replace(replace_ids, session) {
+        let hems = &mut *hems;
+        let queue = hems
+            .ev_sessions
+            .entry(session.asset_id.clone())
+            .or_default();
+        let clashing = queue.conflicts(&session);
+        match queue.replace(replace_ids, session) {
             Ok(removed) => {
                 // A displaced session's request is cancelled with it, in the same
                 // critical section. The user asked for that plan to go, and leaving
@@ -100,7 +137,7 @@ impl AppState {
                 rejection,
                 conflicts: clashing
                     .iter()
-                    .filter_map(|id| hems.ev_sessions.iter().find(|s| s.id == *id).cloned())
+                    .filter_map(|id| queue.iter().find(|s| s.id == *id).cloned())
                     .collect(),
             }),
         }

@@ -405,6 +405,11 @@ Step/LOCF hold; slots with no tariff data at all fall back to hardcoded defaults
 Device sessions (`EvSession`, `HeaterTarget`, `ShiftableLoad`) provide user intent as solver
 constraints — the solver does not iterate over session objects directly.
 
+A session belongs to the asset its request named (`EvSession.asset_id`, `HeaterTarget.asset_id`),
+and `AppState` keeps each EV's queue, each heater's target and each EV's settings by asset id
+(W4); the planner hands an asset only its own (`simulator/plan_context.rs::build_asset_contexts`),
+and the simulated usage schedule is installed for every EV that predicts one, under its own id.
+
 An EV holds a **queue** of charging sessions (`EvSessionQueue`, `entities/device_session.rs`),
 ordered by window start and never overlapping — a household EV has a sequence of departures,
 not one. Each session's window is the half-open `[window_start, departure_time)`, so one
@@ -1482,12 +1487,9 @@ behaviour classes (`state.rs::SimInjectState`):
 | GET | `/flexibility` | 5 | `SiteHeadroom` derived from live asset state (refreshed every dispatcher tick, independent of the active plan) |
 | GET | `/flexibility/history` | 5 | BL-43: `SiteHeadroomSample[]` — the bounded in-memory ring (`AppState::flexibility_history`, 1h @ ~1s cadence, oldest first) every `/flexibility` write is also appended to, since the live snapshot alone has nothing to plot as a line |
 | GET | `/flexibility/capacity` | 5 | Sustained-commitment power/duration/energy capacity curves (import, export) — see below |
-| GET / POST / DELETE | `/ev-session` | 5 | Read / create / end the active `EvSession`; `DELETE` also transitions any linked `Active` `UserRequest` to `Completed` before clearing the session |
-| GET / PUT | `/ev-settings` | 5 | Opportunistic surplus-EV-charging overlay toggle |
+| GET | `/ev-session` | 5 | Every EV's queued `EvSession`s, each naming its EV (`asset_id`); sessions are created through `/user-requests` (BL-41) |
+| GET / PUT | `/assets/:asset_id/ev-settings` | 5 | That EV's opportunistic surplus-charging overlay toggle; 404 for an asset that takes no charge sessions |
 | GET | `/ev-usage-sim` | — | `ev-usage-simulation` / `ev-usage-forecast`: read-only `{mode, engage_charge_planning, next_trip}` diagnostics, `204` when the EV has no usage schedule configured |
-| GET / POST / DELETE | `/heater-target` | 5 | Read / create / clear the active `HeaterTarget` |
-| GET / POST | `/shiftable-loads` | 5 | List / create shiftable loads |
-| DELETE | `/shiftable-loads/:id` | 5 | Remove a shiftable load |
 | GET / POST / DELETE | `/baseline-override` | 5 | Read / create / clear additive baseline-load adjustments |
 
 **Sustained-commitment capacity curve** (`GET /flexibility/capacity`,

@@ -149,8 +149,9 @@ pub(crate) async fn resolve_tick_context(
         battery_bridge_kw: state.arbiter_battery_bridge_kw().await,
         limit_enforcement_enabled: state.limit_enforcement_enabled().await,
         limit_incumbent_lever: state.limit_active_lever().await,
-        // The session governing this tick: the one whose window is open now.
-        ev_session: state.current_ev_session(now).await,
+        // The session governing this tick: the one whose window is open now, for the EV the
+        // arbiter's EV lever drives (by id until W5 makes the lever per asset).
+        ev_session: state.current_ev_session(crate::ids::ASSET_EV, now).await,
         comms_loss,
     }
 }

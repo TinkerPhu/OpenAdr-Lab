@@ -12,7 +12,7 @@ use tracing::{debug, warn};
 
 use crate::assets::PvInverter;
 use crate::controller::milp_planner::asset_port::AssetMilpContext;
-use crate::entities::device_session::{EvSession, HeaterTarget};
+use crate::entities::device_session::HeaterTarget;
 use crate::entities::planner_params::PlannerParams;
 use crate::entities::sim_inject::SimInjectState;
 use crate::simulator::SimState;
@@ -64,8 +64,13 @@ pub fn build_asset_contexts(
     n_slots: usize,
     cum_s: &[i64],
     now: DateTime<Utc>,
-    ev_sessions: &[EvSession],
-    heat_tgt: Option<&HeaterTarget>,
+    // Each EV's queued sessions and each heater's target, by asset id (W4): an asset is handed
+    // only its own.
+    ev_sessions: &std::collections::BTreeMap<
+        String,
+        crate::entities::device_session::EvSessionQueue,
+    >,
+    heater_targets: &std::collections::BTreeMap<String, HeaterTarget>,
     planner: &PlannerParams,
     // Per-asset terminal value of stored energy, keyed by asset id — built
     // by `services::planning::build_plan_cycle_inputs` from each asset's own
@@ -94,8 +99,11 @@ pub fn build_asset_contexts(
                 n: n_slots,
                 cum_s,
                 now,
-                ev_sessions,
-                heater_target: heat_tgt,
+                ev_sessions: ev_sessions
+                    .get(&entry.id)
+                    .map(|q| q.as_slice())
+                    .unwrap_or(&[]),
+                heater_target: heater_targets.get(&entry.id),
                 comfort_rates: &comfort_rates,
                 planner,
                 c_terminal_eur_kwh: c_terminal_eur_kwh_by_asset
@@ -224,8 +232,8 @@ mod tests {
             n_slots,
             cum_s,
             now,
-            &[],
-            None,
+            &std::collections::BTreeMap::new(),
+            &std::collections::BTreeMap::new(),
             &PlannerParams::default(),
             &terminal_values(),
             &[],
@@ -396,8 +404,8 @@ mod tests {
             4,
             &cum_s,
             now,
-            &[],
-            None,
+            &std::collections::BTreeMap::new(),
+            &std::collections::BTreeMap::new(),
             &planner,
             &terminal_values(),
             &[],
@@ -423,6 +431,66 @@ mod tests {
                 ("ev".to_string(), "ev"),
                 ("heater".to_string(), "heater"),
             ]
+        );
+    }
+
+    /// W4: each EV is handed only its own queue, so a second EV does not plan for the first
+    /// EV's session.
+    #[test]
+    fn build_asset_contexts_hands_each_ev_only_its_own_sessions() {
+        use crate::controller::milp_planner::asset_port::EvMilpContext;
+        use crate::entities::asset_params::{AssetParams, EvParams};
+        use crate::entities::device_session::{EvSession, EvSessionQueue};
+
+        let now = Utc.with_ymd_and_hms(2026, 7, 20, 6, 0, 0).unwrap();
+        let params: Vec<_> = ["ev-a", "ev-b"]
+            .iter()
+            .map(|id| {
+                AssetParams::Ev(EvParams {
+                    id: id.to_string(),
+                    ..Default::default()
+                })
+            })
+            .collect();
+        let sim_snap = SimState::from_params(&params, now);
+        let mut queue = EvSessionQueue::default();
+        queue
+            .insert(EvSession::simulated(
+                "ev-a",
+                0.8,
+                now,
+                now + chrono::Duration::hours(3),
+                now,
+            ))
+            .unwrap();
+        let sessions = std::collections::BTreeMap::from([("ev-a".to_string(), queue)]);
+        let cum_s = cum_seconds(4, 3600);
+        let contexts = build_asset_contexts(
+            &sim_snap,
+            4,
+            &cum_s,
+            now,
+            &sessions,
+            &std::collections::BTreeMap::new(),
+            &PlannerParams::default(),
+            &terminal_values(),
+            &[],
+            &std::collections::HashMap::new(),
+            None,
+        );
+        let departure = |id: &str| {
+            contexts
+                .iter()
+                .find(|c| c.asset_id() == id)
+                .and_then(|c| c.as_any().downcast_ref::<EvMilpContext>())
+                .expect("an EV context")
+                .session_departure
+        };
+        assert_eq!(departure("ev-a"), Some(now + chrono::Duration::hours(3)));
+        assert_eq!(
+            departure("ev-b"),
+            None,
+            "the other EV's session is not ev-b's"
         );
     }
 
@@ -468,8 +536,8 @@ mod tests {
                 24,
                 &cum_s,
                 now,
-                &[],
-                None,
+                &std::collections::BTreeMap::new(),
+                &std::collections::BTreeMap::new(),
                 &planner,
                 &terminal_values(),
                 &[],
@@ -542,8 +610,8 @@ mod tests {
             4,
             &cum_s,
             now,
-            &[],
-            None,
+            &std::collections::BTreeMap::new(),
+            &std::collections::BTreeMap::new(),
             &planner,
             &terminal_values(),
             &[],
@@ -585,8 +653,8 @@ mod tests {
             4,
             &cum_s,
             now,
-            &[],
-            None,
+            &std::collections::BTreeMap::new(),
+            &std::collections::BTreeMap::new(),
             &planner,
             &std::collections::HashMap::new(),
             &[],
@@ -618,8 +686,8 @@ mod tests {
             4,
             &cum_s,
             now,
-            &[],
-            None,
+            &std::collections::BTreeMap::new(),
+            &std::collections::BTreeMap::new(),
             &planner,
             &std::collections::HashMap::new(),
             &[],

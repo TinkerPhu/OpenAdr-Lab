@@ -329,6 +329,7 @@ mod tests {
 
     fn sess(window_start: DateTime<Utc>, departure: DateTime<Utc>) -> EvSession {
         EvSession {
+            asset_id: "ev".into(),
             id: uuid::Uuid::new_v4(),
             target_soc_frac: 0.9,
             window_start,
