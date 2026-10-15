@@ -13,9 +13,9 @@ Branch: `refactor/pv-base-load-per-asset` (part 1), then a second branch for par
 
 ## Part 2: per-array weather and measurement
 
-- [ ] 2.1 Test first: east/west arrays forecast differently; old sections refused; measured
+- [x] 2.1 Test first: east/west arrays forecast differently; old sections refused; measured
       array only; generation limit split; two base loads smoothed separately.
-- [ ] 2.2 Profile schema, validation, migrate every profile; `PvParams::weather`, `measured`.
-- [ ] 2.3 Per-asset tick feeds, previews, base-load smoothing, generation-limit split.
-- [ ] 2.4 `/weather` per array, UI weather page; BDD.
+- [x] 2.2 Profile schema, validation, migrate every profile; `PvParams::weather`, `measured`.
+- [x] 2.3 Per-asset tick feeds, previews, base-load smoothing, generation-limit split.
+- [x] 2.4 `/weather` per array, UI weather page; BDD.
 - [ ] 2.5 Checks, docs, journal, wiki, suites on Node2; delete this change; merge.

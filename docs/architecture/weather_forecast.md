@@ -20,8 +20,10 @@ Implemented in `VEN/src/entities/weather.rs`, `entities/solar.rs`,
 MQTT adapter), `routes/weather.rs` (`GET /weather`), the VEN UI Weather tab
 (`VEN/ui/src/pages/Weather.tsx`), the simulator's PV ground truth
 (`simulator/mod.rs`, `simulator/pv_preview.rs`, `tasks/sim_tick/`), and
-profile config (`profile/weather_pv.rs`, the `weather_pv` YAML section in
-`VEN/profiles/ven-{1,2,3}.yaml`). The
+profile config (`profile/weather_pv.rs`: each PV asset's own `weather:` block in
+`VEN/profiles/ven-{1,2,3}.yaml`, W5b — one geometry and rating per array, so an east and a west
+array get different power curves from the same raw forecast; the site-level `weather_pv:`
+section is refused with the new place). The
 production feed for ven-1/2/3 is the Zunzgen site, published by the
 `data_acquisition` project's `WeatherMqttPublisher`/`SrfWeatherToMqtt`
 modules from SRF Meteo data — see that project's own docs for the publisher
@@ -203,8 +205,8 @@ gate on it, so no consumer can silently diverge on what a forecast implies:
    (`tasks::sim_tick::feeds`) and plans with its own forecast (`uncurtailed_power_kw_at`), so the
    planner reads weather only through the PV (W3). The sim-inject pin `pv_plan_kw` still wins.
 3. **The simulator's own PV ground truth** (`PvInverter::step_inner` via
-   `SimState::tick`'s `weather_pv_kw` parameter, and its read-only preview
-   counterpart `SimState::peek_pv_kw`) — everything derived from the sim
+   `SimState::tick`'s per-array feeds, `TickInputs::feeds` / `AssetTickFeeds::weather_pv_kw`,
+   and its read-only preview counterpart `SimState::peek_pv`) — everything derived from the sim
    tick (`/sim`, `/history/*`, the asset ledger, timeline charts) uses the
    weather-sourced value when a fresh forecast is available, instead of
    staying on the sin model regardless of a configured live feed. Resolved
@@ -496,8 +498,9 @@ Example:
 ## VEN-side config
 
 Broker host/port, `<root>` prefix, and `site_id` are env-var-driven
-(`VEN/docker-compose.yml`, `VEN/profiles/ven-{1,2,3}.yaml`'s `weather_pv`
-section), following the same pattern used for the VTN adapter's config.
+(`VEN/docker-compose.yml`, the PV asset's `weather:` block in `VEN/profiles/ven-{1,2,3}.yaml`),
+following the same pattern used for the VTN adapter's config. `GET /weather` returns `derived` as
+one series per array, keyed by asset id, and the VEN UI's Weather tab shows a panel per array.
 
 ## VEN UI surface
 

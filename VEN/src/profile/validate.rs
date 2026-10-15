@@ -19,7 +19,7 @@ impl Profile {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors: Vec<String> = Vec::new();
 
-        validate_asset_roster(&self.assets, self.weather_pv.is_some(), &mut errors);
+        validate_asset_roster(self, &mut errors);
 
         // Planner numeric bounds.
         if self.planner.replan_interval_s == 0 {
@@ -380,18 +380,49 @@ impl Profile {
 /// there, only silently wrong; several assets of one kind are outside this project's scope
 /// (`docs/reference/architectural_smells.md`). Shiftable loads are not profile assets and are
 /// not limited here.
-/// The roster: at least one asset, at most one of each kind, and a `weather_pv` section (the
-/// panels of a PV asset) only beside a PV asset (W3 design D6).
-fn validate_asset_roster(assets: &[AssetProfile], has_weather_pv: bool, errors: &mut Vec<String>) {
+/// The site-level `weather_pv:` and `measurements:` sections moved into the assets (W5b): a
+/// profile that still has them is refused with the place to move them to, never read as if
+/// they were absent.
+fn validate_retired_sections(profile: &Profile, errors: &mut Vec<String>) {
+    if profile.weather_pv.is_some() {
+        errors.push(
+            "weather_pv: moved into the pv asset as its `weather:` block (one per array)".into(),
+        );
+    }
+    if profile.measurements.is_some() {
+        errors.push(
+            "measurements: moved into the assets as `measurement: {enabled: true}` on the pv \
+             and base_load asset it measures"
+                .into(),
+        );
+    }
+}
+
+/// The roster: at least one asset, at most one of each kind, at most one measured PV and
+/// one measured base load (the MQTT transport has one topic each), and none of the retired
+/// site-level feed sections.
+fn validate_asset_roster(profile: &Profile, errors: &mut Vec<String>) {
+    validate_retired_sections(profile, errors);
+    let assets = &profile.assets;
     if assets.is_empty() {
         errors.push("profile must declare at least one asset".into());
     }
-    if has_weather_pv && !assets.iter().any(|a| matches!(a, AssetProfile::Pv(_))) {
-        errors.push(
-            "weather_pv describes the panels of a pv asset, but the profile has no pv asset: \
-             add one or remove weather_pv"
-                .into(),
-        );
+    let measured = |kind_pv: bool| {
+        assets
+            .iter()
+            .filter(|a| match a {
+                AssetProfile::Pv(pv) => kind_pv && pv.measurement.enabled,
+                AssetProfile::BaseLoad(b) => !kind_pv && b.measurement.enabled,
+                _ => false,
+            })
+            .count()
+    };
+    for (kind, n) in [("pv", measured(true)), ("base_load", measured(false))] {
+        if n > 1 {
+            errors.push(format!(
+                "assets: at most one '{kind}' may enable `measurement`, found {n} (one MQTT topic)"
+            ));
+        }
     }
     let kind = |a: &AssetProfile| match a {
         AssetProfile::Ev(_) => "ev",
@@ -578,6 +609,7 @@ spikes:
                     id: "base_load".into(),
                     baseline_kw: 0.5,
                     spikes: vec![spike_overrides],
+                    measurement: Default::default(),
                 },
             )],
             ..Profile::default()
@@ -747,45 +779,53 @@ spikes:
         let _ = tokio::fs::remove_file(path).await;
     }
 
-    /// W3 design D6: `weather_pv` describes the panels of a PV asset; without one it would describe
-    /// PV the site does not have. The weather feed itself needs no `weather_pv` (GB-57).
+    /// W5b: the site-level sections are refused with the place they moved to.
     #[test]
-    fn validate_refuses_weather_pv_without_a_pv_asset() {
-        let weather = r#"
+    fn validate_refuses_the_retired_site_level_sections() {
+        let profile: Profile = serde_yaml::from_str(
+            "assets:
+  - type: pv
+    id: pv
+    rated_kw: 14.4
 weather_pv:
   latitude_deg: 47.4491
   longitude_deg: 7.8081
   tilt_deg: 22.0
   azimuth_deg: 267.0
   rated_kwp: 14.4
-"#;
-        let without_pv: Profile = serde_yaml::from_str(&format!(
-            "assets:
-  - type: base_load
-    id: base_load
-    baseline_kw: 0.5
-{weather}"
-        ))
+measurements:
+  pv_enabled: true
+",
+        )
         .expect("must parse");
-        let msg = format!("{:?}", without_pv.validate().expect_err("must be refused"));
-        assert!(
-            msg.contains("weather_pv") && msg.contains("pv asset"),
-            "{msg}"
-        );
+        let msg = format!("{:?}", profile.validate().expect_err("must be refused"));
+        assert!(msg.contains("weather_pv: moved into the pv asset"), "{msg}");
+        assert!(msg.contains("measurements: moved into the assets"), "{msg}");
+    }
 
-        let with_pv: Profile = serde_yaml::from_str(&format!(
+    /// W5b: each array's weather and measurement are its own.
+    #[test]
+    fn each_pv_asset_carries_its_own_weather_and_measurement() {
+        let profile: Profile = serde_yaml::from_str(
             "assets:
   - type: pv
-    id: pv
-    rated_kw: 14.4
-{weather}"
-        ))
+    id: pv-west
+    rated_kw: 8.0
+    weather: {latitude_deg: 47.4, longitude_deg: 7.8, tilt_deg: 22.0, azimuth_deg: 267.0, rated_kwp: 8.4}
+    measurement: {enabled: true}
+  - type: base_load
+    id: house
+    measurement: {enabled: true}
+",
+        )
         .expect("must parse");
-        let errors = with_pv.validate().err().unwrap_or_default();
-        assert!(
-            !errors.iter().any(|e| e.contains("weather_pv")),
-            "{errors:?}"
-        );
+        assert!(profile.validate().is_ok(), "{:?}", profile.validate());
+        let weather = profile.pv_weather_params();
+        assert_eq!(weather.len(), 1);
+        assert_eq!(weather["pv-west"].geometry.azimuth_deg, 267.0);
+        assert_eq!(weather["pv-west"].rated_kwp, 8.4);
+        assert_eq!(profile.measured_pv_asset().as_deref(), Some("pv-west"));
+        assert_eq!(profile.measured_base_load_asset().as_deref(), Some("house"));
     }
 
     // thermostat-deadband: the band check must reject a delta that leaves no
@@ -1703,6 +1743,7 @@ polling:
                     id: "base_load".into(),
                     baseline_kw: 0.5,
                     spikes: vec![],
+                    measurement: Default::default(),
                 },
             )],
             ..Profile::default()
@@ -1720,6 +1761,7 @@ polling:
                     id: "base_load".into(),
                     baseline_kw: 0.5,
                     spikes: vec![],
+                    measurement: Default::default(),
                 },
             )],
             ..Profile::default()

@@ -18,6 +18,12 @@ assets:
   - type: pv
     id: pv
     rated_kw: 5.0
+    weather:
+      latitude_deg: 47.4491
+      longitude_deg: 7.8081
+      tilt_deg: 30.0
+      azimuth_deg: 180.0
+      rated_kwp: 5.0
   - type: battery
     id: battery
     capacity_kwh: 10.0
@@ -44,13 +50,6 @@ planner:
       threshold_kw: 10.0
       measurement_window_s: 3600
       penalty_eur_per_kw: 5.0
-
-weather_pv:
-  latitude_deg: 47.4491
-  longitude_deg: 7.8081
-  tilt_deg: 30.0
-  azimuth_deg: 180.0
-  rated_kwp: 5.0
 
 packets:
   - asset: ev

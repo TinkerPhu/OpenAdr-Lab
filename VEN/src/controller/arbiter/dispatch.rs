@@ -17,7 +17,7 @@ pub fn meet_dispatch_setpoint(
     setpoints: &mut HashMap<String, f64>,
     setpoint_kw: f64,
 ) {
-    let net_kw = projected_net_kw(tick.sim, setpoints, tick.live_pv_kw, tick.live_base_load_kw);
+    let net_kw = projected_net_kw(tick.sim, setpoints, tick.live_kw);
     let inputs = LeverInputs {
         tick,
         incumbent_lever: None,

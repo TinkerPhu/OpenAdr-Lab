@@ -64,87 +64,50 @@ impl WeatherPvConfig {
 mod tests {
     use crate::profile::schema::Profile;
 
-    #[test]
-    fn profile_without_weather_pv_parses_with_none() {
-        let yaml = "assets: []\n";
-        let p: Profile = serde_yaml::from_str(yaml).unwrap();
-        assert!(p.weather_pv.is_none());
-        assert!(p.weather_pv_params().is_none());
+    /// One PV asset `pv` with `weather` as its `weather:` block.
+    fn profile_with_weather(weather: &str) -> Profile {
+        let yaml = format!(
+            "assets:\n  - type: pv\n    id: pv\n    rated_kw: 10.0\n    weather:\n{weather}"
+        );
+        serde_yaml::from_str(&yaml).unwrap()
     }
 
     #[test]
-    fn profile_with_weather_pv_parses_required_fields_and_defaults() {
-        let yaml = r#"
-assets: []
-weather_pv:
-  latitude_deg: 47.4491
-  longitude_deg: 7.8081
-  tilt_deg: 30.0
-  azimuth_deg: 180.0
-  rated_kwp: 10.0
-"#;
-        let p: Profile = serde_yaml::from_str(yaml).unwrap();
-        let cfg = p.weather_pv.as_ref().expect("weather_pv should parse");
-        assert_eq!(cfg.latitude_deg, 47.4491);
-        assert_eq!(cfg.rated_kwp, 10.0);
-        // Defaults applied for omitted tuning fields.
-        assert_eq!(cfg.performance_ratio, 0.87);
-        assert_eq!(cfg.temp_coeff_pct_per_c, -0.35);
-        assert_eq!(cfg.noct_c, 45.0);
-        assert_eq!(cfg.ac_limit_kw, None);
-        assert_eq!(cfg.snowfall_trigger_cm, 0.2);
-        assert_eq!(cfg.clear_threshold_c, 1.5);
-        assert_eq!(cfg.covered_output_fraction, 0.0);
+    fn profile_without_weather_has_no_weather_params() {
+        let p: Profile = serde_yaml::from_str("assets:\n  - type: pv\n    id: pv\n").unwrap();
+        assert!(p.pv_weather_params().is_empty());
+        assert_eq!(p.measured_pv_asset(), None);
+        assert_eq!(p.measured_base_load_asset(), None);
+    }
 
-        let params = p.weather_pv_params().expect("params should be Some");
+    #[test]
+    fn a_pv_weather_block_parses_required_fields_and_defaults() {
+        let p = profile_with_weather(
+            "      latitude_deg: 47.4491\n      longitude_deg: 7.8081\n      tilt_deg: 30.0\n      azimuth_deg: 180.0\n      rated_kwp: 10.0\n",
+        );
+        let params = &p.pv_weather_params()["pv"];
         assert_eq!(params.rated_kwp, 10.0);
         assert_eq!(params.geometry.tilt_deg, 30.0);
         assert_eq!(params.geometry.azimuth_deg, 180.0);
         assert_eq!(params.geometry.location.latitude_deg, 47.4491);
         assert_eq!(params.geometry.location.longitude_deg, 7.8081);
+        // Defaults applied for omitted tuning fields.
+        assert_eq!(params.performance_ratio, 0.87);
+        assert_eq!(params.temp_coeff_pct_per_c, -0.35);
+        assert_eq!(params.noct_c, 45.0);
+        assert_eq!(params.ac_limit_kw, None);
+        assert_eq!(params.snow.snowfall_trigger_cm, 0.2);
+        assert_eq!(params.snow.clear_threshold_c, 1.5);
+        assert_eq!(params.snow.covered_output_fraction, 0.0);
     }
 
     #[test]
-    fn profile_with_weather_pv_overrides_tuning_fields() {
-        let yaml = r#"
-assets: []
-weather_pv:
-  latitude_deg: 47.4491
-  longitude_deg: 7.8081
-  tilt_deg: 30.0
-  azimuth_deg: 180.0
-  rated_kwp: 10.0
-  performance_ratio: 0.80
-  ac_limit_kw: 8.0
-"#;
-        let p: Profile = serde_yaml::from_str(yaml).unwrap();
-        let params = p.weather_pv_params().unwrap();
+    fn a_pv_weather_block_overrides_tuning_fields() {
+        let p = profile_with_weather(
+            "      latitude_deg: 47.4491\n      longitude_deg: 7.8081\n      tilt_deg: 30.0\n      azimuth_deg: 180.0\n      rated_kwp: 10.0\n      performance_ratio: 0.80\n      ac_limit_kw: 8.0\n",
+        );
+        let params = &p.pv_weather_params()["pv"];
         assert_eq!(params.performance_ratio, 0.80);
         assert_eq!(params.ac_limit_kw, Some(8.0));
-    }
-
-    #[test]
-    fn profile_without_measurements_disables_both_signals() {
-        let yaml = "assets: []\n";
-        let p: Profile = serde_yaml::from_str(yaml).unwrap();
-        assert!(p.measurements.is_none());
-        assert!(!p.pv_measurement_enabled());
-        assert!(!p.base_load_measurement_enabled());
-    }
-
-    #[test]
-    fn profile_with_measurements_section_enables_configured_signals_only() {
-        let yaml = "assets: []\nmeasurements:\n  pv_enabled: true\n";
-        let p: Profile = serde_yaml::from_str(yaml).unwrap();
-        assert!(p.pv_measurement_enabled());
-        assert!(!p.base_load_measurement_enabled());
-    }
-
-    #[test]
-    fn profile_with_measurements_section_enables_both_signals() {
-        let yaml = "assets: []\nmeasurements:\n  pv_enabled: true\n  base_load_enabled: true\n";
-        let p: Profile = serde_yaml::from_str(yaml).unwrap();
-        assert!(p.pv_measurement_enabled());
-        assert!(p.base_load_measurement_enabled());
     }
 }

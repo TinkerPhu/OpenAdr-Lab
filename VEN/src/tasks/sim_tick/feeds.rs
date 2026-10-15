@@ -2,110 +2,97 @@
 // read pre-lock by `context::resolve_tick_context`.
 
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 
-/// Weather-sourced PV for this tick: the value at this exact instant, plus one
-/// value per remaining plan slot for the site-headroom / capacity forecast.
+/// Weather-sourced PV for this tick, per array (W5b): each array's value at this exact
+/// instant, and the series behind it (from that array's own geometry and rating).
 ///
-/// Both come from a SINGLE `latest()` fetch and a SINGLE
-/// `weather_pv_forecast_series` evaluation — that series runs solar-position
-/// and transposition physics over every forecast sample plus a snow
-/// trajectory, and the tick loop runs once a second, so resolving the instant
-/// and the slot grid separately would double that work on every tick of every
-/// VEN. The staleness gate and the translation are `entities::solar`'s one
-/// `fresh_weather_pv_series`; the planner reads the PV's forecast, which this series
-/// feeds, so a plan and the headroom drawn against it never disagree.
-pub(crate) async fn resolve_weather_pv_kw_for_tick(
+/// One `latest()` fetch for every array and one `weather_pv_forecast_series` evaluation per
+/// array — that series runs solar-position and transposition physics over every forecast
+/// sample plus a snow trajectory, and the tick loop runs once a second. The staleness gate
+/// and the translation are `entities::solar`'s one `fresh_weather_pv_series`; the planner
+/// reads each array's forecast, which this series feeds, so a plan and the headroom drawn
+/// against it never disagree. The raw series is threaded onto the array each tick
+/// (`TickOverrides.pv_weather_forecast`) so it can sample it at whatever future timestamps
+/// it needs.
+pub(crate) async fn resolve_weather_pv_for_tick(
     weather: &dyn crate::controller::WeatherForecastPort,
-    weather_pv_params: Option<&crate::entities::asset_params::PvForecastParams>,
+    pv_weather: &crate::entities::asset_params::PvWeatherParams,
     initial_snow: crate::entities::pv_snow::PvSnowState,
     now: DateTime<Utc>,
 ) -> (
-    Option<f64>,
-    Option<Vec<crate::entities::solar::WeatherPvForecastSlot>>,
+    HashMap<String, f64>,
+    HashMap<String, Vec<crate::entities::solar::WeatherPvForecastSlot>>,
 ) {
-    if weather_pv_params.is_none() {
-        return (None, None);
+    let (mut kw_now, mut series_by_asset) = (HashMap::new(), HashMap::new());
+    if pv_weather.is_empty() {
+        return (kw_now, series_by_asset);
     }
     let forecast = weather.latest().await;
-    let Some(series) = crate::entities::solar::fresh_weather_pv_series(
-        weather_pv_params,
-        forecast.as_ref(),
-        now,
-        crate::services::planning::WEATHER_STALENESS_THRESHOLD,
-        initial_snow,
-    ) else {
-        return (None, None);
-    };
-    let now_kw = crate::entities::solar::weather_pv_kw_for_slots(&series, &[now])
-        .first()
-        .copied();
-    // pv-competence-consolidation section 5: the per-slot series (formerly a
-    // separate `slots_kw` return value, pre-sampled onto plan-slot
-    // boundaries by this function) is superseded entirely by the raw series
-    // below, threaded onto PvInverter each tick (TickOverrides.pv_weather_forecast)
-    // so PvInverter::max_effort_schedule/forecast()/simulate_forward can
-    // sample it themselves at whatever future timestamps they need, rather
-    // than a site-level caller pre-sampling it onto boundaries the asset
-    // doesn't own.
-    (now_kw, Some(series))
+    for (asset_id, params) in pv_weather {
+        let Some(series) = crate::entities::solar::fresh_weather_pv_series(
+            Some(params),
+            forecast.as_ref(),
+            now,
+            crate::services::planning::WEATHER_STALENESS_THRESHOLD,
+            initial_snow,
+        ) else {
+            continue;
+        };
+        if let Some(&kw) = crate::entities::solar::weather_pv_kw_for_slots(&series, &[now]).first()
+        {
+            kw_now.insert(asset_id.clone(), kw);
+        }
+        series_by_asset.insert(asset_id.clone(), series);
+    }
+    (kw_now, series_by_asset)
 }
 
-/// Real-measurement MQTT feed value for this exact instant (real-measurement-mqtt).
-/// `enabled` is the profile-level gate (`measurements.pv_enabled` /
-/// `.base_load_enabled`) — the second gate alongside the port itself only
-/// existing when the corresponding env var was set at startup.
+/// Real-measurement MQTT feed value for this exact instant (real-measurement-mqtt), for the
+/// asset the feed measures (`None`: the profile enables it for no asset — the second gate
+/// alongside the port itself only existing when the corresponding env var was set).
 async fn resolve_measured_kw_now(
     port: &dyn crate::controller::MeasurementPort,
-    enabled: bool,
+    asset_id: Option<&str>,
     now: DateTime<Utc>,
-) -> Option<f64> {
-    if !enabled {
-        return None;
-    }
+) -> Option<(String, f64)> {
+    let asset_id = asset_id?;
     let latest = port.latest_kw().await;
-    crate::entities::measurement::resolve_measured_kw(
+    let kw = crate::entities::measurement::resolve_measured_kw(
         latest,
         now,
         crate::entities::measurement::MEASUREMENT_STALENESS_THRESHOLD,
-    )
+    )?;
+    Some((asset_id.to_string(), kw))
 }
 
-/// Both signals' measured readings for this instant, `(pv, base_load)` —
-/// bundles the two `resolve_measured_kw_now` calls into one await site to
-/// keep `tick_once` under the tasks/ file-size cap.
+/// Both feeds' measured readings for this instant, by the asset each measures —
+/// `(port, measured asset)` for PV and for base load.
 pub(crate) async fn resolve_measurements_now(
-    pv_port: &dyn crate::controller::MeasurementPort,
-    pv_enabled: bool,
-    base_load_port: &dyn crate::controller::MeasurementPort,
-    base_load_enabled: bool,
+    pv: (&dyn crate::controller::MeasurementPort, Option<&str>),
+    base_load: (&dyn crate::controller::MeasurementPort, Option<&str>),
     now: DateTime<Utc>,
-) -> (Option<f64>, Option<f64>) {
-    let pv = resolve_measured_kw_now(pv_port, pv_enabled, now).await;
-    let base_load = resolve_measured_kw_now(base_load_port, base_load_enabled, now).await;
-    (pv, base_load)
+) -> HashMap<String, f64> {
+    let pv = resolve_measured_kw_now(pv.0, pv.1, now).await;
+    let base_load = resolve_measured_kw_now(base_load.0, base_load.1, now).await;
+    pv.into_iter().chain(base_load).collect()
 }
 
-/// This tick's PV preview twice: under the generation limit in force (what the tick will
-/// produce) and under the limit without the arbiter's own tightening (what a released
-/// correction would face — `ArbiterTick::live_pv_released_kw`, R-88). One preview, so the
-/// two can only differ in the limit.
-pub(crate) fn live_pv_previews(
+/// This tick's previewed power of every physics-driven asset, twice (W5b: per asset): each
+/// PV array under the generation limit in force (what the tick will produce) and under the
+/// limit without the arbiter's own tightening (what a released correction would face —
+/// `ArbiterTick::live_released_kw`, R-88), each base load once (the two are equal for it).
+/// One preview per array, so the two can only differ in the limit.
+pub(crate) fn live_previews(
     sim: &crate::simulator::SimState,
     ctx: &super::context::TickContext,
     pre_snap: &crate::controller::SimSnapshot,
     now: DateTime<Utc>,
     dt_s: f64,
-) -> (Option<f64>, Option<f64>) {
-    let Some(preview) = sim.peek_pv(
-        now,
-        dt_s,
-        ctx.inject.pv_irradiance,
-        ctx.inject.pv_tau_s,
-        ctx.weather_pv_kw_now,
-        ctx.pv_measured_kw_now,
-    ) else {
-        return (None, None);
-    };
+) -> (
+    crate::controller::arbiter::LiveKwByAsset,
+    crate::controller::arbiter::LiveKwByAsset,
+) {
     let released_limit = crate::controller::comms_loss::pv_generation_limit(
         pre_snap,
         ctx.plan_snap.as_ref(),
@@ -115,8 +102,28 @@ pub(crate) fn live_pv_previews(
         None,
         ctx.comms_loss,
     );
-    (
-        Some(preview.in_force_kw()),
-        Some(preview.under_limit_kw(released_limit.limit_kw)),
-    )
+    let (inject, feeds) = (&ctx.inject, &ctx.feeds);
+    let (mut live, mut released) = (HashMap::new(), HashMap::new());
+    for (entry, _) in sim.iter_assets() {
+        let id = entry.id.as_str();
+        let (pv_override, tau_s) = (inject.pv_irradiance, inject.pv_tau_s);
+        if let Some(preview) = sim.peek_pv(id, now, dt_s, pv_override, tau_s, feeds) {
+            live.insert(id.to_string(), preview.in_force_kw());
+            released.insert(
+                id.to_string(),
+                preview.under_limit_kw(released_limit.limit_kw),
+            );
+        } else if let Some(kw) = sim.peek_base_load_kw(
+            id,
+            now,
+            dt_s,
+            inject.base_load_kw,
+            inject.base_load_alpha,
+            feeds,
+        ) {
+            live.insert(id.to_string(), kw);
+            released.insert(id.to_string(), kw);
+        }
+    }
+    (live, released)
 }

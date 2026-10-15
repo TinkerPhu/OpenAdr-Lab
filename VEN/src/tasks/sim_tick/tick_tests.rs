@@ -41,11 +41,9 @@ mod tests {
             100, // persist_every_ticks — no persist this tick
             1,   // tick_s
             Arc::new(crate::controller::NoopWeatherPort),
-            None, // weather_pv_params
+            Default::default(), // asset_feeds: no weather, nothing measured
             Arc::new(crate::controller::NoopMeasurementPort),
-            false,
             Arc::new(crate::controller::NoopMeasurementPort),
-            false,
             crate::services::notify::Notifier::new(None),
             None,  // comms_loss_config
             100.0, // grid_max_import_kw

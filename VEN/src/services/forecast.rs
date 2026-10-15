@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::controller::{HistoryPort, WeatherForecastPort};
-use crate::entities::asset_params::PvForecastParams;
+use crate::entities::asset_params::{PvForecastParams, PvWeatherParams};
 use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics, ForecastSource};
 use crate::entities::history::{ForecastAccuracySample, ForecastLeadKind, PlanHistorySample};
 use crate::entities::plan::{Plan, SiteHeadroom};
@@ -26,7 +26,7 @@ pub async fn finish_plan_cycle(
     prev_plan: Option<&Plan>,
     cycle: &crate::services::planning::PlanCycleResult,
     weather: &Arc<dyn WeatherForecastPort>,
-    weather_pv_params: Option<&PvForecastParams>,
+    weather_pv_params: &PvWeatherParams,
     history: Option<Arc<dyn HistoryPort>>,
     // site-capacity-seam-unification: bundled as a tuple purely to keep
     // call sites' line count down -- no semantic reason to keep them paired
@@ -176,7 +176,7 @@ pub async fn publish_post_cycle_state(
     adopted_plan: &Plan,
     wall_now: DateTime<Utc>,
     weather: &Arc<dyn WeatherForecastPort>,
-    weather_pv_params: Option<&PvForecastParams>,
+    weather_pv_params: &PvWeatherParams,
     heuristics: &HashMap<String, AssetHeuristics>,
 ) {
     state.set_site_headroom(site_headroom).await;
@@ -195,25 +195,29 @@ pub async fn publish_post_cycle_state(
             }
         }
     }
-    // R-50 (remainder): weather-sourced PV forecast. PV has no LP decision
-    // variable (see assets/pv.rs), so it never appears in `planned_kw_by_asset`
-    // — no precedence conflict with the Optimization-sourced forecasts above,
-    // same reasoning as the heuristics block. `None` (no config, no feed, or
-    // stale) leaves PV forecast-less here exactly as before this existed.
-    if let Some(params) = weather_pv_params {
-        if !existing_ids.contains(crate::ids::ASSET_PV) {
-            if let Some(forecast) = weather.latest().await {
-                if forecast.is_fresh(
-                    wall_now,
-                    crate::services::planning::WEATHER_STALENESS_THRESHOLD,
-                ) {
-                    forecasts.push(build_weather_pv_forecast(
-                        &forecast,
-                        params,
-                        state.pv_snow_state().await,
-                        wall_now,
-                    ));
-                }
+    // R-50 (remainder): each PV array's weather-sourced forecast (W5b: its own geometry). PV
+    // has no LP decision variable (see assets/pv.rs), so it never appears in
+    // `planned_kw_by_asset` — no precedence conflict with the Optimization-sourced forecasts
+    // above, same reasoning as the heuristics block. No config, no feed, or a stale one leaves
+    // the arrays forecast-less here exactly as before this existed.
+    let fresh = match weather.latest().await {
+        Some(f)
+            if f.is_fresh(
+                wall_now,
+                crate::services::planning::WEATHER_STALENESS_THRESHOLD,
+            ) =>
+        {
+            Some(f)
+        }
+        _ => None,
+    };
+    if let Some(forecast) = fresh.filter(|_| !weather_pv_params.is_empty()) {
+        let snow = state.pv_snow_state().await;
+        for (asset_id, params) in weather_pv_params {
+            if !existing_ids.contains(asset_id) {
+                forecasts.push(build_weather_pv_forecast(
+                    asset_id, &forecast, params, snow, wall_now,
+                ));
             }
         }
     }
@@ -231,6 +235,7 @@ pub async fn publish_post_cycle_state(
 /// default (linear decay to a 0.2 floor at the 48h horizon), not a measured
 /// curve — tune once real accuracy data exists.
 pub fn build_weather_pv_forecast(
+    asset_id: &str,
     forecast: &WeatherForecast,
     params: &PvForecastParams,
     initial_snow: crate::entities::pv_snow::PvSnowState,
@@ -246,7 +251,7 @@ pub fn build_weather_pv_forecast(
         forecast.samples.iter().map(slot_confidence).sum::<f64>() / forecast.samples.len() as f64
     };
     AssetForecast {
-        asset_id: crate::ids::ASSET_PV.to_string(),
+        asset_id: asset_id.to_string(),
         updated_at: now,
         source: ForecastSource::WeatherModel,
         confidence,
@@ -731,8 +736,8 @@ mod tests {
             valid_at: noon,
             ..weather_sample(1, Some(0.0))
         }]);
-        let af = build_weather_pv_forecast(&forecast, &params, PvSnowState::default(), noon);
-        assert_eq!(af.asset_id, crate::ids::ASSET_PV);
+        let af = build_weather_pv_forecast("pv", &forecast, &params, PvSnowState::default(), noon);
+        assert_eq!(af.asset_id, "pv");
         assert_eq!(af.source, ForecastSource::WeatherModel);
         assert_eq!(af.power_kw.len(), 1);
         assert!(
@@ -746,7 +751,7 @@ mod tests {
     fn build_weather_pv_forecast_empty_samples_zero_confidence() {
         let params = pv_forecast_params();
         let forecast = weather_forecast(vec![]);
-        let af = build_weather_pv_forecast(&forecast, &params, PvSnowState::default(), ts(0));
+        let af = build_weather_pv_forecast("pv", &forecast, &params, PvSnowState::default(), ts(0));
         assert_eq!(af.confidence, 0.0);
         assert!(af.power_kw.is_empty());
     }

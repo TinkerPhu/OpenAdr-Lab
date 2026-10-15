@@ -14,7 +14,6 @@ use tokio::sync::RwLock;
 
 use crate::assets::ControlDescriptor;
 use crate::entities::asset::PlanTriggerSignal;
-use crate::entities::asset_params::PvForecastParams;
 use crate::entities::planner_params::PlannerObjective;
 use crate::planner_events::PlannerEventTx;
 use crate::state::AppState;
@@ -45,18 +44,20 @@ pub type Telemetry = Arc<dyn controller::telemetry_port::TelemetryPort>;
 /// Weather forecast plugin port (docs/architecture/weather_forecast.md). Always present —
 /// `NoopWeatherPort` when no MQTT broker is configured.
 pub type Weather = Arc<dyn controller::WeatherForecastPort>;
-/// Weather-sourced PV forecast config (weather-forecast-visibility). `None` when the profile has
-/// no `weather_pv` section — the `/weather` route's `derived` field is `null` then, not an error.
-pub type WeatherPvParams = Option<PvForecastParams>;
+/// Each PV array's weather-forecast params, by asset id (weather-forecast-visibility, W5b). Empty
+/// when no array has a `weather:` block — the `/weather` route's `derived` map is empty then,
+/// not an error.
+pub type WeatherPvParams = crate::entities::asset_params::PvWeatherParams;
 
 /// Real-measurement MQTT feeds (real-measurement-mqtt). The ports are always present —
 /// `NoopMeasurementPort` when no broker is configured for a signal.
 #[derive(Clone)]
 pub struct MeasurementFeeds {
     pub pv: Arc<dyn controller::MeasurementPort>,
-    pub pv_enabled: bool,
+    /// The PV asset the feed measures (its profile `measurement.enabled`); `None`: disabled.
+    pub pv_asset: Option<String>,
     pub base_load: Arc<dyn controller::MeasurementPort>,
-    pub base_load_enabled: bool,
+    pub base_load_asset: Option<String>,
 }
 
 /// The site's physical grid import/export rating (`profile.grid`), the same clamp the tick

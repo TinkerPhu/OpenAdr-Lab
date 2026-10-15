@@ -13,6 +13,8 @@ use super::SimState;
 pub struct PvPreview<'a> {
     pv: &'a PvInverter,
     inputs: PvPowerInputs,
+    /// This array's share of the site generation limit (`generation_limit_share`).
+    limit_share: f64,
 }
 
 impl PvPreview<'_> {
@@ -22,9 +24,11 @@ impl PvPreview<'_> {
     }
 
     /// Under `generation_limit_kw` (≤ 0; `None` = unlimited) instead.
+    /// This array's output under the site generation limit `generation_limit_kw`, of which it
+    /// takes its share.
     pub fn under_limit_kw(&self, generation_limit_kw: Option<f64>) -> f64 {
-        self.pv
-            .power_under_limit_kw(&self.inputs, generation_limit_kw)
+        let own_limit_kw = generation_limit_kw.map(|l| l * self.limit_share);
+        self.pv.power_under_limit_kw(&self.inputs, own_limit_kw)
     }
 }
 
@@ -44,17 +48,17 @@ impl SimState {
     /// `simulator/tests/peek_pv_kw_tests.rs` guards against re-drift.
     pub fn peek_pv(
         &self,
+        asset_id: &str,
         now: DateTime<Utc>,
         dt_s: f64,
         pv_irradiance_override: Option<f64>,
         pv_tau_s: f64,
-        weather_pv_kw: Option<f64>,
-        pv_measured_kw: Option<f64>,
+        feeds: &super::AssetTickFeeds,
     ) -> Option<PvPreview<'_>> {
-        let pv_cfg = self
-            .asset_configs
-            .iter()
-            .find_map(|cfg| cfg.as_any().downcast_ref::<PvInverter>())?;
+        let (_, cfg) = self.find_asset(asset_id)?;
+        let pv_cfg = cfg.as_any().downcast_ref::<PvInverter>()?;
+        let limit_share =
+            super::generation_limit_share(cfg, super::total_ac_ceiling_kw(&self.asset_configs));
 
         // Reproduce exactly what `tick()` is about to do to the smoothing state,
         // without writing it back: same natural curve, same offset arithmetic.
@@ -66,13 +70,17 @@ impl SimState {
             pv_tau_s,
         );
         let inputs = PvPowerInputs {
-            measured_power_kw: pv_measured_kw,
-            weather_power_kw: weather_pv_kw,
+            measured_power_kw: feeds.measured_kw.get(asset_id).copied(),
+            weather_power_kw: feeds.weather_pv_kw.get(asset_id).copied(),
             irradiance: (natural_irradiance + offset).clamp(0.0, 1.0),
             irradiance_offset: offset,
             irradiance_forced: pv_irradiance_override.is_some(),
         };
-        Some(PvPreview { pv: pv_cfg, inputs })
+        Some(PvPreview {
+            pv: pv_cfg,
+            inputs,
+            limit_share,
+        })
     }
 
     /// This tick's PV output under the generation limit in force — `peek_pv(..)` read as
@@ -81,21 +89,14 @@ impl SimState {
     #[cfg(test)]
     pub fn peek_pv_kw(
         &self,
+        asset_id: &str,
         now: DateTime<Utc>,
         dt_s: f64,
         pv_irradiance_override: Option<f64>,
         pv_tau_s: f64,
-        weather_pv_kw: Option<f64>,
-        pv_measured_kw: Option<f64>,
+        feeds: &super::AssetTickFeeds,
     ) -> Option<f64> {
-        self.peek_pv(
-            now,
-            dt_s,
-            pv_irradiance_override,
-            pv_tau_s,
-            weather_pv_kw,
-            pv_measured_kw,
-        )
-        .map(|preview| preview.in_force_kw())
+        self.peek_pv(asset_id, now, dt_s, pv_irradiance_override, pv_tau_s, feeds)
+            .map(|preview| preview.in_force_kw())
     }
 }

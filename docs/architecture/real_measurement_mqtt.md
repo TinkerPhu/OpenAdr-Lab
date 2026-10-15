@@ -20,7 +20,7 @@ Implemented in `VEN/src/measurement.rs` (the generic MQTT adapter),
 `VEN/src/measurement_translation.rs` (the per-device customization point),
 `controller/measurement_port.rs` (`MeasurementPort` trait),
 `entities/measurement.rs` (`resolve_measured_kw`, the staleness gate),
-`profile/schema.rs` (`measurements:` YAML section), `assets/pv.rs` /
+`profile/schema.rs` (each asset's `measurement:` switch), `assets/pv.rs` /
 `assets/base_load.rs` (the per-signal precedence logic), `simulator/mod.rs`
 / `tasks/sim_tick/context.rs` (wiring into the live tick), `routes/measurement.rs`
 (`GET /measurement`), and the VEN UI Diagnostics → Measurements page
@@ -103,15 +103,22 @@ originally have:
    adapter constructed; unset → `NoopMeasurementPort` (`latest_kw()` always
    `None`, `is_alive()` always `false`). No code anywhere branches on
    `VEN_NAME` — presence is purely config-driven.
-2. **Profile gate** (`measurements:` YAML section):
+2. **Profile gate** (the measured asset's own `measurement:` switch, W5b):
    ```yaml
-   measurements:
-     pv_enabled: true
-     base_load_enabled: true
+   assets:
+     - type: pv
+       id: pv
+       measurement: {enabled: true}
+     - type: base_load
+       id: base_load
+       measurement: {enabled: true}
    ```
-   `Profile::pv_measurement_enabled()` / `Profile::base_load_measurement_enabled()`
-   default to `false` when the section (or field) is absent. This lets a VEN
-   instance have the MQTT connection configured (e.g. for diagnostics
+   `Profile::measured_pv_asset()` / `Profile::measured_base_load_asset()` name the asset a feed
+   measures, `None` when no asset enables one; the reading reaches only that asset
+   (`simulator::AssetTickFeeds::measured_kw`), and `GET /measurement` reports it as `asset_id`.
+   The MQTT transport has one PV and one base-load topic, so validation allows one measured
+   asset of each kind. The old site-level `measurements:` section is refused with the new
+   place. This lets a VEN instance have the MQTT connection configured (e.g. for diagnostics
    visibility) without yet trusting its readings for physics.
 
 Env vars (mirroring `WEATHER_MQTT_*`): `{PV,BASE_LOAD}_MEASUREMENT_MQTT_HOST`

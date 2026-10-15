@@ -33,6 +33,16 @@ fn pv_state_with_inverter_cap(rated_kw: f64, inverter_max_kw: f64) -> SimState {
     )
 }
 
+/// This tick's feeds for the array `pv`: a weather estimate and a measured reading, those given.
+fn pv_feeds(weather_kw: Option<f64>, measured_kw: Option<f64>) -> crate::simulator::AssetTickFeeds {
+    let one = |kw: Option<f64>| kw.map(|kw| ("pv".to_string(), kw)).into_iter().collect();
+    crate::simulator::AssetTickFeeds {
+        weather_pv_kw: one(weather_kw),
+        measured_kw: one(measured_kw),
+        ..Default::default()
+    }
+}
+
 fn noon() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 7, 12, 12, 0, 0).unwrap()
 }
@@ -41,7 +51,7 @@ fn noon() -> DateTime<Utc> {
 fn peek_pv_kw_returns_none_without_pv_asset() {
     let sim = SimState::from_params(&[], noon());
     assert_eq!(
-        sim.peek_pv_kw(noon(), 30.0, None, 2847.37, None, None),
+        sim.peek_pv_kw("pv", noon(), 30.0, None, 2847.37, &pv_feeds(None, None)),
         None
     );
 }
@@ -58,7 +68,7 @@ fn peek_pv_kw_matches_tick_output_for_same_now() {
     let pv_tau_s = 2847.37;
 
     let preview = sim
-        .peek_pv_kw(now, dt_s, None, pv_tau_s, None, None)
+        .peek_pv_kw("pv", now, dt_s, None, pv_tau_s, &pv_feeds(None, None))
         .expect("PV asset is configured");
 
     sim.tick(TickInputs {
@@ -92,7 +102,7 @@ fn peek_pv_kw_matches_tick_output_when_inverter_caps_dc_potential() {
     let dt_s = 30.0;
 
     let preview = sim
-        .peek_pv_kw(now, dt_s, None, 2847.37, None, None)
+        .peek_pv_kw("pv", now, dt_s, None, 2847.37, &pv_feeds(None, None))
         .expect("PV asset is configured");
 
     sim.tick(TickInputs {
@@ -125,7 +135,14 @@ fn peek_pv_kw_override_bypasses_decay() {
     sim.pv_smoothing.irradiance_offset = 0.9;
 
     let preview = sim
-        .peek_pv_kw(noon(), 30.0, Some(0.5), 2847.37, None, None)
+        .peek_pv_kw(
+            "pv",
+            noon(),
+            30.0,
+            Some(0.5),
+            2847.37,
+            &pv_feeds(None, None),
+        )
         .expect("PV asset is configured");
     assert!(
         (preview + 5.0).abs() < 1e-9,
@@ -147,7 +164,14 @@ fn peek_pv_kw_respects_generation_limit_kw() {
     }
 
     let preview = sim
-        .peek_pv_kw(noon(), 30.0, Some(1.0), 2847.37, None, None)
+        .peek_pv_kw(
+            "pv",
+            noon(),
+            30.0,
+            Some(1.0),
+            2847.37,
+            &pv_feeds(None, None),
+        )
         .expect("PV asset is configured");
     assert!(
         (preview + 2.0).abs() < 1e-9,
@@ -159,7 +183,14 @@ fn peek_pv_kw_respects_generation_limit_kw() {
 fn peek_pv_kw_uses_weather_when_no_manual_override() {
     let sim = pv_state(10.0); // sin model at noon would be near-full irradiance
     let preview = sim
-        .peek_pv_kw(noon(), 30.0, None, 2847.37, Some(4.2), None)
+        .peek_pv_kw(
+            "pv",
+            noon(),
+            30.0,
+            None,
+            2847.37,
+            &pv_feeds(Some(4.2), None),
+        )
         .expect("PV asset is configured");
     assert!(
         (preview + 4.2).abs() < 1e-9,
@@ -171,7 +202,14 @@ fn peek_pv_kw_uses_weather_when_no_manual_override() {
 fn peek_pv_kw_manual_override_wins_over_weather() {
     let sim = pv_state(10.0);
     let preview = sim
-        .peek_pv_kw(noon(), 30.0, Some(0.5), 2847.37, Some(4.2), None)
+        .peek_pv_kw(
+            "pv",
+            noon(),
+            30.0,
+            Some(0.5),
+            2847.37,
+            &pv_feeds(Some(4.2), None),
+        )
         .expect("PV asset is configured");
     assert!(
         (preview + 5.0).abs() < 1e-9,
@@ -190,7 +228,14 @@ fn peek_pv_kw_blends_decaying_offset_onto_weather_when_override_released() {
                                                // pv_alpha=0.0; under tau = -T/ln(1-alpha), alpha->0 corresponds to tau->infinity,
                                                // not tau=0 — pv-competence-consolidation D7).
     let preview = sim
-        .peek_pv_kw(noon(), 30.0, None, f64::INFINITY, Some(4.2), None)
+        .peek_pv_kw(
+            "pv",
+            noon(),
+            30.0,
+            None,
+            f64::INFINITY,
+            &pv_feeds(Some(4.2), None),
+        )
         .expect("PV asset is configured");
     assert!(
         (preview + 3.2).abs() < 1e-9,
@@ -205,12 +250,12 @@ fn peek_pv_kw_matches_tick_output_with_weather_for_same_now() {
     let dt_s = 30.0;
 
     let preview = sim
-        .peek_pv_kw(now, dt_s, None, 2847.37, Some(7.0), None)
+        .peek_pv_kw("pv", now, dt_s, None, 2847.37, &pv_feeds(Some(7.0), None))
         .expect("PV asset is configured");
 
     sim.tick(TickInputs {
         pv_tau_s: 2847.37,
-        weather_pv_kw: Some(7.0),
+        feeds: crate::simulator::AssetTickFeeds::weather_kw("pv", 7.0),
         ..TickInputs::new(dt_s, now, HashMap::new())
     });
 
@@ -249,7 +294,7 @@ fn tick_weather_visible_immediately_after_override_auto_clears() {
         pv_irradiance_override: Some(0.9),
         pv_tau_s: 2847.37,
         // ignored this tick: the forced override wins
-        weather_pv_kw: Some(5.0),
+        feeds: crate::simulator::AssetTickFeeds::weather_kw("pv", 5.0),
         ..TickInputs::new(dt_s, now, HashMap::new())
     });
     let pv_after_tick1 = sim
@@ -265,7 +310,7 @@ fn tick_weather_visible_immediately_after_override_auto_clears() {
 
     sim.tick(TickInputs {
         pv_tau_s: 2847.37,
-        weather_pv_kw: Some(5.0),
+        feeds: crate::simulator::AssetTickFeeds::weather_kw("pv", 5.0),
         ..TickInputs::new(dt_s, now + chrono::Duration::seconds(1), HashMap::new())
     });
     let pv_after_tick2 = sim
@@ -347,7 +392,14 @@ fn tick_clears_pv_generation_limit_when_override_is_none() {
 fn peek_pv_under_a_given_limit_clamps_like_the_limit_in_force() {
     let sim = pv_state(5.0);
     let preview = sim
-        .peek_pv(noon(), 30.0, Some(1.0), 2847.37, None, None)
+        .peek_pv(
+            "pv",
+            noon(),
+            30.0,
+            Some(1.0),
+            2847.37,
+            &pv_feeds(None, None),
+        )
         .expect("PV configured");
     let unlimited = preview.under_limit_kw(None);
     assert!(

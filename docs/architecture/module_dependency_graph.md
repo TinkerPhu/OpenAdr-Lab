@@ -241,7 +241,6 @@ graph LR
   M_boot --> M_weather
   M_controller --> M_controller_milp_planner
   M_controller --> M_entities
-  M_controller --> M_ids
   M_controller --> M_lab_core
   M_controller_milp_planner --> M_controller
   M_controller_milp_planner --> M_entities
@@ -269,7 +268,6 @@ graph LR
   M_services --> M_controller
   M_services --> M_controller_milp_planner
   M_services --> M_entities
-  M_services --> M_ids
   M_services --> M_lab_core
   M_services --> M_planner_events
   M_services --> M_state
@@ -284,7 +282,6 @@ graph LR
   M_tasks --> M_config
   M_tasks --> M_controller
   M_tasks --> M_entities
-  M_tasks --> M_ids
   M_tasks --> M_lab_core
   M_tasks --> M_planner_events
   M_tasks --> M_profile

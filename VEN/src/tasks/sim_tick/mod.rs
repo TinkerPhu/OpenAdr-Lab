@@ -18,7 +18,6 @@ use tokio::sync::Mutex;
 use crate::controller::MeasurementPort;
 use crate::controller::WeatherForecastPort;
 use crate::entities::asset::PlanTriggerSignal;
-use crate::entities::asset_params::PvForecastParams;
 use crate::entities::planner_params::SimulatorParams;
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
@@ -34,11 +33,9 @@ pub(crate) fn spawn_sim_tick(
     data_dir: String,
     event_tx: PlannerEventTx,
     weather: Arc<dyn WeatherForecastPort>,
-    weather_pv_params: Option<PvForecastParams>,
+    asset_feeds: Arc<crate::entities::asset_params::AssetFeedConfig>,
     pv_measurement: Arc<dyn MeasurementPort>,
-    pv_measurement_enabled: bool,
     base_load_measurement: Arc<dyn MeasurementPort>,
-    base_load_measurement_enabled: bool,
     notifier: crate::services::notify::Notifier,
     comms_loss_config: Option<crate::profile::comms_loss::CommsLossConfig>,
     // site-capacity-seam-unification / R-72: the site's genuine physical/
@@ -73,11 +70,9 @@ pub(crate) fn spawn_sim_tick(
                 persist_every_ticks,
                 tick_s,
                 weather.clone(),
-                weather_pv_params,
+                asset_feeds.clone(),
                 pv_measurement.clone(),
-                pv_measurement_enabled,
                 base_load_measurement.clone(),
-                base_load_measurement_enabled,
                 notifier.clone(),
                 comms_loss_config,
                 grid_max_import_kw,

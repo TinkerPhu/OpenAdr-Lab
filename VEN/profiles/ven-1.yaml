@@ -29,6 +29,28 @@ assets:
     id: pv
     rated_kw: 14.4
     inverter_max_kw: 12.5
+    # Weather-sourced PV forecast (docs/architecture/weather_forecast.md).
+    # rated_kwp: 14.4 = the real installed Zunzgen array (reference for
+    # comparing model output against actual measured yield). ven-2/ven-3 use
+    # smaller hypothetical capacities at the same site/geometry for comparison.
+    # performance_ratio: calibrated against two real observed peaks (see
+    # docs/history/project_journal.md) — 9.5 kW on 2026-07-21 15:50 CEST and
+    # 9.4 kW on 2026-07-22 15:10 CEST, using real InfluxDB-archived irradiance/
+    # temperature at those instants. Independently derived ratios were 0.854
+    # and 0.824; 0.84 is their average. Default (0.87) assumes a cleaner/newer
+    # system than this one; re-derive if more peak observations become
+    # available.
+    weather:
+      latitude_deg: 47.4491
+      longitude_deg: 7.8081
+      tilt_deg: 22.0
+      azimuth_deg: 267.0
+      rated_kwp: 14.4
+      performance_ratio: 0.84
+    # Real-measurement ground truth (docs/architecture/real_measurement_mqtt.md).
+    # ven-1 only: real inverter PV output and real house-load meter reading
+    # outrank the weather/sin-model estimates whenever fresh.
+    measurement: {enabled: true}
   - type: battery
     id: battery
     capacity_kwh: 10.0
@@ -83,6 +105,7 @@ assets:
         jitter_h: 0.5
         probability: 1.0
         weekdays: []                    # TV/lights, every day
+    measurement: {enabled: true}
 
 simulator:
   tick_s: 1
@@ -112,29 +135,3 @@ planner:
       slots: 96   # 16 h at 10-min resolution
     - step_s: 900
       slots: 96   # 24 h at 15-min resolution
-
-# Weather-sourced PV forecast (docs/architecture/weather_forecast.md).
-# rated_kwp: 14.4 = the real installed Zunzgen array (reference for
-# comparing model output against actual measured yield). ven-2/ven-3 use
-# smaller hypothetical capacities at the same site/geometry for comparison.
-# performance_ratio: calibrated against two real observed peaks (see
-# docs/history/project_journal.md) — 9.5 kW on 2026-07-21 15:50 CEST and
-# 9.4 kW on 2026-07-22 15:10 CEST, using real InfluxDB-archived irradiance/
-# temperature at those instants. Independently derived ratios were 0.854
-# and 0.824; 0.84 is their average. Default (0.87) assumes a cleaner/newer
-# system than this one; re-derive if more peak observations become
-# available.
-weather_pv:
-  latitude_deg: 47.4491
-  longitude_deg: 7.8081
-  tilt_deg: 22.0
-  azimuth_deg: 267.0
-  rated_kwp: 14.4
-  performance_ratio: 0.84
-
-# Real-measurement ground truth (docs/architecture/real_measurement_mqtt.md).
-# ven-1 only: real inverter PV output and real house-load meter reading
-# outrank the weather/sin-model estimates whenever fresh.
-measurements:
-  pv_enabled: true
-  base_load_enabled: true

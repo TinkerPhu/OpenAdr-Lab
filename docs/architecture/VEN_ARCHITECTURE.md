@@ -1546,8 +1546,18 @@ on. Precedence: deterministic pin (`pv_forecast_override`, always wins) →
 `PvInverter`'s own weather-aware projection (its `weather_forecast` field,
 populated each tick from the same weather feed R-50 always used) → sin-model
 snapshot with the decaying manual-inject offset, clipped to `inverter_max_kw`.
-There is no planner-side fallback: a site without a PV asset plans no PV, and a profile with a
-`weather_pv` section must have a PV asset (`profile::validate`). Two properties matter and are
+There is no planner-side fallback: a site without a PV asset plans no PV, and weather geometry
+exists only inside a PV asset (its `weather:` block, W5b). Per asset since W5b: each array's
+weather series and the measured asset's reading reach only that asset
+(`simulator::AssetTickFeeds`, set per asset in `SimState::tick`'s loop), each base load has its own
+Behaviour B smoothing state and learned heuristic, the site generation limit is shared over the
+arrays by their AC ceilings (`simulator::generation_limit_share`, used by the tick and by
+`peek_pv`), and the arbiter projects each previewed asset at its own live value
+(`controller/arbiter/live.rs`: `LiveKwByAsset`, `tighten_generation`). Profile validation still
+allows one asset of each kind; lifting that limit is a separate step. Tests:
+`simulator/tests/per_asset_tests.rs`, `routes/weather.rs`
+(`east_and_west_arrays_derive_their_own_forecasts`), `profile/validate.rs`
+(`each_pv_asset_carries_its_own_weather_and_measurement`). Two properties matter and are
 regression-tested:
 
 - **Each slot/future point is evaluated at its own timestamp**, using

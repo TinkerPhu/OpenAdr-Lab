@@ -5,7 +5,7 @@ use tracing::info;
 
 use crate::controller::{HistoryPort, SolverPort, WeatherForecastPort};
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
-use crate::entities::asset_params::{AssetParams, PvForecastParams};
+use crate::entities::asset_params::AssetParams;
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
@@ -30,7 +30,7 @@ pub(crate) fn spawn_planning(
     notifier: crate::services::notify::Notifier,
     now_fn: impl Fn() -> chrono::DateTime<Utc> + Send + Sync + 'static,
     weather: Arc<dyn WeatherForecastPort>,
-    weather_pv_params: Option<PvForecastParams>,
+    weather_pv_params: crate::entities::asset_params::PvWeatherParams,
     history: Option<Arc<dyn HistoryPort>>,
     // GB-54 — this VEN's stable phase within the replan grid. Built from the
     // VEN's name by `planner_params::replan_phase_offset_s` at start-up.
@@ -95,7 +95,7 @@ pub(crate) fn spawn_planning(
                 &event_tx,
                 &notifier,
                 &weather,
-                weather_pv_params.as_ref(),
+                &weather_pv_params,
                 &signal,
                 wall_now,
                 now,
@@ -210,7 +210,7 @@ mod tests {
             crate::services::notify::Notifier::new(None),
             Utc::now,
             Arc::new(crate::controller::NoopWeatherPort),
-            None,
+            Default::default(),
             None,
             0,
         );

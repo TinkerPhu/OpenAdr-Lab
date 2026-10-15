@@ -23,12 +23,14 @@ mod dispatch;
 mod emergency;
 mod lag_bridge;
 pub mod limit;
+mod live;
 mod ranked;
 mod release;
 
 pub use decision::decision_event;
 pub use dispatch::meet_dispatch_setpoint;
 pub use emergency::heater_emergency_modes;
+pub use live::{projected_net_kw, projected_net_kw_except, tighten_generation, LiveKwByAsset};
 #[cfg(test)]
 use ranked::rank_levers;
 pub use ranked::SetpointBoundsKw;
@@ -185,14 +187,16 @@ pub struct ArbiterTick<'a> {
     pub objective: PlannerObjective,
     /// Each EV's opportunistic regime (`ev_overlays`).
     pub ev_overlay: &'a EvOverlays,
-    pub live_pv_kw: Option<f64>,
-    /// This tick's PV preview under the generation limit that would apply **without** the
-    /// arbiter's own tightening — the PV a released correction would face. `live_pv_kw`
-    /// already includes last tick's arbiter curtailment (it clamps by the inverter's current
-    /// limit), so judging "is the cause gone" on it would release whenever the arbiter's own
-    /// curtailment happened to hide the deviation (R-88). `None`: fall back to `live_pv_kw`.
-    pub live_pv_released_kw: Option<f64>,
-    pub live_base_load_kw: Option<f64>,
+    /// This tick's previewed power of every physics-driven asset (PV arrays, base loads), by
+    /// asset id (`SimState::peek_pv` / `peek_base_load_kw`): what the projection counts for
+    /// them instead of their necessarily-stale snapshot.
+    pub live_kw: &'a LiveKwByAsset,
+    /// This tick's previews again, with each array under the generation limit that would apply
+    /// **without** the arbiter's own tightening — the PV a released correction would face.
+    /// `live_kw` already includes last tick's arbiter curtailment (it clamps by the inverter's
+    /// current limit), so judging "is the cause gone" on it would release whenever the
+    /// arbiter's own curtailment happened to hide the deviation (R-88). `None`: use `live_kw`.
+    pub live_released_kw: Option<&'a LiveKwByAsset>,
     /// An alert window is active — the only case that may curtail the heater's
     /// thermostat-forced emergency heat.
     pub alert_active: bool,
@@ -205,76 +209,6 @@ pub struct ArbiterTick<'a> {
     /// as a deviation of its own, and the arbiter undid the EV's now-landed change to remove
     /// it — the EV/battery hunt of R-104.
     pub prev_bridge_kw_by_asset: &'a HashMap<String, f64>,
-}
-
-/// Generalizes the former `apply_surplus_ev_overlay`'s `net_other_kw`
-/// calculation: this tick's projected net site power, preferring
-/// `live_pv_kw`/`live_base_load_kw` over the necessarily-stale `SimSnapshot`
-/// for those two physics-driven inputs, and `setpoints` for every controlled
-/// asset.
-///
-/// For battery/EV, `setpoints` must hold the command the adjustments start
-/// from: `reconcile` seeds them with `AssetSnapshot.setpoint_kw` (the
-/// arbiter's own last-tick command, the dead-beat integrator state), never the
-/// plan's static per-slot allocation. Reading the plan allocation instead would
-/// make the deviation signal blind to a correction already applied — the next
-/// tick "rediscovers" the same deviation and re-applies a fresh correction on
-/// top of it, an unbounded per-tick runaway rather than settling once
-/// corrected (see
-/// `reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp`).
-pub fn projected_net_kw(
-    sim: &SimSnapshot,
-    setpoints: &HashMap<String, f64>,
-    live_pv_kw: Option<f64>,
-    live_base_load_kw: Option<f64>,
-) -> f64 {
-    projected_net_kw_except(sim, setpoints, live_pv_kw, live_base_load_kw, &[])
-}
-
-/// `projected_net_kw` without the assets in `except_asset_ids` — for callers
-/// that solve for those assets' own setpoints (dispatch override, the no-plan
-/// EV fallback).
-pub fn projected_net_kw_except(
-    sim: &SimSnapshot,
-    setpoints: &HashMap<String, f64>,
-    live_pv_kw: Option<f64>,
-    live_base_load_kw: Option<f64>,
-    except_asset_ids: &[&str],
-) -> f64 {
-    sim.assets
-        .iter()
-        .filter(|(id, _)| !except_asset_ids.contains(&id.as_str()))
-        .map(|(id, snap)| {
-            // A live measurement beats the model for the two assets that have
-            // one; everything else is the asset's own answer to what this
-            // tick's command makes it draw — stage quantization, an all-or-
-            // nothing start, a thermostat override and a charger's response
-            // lag all included, none of them re-derived here (R-81/R-82).
-            match measured_kw_for(id, live_pv_kw, live_base_load_kw) {
-                Some(measured_kw) => measured_kw,
-                None => snap.power_drawn_for_setpoint_kw(arbiter_levers::current_setpoint_kw(
-                    setpoints, sim, id,
-                )),
-            }
-        })
-        .sum()
-}
-
-/// The measurement standing in for the model for `asset_id`, if that asset has
-/// a live feed at all. Declared as a table rather than a chain of id tests: a
-/// feed belongs to exactly one asset, and a third one is another row here.
-fn measured_kw_for(
-    asset_id: &str,
-    live_pv_kw: Option<f64>,
-    live_base_load_kw: Option<f64>,
-) -> Option<f64> {
-    [
-        (crate::ids::ASSET_PV, live_pv_kw),
-        (crate::ids::ASSET_BASE_LOAD, live_base_load_kw),
-    ]
-    .into_iter()
-    .find(|(id, _)| *id == asset_id)
-    .and_then(|(_, measured_kw)| measured_kw)
 }
 
 /// `projected_net_kw − target`, where the target is the plan's signed net
@@ -302,7 +236,6 @@ pub fn reconcile(
     incumbent_lever: Option<&str>,
 ) -> ArbiterOutcome {
     let sim = tick.sim;
-    let (live_pv_kw, live_base_load_kw) = (tick.live_pv_kw, tick.live_base_load_kw);
     let mut setpoints = base_setpoints.clone();
     // Carry forward the dead-beat correctors' own last-applied setpoint as
     // the baseline, not the plan's static per-slot allocation — otherwise a
@@ -321,20 +254,14 @@ pub fn reconcile(
         // No active plan yet (startup window): same fallback as the
         // pre-arbiter no-plan branch — opportunistic EV-only, since there's
         // no plan target to compute a deviation against.
-        apply_ev_lever_opportunistic(
-            &mut setpoints,
-            sim,
-            live_pv_kw,
-            live_base_load_kw,
-            tick.ev_overlay,
-        );
+        apply_ev_lever_opportunistic(&mut setpoints, sim, tick.live_kw, tick.ev_overlay);
         return ArbiterOutcome {
             setpoints,
             ..Default::default()
         };
     };
 
-    let net_kw = projected_net_kw(sim, &setpoints, live_pv_kw, live_base_load_kw);
+    let net_kw = projected_net_kw(sim, &setpoints, tick.live_kw);
     let dev_kw = deviation_kw(slot, net_kw, tick.limit_target_kw);
     let without_kw =
         release::deviation_without_correction_kw(tick, slot, &setpoints, base_setpoints);
@@ -428,6 +355,22 @@ pub(crate) mod test_ticks {
 
     pub(crate) fn no_bridge() -> &'static HashMap<String, f64> {
         &NO_BRIDGE
+    }
+
+    /// This tick's previews of the PV array `pv` and the base load `base_load`, those given.
+    pub(crate) fn live(pv_kw: Option<f64>, base_load_kw: Option<f64>) -> super::LiveKwByAsset {
+        [("pv", pv_kw), ("base_load", base_load_kw)]
+            .into_iter()
+            .filter_map(|(id, kw)| Some((id.to_string(), kw?)))
+            .collect()
+    }
+
+    /// `live`, for a tick a helper function returns.
+    pub(crate) fn live_static(
+        pv_kw: Option<f64>,
+        base_load_kw: Option<f64>,
+    ) -> &'static super::LiveKwByAsset {
+        Box::leak(Box::new(live(pv_kw, base_load_kw)))
     }
 }
 

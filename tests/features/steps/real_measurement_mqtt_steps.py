@@ -1,7 +1,7 @@
 """Step definitions for the real-measurement-mqtt BDD scenarios
 (real_measurement_mqtt.feature). Requires the `mosquitto` test-broker service
-in tests/docker-compose.test.yml and the `measurements` profile section in
-VEN/profiles/test.yaml.
+in tests/docker-compose.test.yml and the `measurement: {enabled: true}` of the pv and
+base_load assets in VEN/profiles/test.yaml.
 """
 
 import json
@@ -59,7 +59,8 @@ def step_daylight_snow_free_output(context, kw):
     reference_kw = 0.0
     while time.time() < deadline:
         resp = ven_get("/weather")
-        derived = resp.json().get("derived") if resp.ok else None
+        # One derived series per array (W5b); the test profile has one, `pv`.
+        derived = (resp.json().get("derived") or {}).get("pv") if resp.ok else None
         if derived and derived[0]["snow_free_ac_kw"] >= kw:
             return
         reference_kw = derived[0]["snow_free_ac_kw"] if derived else 0.0
@@ -84,7 +85,7 @@ def step_weather_reports_snow_covered(context):
 def step_derived_hours_covered(context):
     derived = ven_get("/weather").json()["derived"]
     assert derived, "no derived PV forecast"
-    for slot in derived:
+    for slot in (slot for series in derived.values() for slot in series):
         assert slot["snow_covered"], f"hour {slot['valid_at']} is not snow-covered"
         assert abs(slot["forecast_ac_kw"]) < 1e-9, (
             f"hour {slot['valid_at']} promises {slot['forecast_ac_kw']} kW from a covered panel"
@@ -134,6 +135,8 @@ def step_measurement_pv_ok(context):
     )
     resp = ven_get("/measurement")
     assert resp.json()["pv"]["raw_kw"] == PV_MEASURED_KW
+    # The feed belongs to the asset that enables it in the profile (W5b).
+    assert resp.json()["pv"]["asset_id"] == "pv", resp.json()["pv"]
 
 
 @then("/measurement reports the base_load signal as ok with the published reading")

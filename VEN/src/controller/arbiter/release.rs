@@ -51,10 +51,10 @@ pub(super) fn deviation_without_correction_kw(
 ) -> f64 {
     // PV as it would be without the arbiter's own curtailment — the third correction the
     // arbiter holds, carried through the inverter's generation limit instead of a setpoint.
-    let live_pv_kw = tick.live_pv_released_kw.or(tick.live_pv_kw);
-    let (sim, live_base_kw) = (tick.sim, tick.live_base_load_kw);
+    let live = tick.live_released_kw.unwrap_or(tick.live_kw);
+    let sim = tick.sim;
     let carried = carried_ids(sim);
-    let others_kw = projected_net_kw_except(sim, setpoints, live_pv_kw, live_base_kw, &carried);
+    let others_kw = projected_net_kw_except(sim, setpoints, live, &carried);
     let released = at_plan(setpoints, plan_setpoints, sim);
     let levers_at_plan_kw: f64 = carried
         .iter()

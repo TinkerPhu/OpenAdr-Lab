@@ -149,16 +149,13 @@ pub struct Profile {
     pub grid: super::grid::GridConfig,
     #[serde(default)]
     pub history: HistoryConfig,
-    /// Weather-sourced PV forecast config (weather-forecast-visibility).
-    /// Optional and additive — absent by default, so every profile without
-    /// it parses and behaves exactly as before this section existed.
+    /// Retired site-level sections (W5b): the weather geometry is each PV asset's own
+    /// `weather:` block, the measurement switch each PV / base-load asset's own
+    /// `measurement:`. Read only so validation can name the new place.
     #[serde(default)]
-    pub weather_pv: Option<WeatherPvConfig>,
-    /// Real-measurement MQTT feed enable flags (per-VEN gate, alongside the
-    /// env-var/transport gate — both must allow a signal for it to take
-    /// effect). Optional and additive — absent by default.
+    pub weather_pv: Option<serde_yaml::Value>,
     #[serde(default)]
-    pub measurements: Option<MeasurementsConfig>,
+    pub measurements: Option<serde_yaml::Value>,
     /// GB-09: per-VEN VTN poll cadence + startup jitter. Omitted -> 30/30/60s, zero-jitter defaults.
     #[serde(default)]
     pub polling: super::polling::PollConfig,
@@ -174,11 +171,17 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Weather-sourced PV forecast params, if configured. `None` when the
-    /// profile has no `weather_pv` section — callers (the `GET /weather`
-    /// route) treat that as "derived state unavailable," not an error.
-    pub fn weather_pv_params(&self) -> Option<PvForecastParams> {
-        self.weather_pv.as_ref().map(WeatherPvConfig::to_params)
+    /// Each PV array's weather-forecast params, by asset id: the arrays whose profile entry
+    /// has a `weather:` block. Empty when none has — callers (the `GET /weather` route)
+    /// treat that as "derived state unavailable," not an error.
+    pub fn pv_weather_params(&self) -> std::collections::BTreeMap<String, PvForecastParams> {
+        self.assets
+            .iter()
+            .filter_map(|a| match a {
+                AssetProfile::Pv(pv) => Some((pv.id.clone(), pv.weather.as_ref()?.to_params())),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Base-load heuristics learner config, resolved from the profile's
@@ -187,32 +190,42 @@ impl Profile {
         self.heuristics.to_config()
     }
 
-    /// Whether this VEN's profile enables trusting a real measured PV
-    /// reading. `false` when the profile has no `measurements` section or
-    /// omits `pv_enabled` — the profile-level half of the two-gate design
-    /// (the other half is the `PV_MEASUREMENT_MQTT_HOST` env var).
-    pub fn pv_measurement_enabled(&self) -> bool {
-        self.measurements.as_ref().is_some_and(|m| m.pv_enabled)
+    /// Which asset each external feed belongs to (`AssetFeedConfig`).
+    pub fn asset_feeds(&self) -> crate::entities::asset_params::AssetFeedConfig {
+        crate::entities::asset_params::AssetFeedConfig {
+            pv_weather: self.pv_weather_params(),
+            measured_pv: self.measured_pv_asset(),
+            measured_base_load: self.measured_base_load_asset(),
+        }
     }
 
-    /// Whether this VEN's profile enables trusting a real measured baseline
-    /// load reading. Same two-gate design as `pv_measurement_enabled`.
-    pub fn base_load_measurement_enabled(&self) -> bool {
-        self.measurements
-            .as_ref()
-            .is_some_and(|m| m.base_load_enabled)
+    /// The PV asset whose real measured reading this VEN trusts: the one whose
+    /// `measurement.enabled` is set (the profile-level half of the two-gate design; the other
+    /// half is the `PV_MEASUREMENT_MQTT_HOST` env var). `None` when none is.
+    pub fn measured_pv_asset(&self) -> Option<String> {
+        self.assets.iter().find_map(|a| match a {
+            AssetProfile::Pv(pv) if pv.measurement.enabled => Some(pv.id.clone()),
+            _ => None,
+        })
+    }
+
+    /// The base-load asset whose real measured reading this VEN trusts. Same two-gate
+    /// design as `measured_pv_asset`.
+    pub fn measured_base_load_asset(&self) -> Option<String> {
+        self.assets.iter().find_map(|a| match a {
+            AssetProfile::BaseLoad(b) if b.measurement.enabled => Some(b.id.clone()),
+            _ => None,
+        })
     }
 }
 
-/// `measurements:` profile section — enable flags only; no physical params
-/// needed here since the asset structs already carry those (`rated_kw`
-/// etc.). See docs/architecture for the two-gate design (env var + profile).
+/// An asset's real-measurement switch (`measurement:` in its profile entry). Off by default;
+/// the MQTT transport carries one PV and one base-load topic, so at most one asset of each
+/// kind may switch it on.
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct MeasurementsConfig {
+pub struct MeasurementSwitch {
     #[serde(default)]
-    pub pv_enabled: bool,
-    #[serde(default)]
-    pub base_load_enabled: bool,
+    pub enabled: bool,
 }
 
 /// WP1.2/WP1.3 (Phase 1, A-1) — persistent history sampling + retention.
@@ -407,6 +420,12 @@ pub struct PvConfig {
     /// PV embodied carbon, gCO2eq/kWh — reporting-only, not in the planner objective.
     #[serde(default = "super::defaults::default_pv_co2_g_kwh")]
     pub co2_g_kwh: f64,
+    /// This array's weather-forecast geometry and rating (weather-forecast-visibility). An
+    /// array without one follows its own irradiance model.
+    #[serde(default)]
+    pub weather: Option<WeatherPvConfig>,
+    #[serde(default)]
+    pub measurement: MeasurementSwitch,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -445,6 +464,8 @@ pub struct BaseLoadConfig {
     /// default — profiles that don't list any get zero appliance noise.
     #[serde(default)]
     pub spikes: Vec<SpikeConfig>,
+    #[serde(default)]
+    pub measurement: MeasurementSwitch,
 }
 
 /// One simulated appliance draw: a Gaussian-shaped power bump centered on
