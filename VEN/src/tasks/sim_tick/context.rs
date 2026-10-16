@@ -57,6 +57,17 @@ pub(crate) struct TickContext {
     pub opportunistic: Option<crate::controller::arbiter::OpportunisticRequests>,
 }
 
+impl TickContext {
+    /// The request targets the simulator hands each asset this tick: empty under every planning
+    /// objective, which injects no request target (openspec `opportunistic-objective` D0).
+    pub(crate) fn request_targets(&self) -> crate::controller::arbiter::RequestTargets {
+        self.opportunistic
+            .as_ref()
+            .map(|r| r.targets.clone())
+            .unwrap_or_default()
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn resolve_tick_context(
     state: &AppState,

@@ -16108,3 +16108,33 @@ curve, so only the editor needed to change.
 - The route-level status codes (404, 422) are pinned by the BDD scenarios; the repo has no handler test
   harness for these routes.
 
+## 051: the opportunistic objective, groups 0-4 (051-opportunistic-objective)
+
+**What.** A planner objective `opportunistic` (`openspec/changes/opportunistic-objective`): the
+common non-planning HEMS as a baseline. Under it the tick follows no plan allocation; one pass
+(`controller/arbiter/opportunistic.rs`) shares the site balance out to every asset that declares a
+surplus-claim rank (EV, heater, shiftable load, battery: the same constants the MILP context
+returns), and storage covers import. Request modes declare how they are served without look-ahead
+(`UserRequestMode::non_planning_dispatch`); an EV session's target and a heater's start-now
+target reach the asset through per-asset tick inputs, so the asset says when it is done, and the
+heater holds a target through its own ceiling latch. The planning cycle does not solve it (an
+interim plan without slots, status `SIMULATED`, until the forecast of group 7); the gate adopts on
+any change of dispatch regime. VEN UI: the objective in the picker, a plan-status table per solve
+status, a "Simulated forecast" chip, an opportunistic readout in the arbiter diagnostics.
+
+**Why.** The lab could show that planning moves load, not what the same fleet does without it.
+
+**How planning mode is kept identical.** Before any production edit: a tick golden (18 planned
+scenarios x 30 ticks through `build_tick_setpoints`), `rank_levers` and the adoption gate against
+frozen copies on 10 000 random cases each. The opportunistic code sits behind two guards on
+`PlannerObjective::dispatches_from_plan()`; the planning no-plan window, the EV overlay, `reconcile`
+and the lever machinery are untouched, and a switch-back test shows the first planned tick after an
+opportunistic hour decides as a fresh planning VEN does.
+
+**Issues.** The first design put the pass on the shared closed-loop lever machinery; a charger with
+a one-tick lag would have toggled, so it became an open-loop allocation (design D2). A bit-exact
+tick golden failed against itself: the arbiter sums power over `HashMap`s. Two hand-written
+spellings of enums were consolidated on the way (`PlannerObjective`'s three lists, the plan-history
+store's `SolveStatus`/`WarningKind`). `entities/plan.rs` crossed 500 lines; the plan's outcome
+vocabulary moved to `entities/plan_outcome.rs`. Groups 5-10 (objective source, fleet channel,
+forecast, VTN UI, BDD, docs) are still open.

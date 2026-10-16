@@ -3547,3 +3547,19 @@ right for keeping an x86 plan identical to the last bit; it is no longer needed 
   maximum cost is the area under it. Naming the field after the UI label (`cumulative_max_cost_eur`) kept
   the two apart.
 
+## A pass that starts from the base every tick must allocate open-loop (2026-10-16)
+
+- The arbiter's lever loop corrects closed-loop: a lever is credited with what its asset draws
+  **this tick**. That is right for deviation correction, which carries its last command forward,
+  and wrong for a pass that rebuilds every command from the asset's default each tick: a charger
+  whose command lands one tick late is credited 0, its share goes to the next lever, and on the
+  next balanced tick its command is reset, so it toggles. Such a pass commands each asset what it
+  should draw once the command lands, from this tick's balance (as `apply_ev_lever_opportunistic`
+  always did); the same balance then gives the same commands every tick, and a test pins that.
+
+## A golden over floating sums of a HashMap compares decisions, not bits (2026-10-16)
+
+- A bit-exact tick golden failed against itself on the next run: `projected_net_kw` sums over a
+  `HashMap`, whose iteration order changes per process, so the last bit of a sum moves. Compare at
+  a stated tolerance (1e-9 kW here) and say why in the golden's header; run it in three separate
+  processes before trusting it.

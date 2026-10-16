@@ -17,6 +17,8 @@ pub mod measurement;
 pub mod notification;
 pub mod plan;
 pub mod plan_cost;
+
+pub mod plan_outcome;
 pub mod planner_params;
 pub mod pv_snow;
 pub mod report_submission;
