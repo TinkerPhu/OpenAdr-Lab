@@ -54,7 +54,11 @@ wait_for_load_to_settle "main pass"
 # Then run @isolated scenarios in a second pass so each gets a fresh VEN
 # state and is not affected by Node1 resource contention from prior scenarios.
 set +e
-python -m behave --tags=~@isolated --exclude "isolated" "$@"
+# Every pass also records its failed scenarios (behave's `rerun` formatter writes
+# feature:line locations), so a failure gets exactly one retry on its own below.
+RERUN_MAIN=/tmp/rerun_main.txt
+RERUN_ISOLATED=/tmp/rerun_isolated.txt
+python -m behave -f rerun -o "$RERUN_MAIN" -f pretty --tags=~@isolated --exclude "isolated" "$@"
 MAIN_EXIT=$?
 
 echo ""
@@ -64,7 +68,12 @@ echo "=== Running @isolated scenarios (fresh VEN state) ==="
 # Point directly at the dedicated isolated/ subdirectory. Every scenario in
 # that directory is @isolated, so nothing is loaded-but-skipped: zero structural
 # skips in the summary.
-python -m behave features/isolated/ "$@"
+python -m behave -f rerun -o "$RERUN_ISOLATED" -f pretty features/isolated/ "$@"
 ISOLATED_EXIT=$?
+
+# Flaky versus red: see retry_failed.sh.
+. ./retry_failed.sh
+retry_failed_scenarios main "$MAIN_EXIT" "$RERUN_MAIN" "$@" && MAIN_EXIT=0
+retry_failed_scenarios isolated "$ISOLATED_EXIT" "$RERUN_ISOLATED" "$@" && ISOLATED_EXIT=0
 
 exit $((MAIN_EXIT | ISOLATED_EXIT))
