@@ -4,6 +4,9 @@ mod arbiter_glue;
 mod context;
 mod feeds;
 mod finalize;
+#[cfg(test)]
+#[path = "tests/forecast_guard.rs"]
+mod forecast_guard;
 mod forecast_wiring;
 mod post_lock;
 mod publish;

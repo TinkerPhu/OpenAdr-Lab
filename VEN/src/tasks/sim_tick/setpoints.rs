@@ -60,11 +60,16 @@ pub(crate) fn build_tick_setpoints(
             .map(|l| l.limit_kw);
     let hard_limit_kw = limit::hard_import_limit_kw(capacity_limit_kw, alert_active)
         .filter(|_| ctx.limit_enforcement_enabled);
-    let ev_overlay =
-        controller::arbiter::ev_overlays(sim_snap, plan_snap, now, |id| ctx.overlay_enabled.of(id));
+    // The opportunistic arm follows no plan allocation anywhere (D1): not in the base, not in
+    // the EV overlays, not as the slot the levers are priced in. So the forecast, which has no
+    // plan yet when it steps, decides as the live tick does.
+    let followed_plan = plan_snap.filter(|_| ctx.opportunistic.is_none());
+    let ev_overlay = controller::arbiter::ev_overlays(sim_snap, followed_plan, now, |id| {
+        ctx.overlay_enabled.of(id)
+    });
     let tick = controller::arbiter::ArbiterTick {
         sim: sim_snap,
-        plan_slot: plan_snap.and_then(|p| p.current_slot(now)),
+        plan_slot: followed_plan.and_then(|p| p.current_slot(now)),
         objective: plan_snap.map_or(PlannerObjective::MinCost, |p| p.objective),
         ev_overlay: &ev_overlay,
         live_kw,

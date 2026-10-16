@@ -32,7 +32,10 @@ mod stages;
 pub use decision::decision_event;
 pub use dispatch::meet_dispatch_setpoint;
 pub use emergency::heater_emergency_modes;
-pub use live::{projected_net_kw, projected_net_kw_except, tighten_generation, LiveKwByAsset};
+pub use live::{
+    projected_landed_net_kw, projected_net_kw, projected_net_kw_except, tighten_generation,
+    LiveKwByAsset,
+};
 pub use opportunistic::{
     opportunistic_requests, opportunistic_step, OpportunisticOutcome, OpportunisticRequests,
     RequestTargets,
@@ -98,6 +101,67 @@ pub fn ev_overlays(
             };
             (id.to_string(), overlay)
         })
+        .collect()
+}
+
+/// Each EV's opportunistic switch at one instant, by asset id: its user's toggle, paused while a
+/// session of its own runs (`EvSettings::overlay_enabled`). An EV with neither a settings record
+/// nor a session reads the default settings with no session running. The live tick and the
+/// opportunistic forecast both read it from `OverlayEnabled::at`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OverlayEnabled(HashMap<String, bool>);
+
+impl OverlayEnabled {
+    #[cfg(test)]
+    pub fn from_map(overlay_by_asset: HashMap<String, bool>) -> Self {
+        Self(overlay_by_asset)
+    }
+
+    pub fn of(&self, asset_id: &str) -> bool {
+        self.0.get(asset_id).copied().unwrap_or_else(|| {
+            crate::entities::ev_settings::EvSettings::default().overlay_enabled(false)
+        })
+    }
+
+    /// The switches at `now`, and the session each EV serves then: the one whose window is
+    /// open (`EvSessionQueue::current`), so a queued later session does not pause an EV now.
+    pub fn at(
+        settings: &std::collections::BTreeMap<String, crate::entities::ev_settings::EvSettings>,
+        queues: &std::collections::BTreeMap<
+            String,
+            crate::entities::device_session::EvSessionQueue,
+        >,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> (
+        Self,
+        HashMap<String, crate::entities::device_session::EvSession>,
+    ) {
+        let sessions_now: HashMap<_, _> = queues
+            .iter()
+            .filter_map(|(id, queue)| queue.current(now).cloned().map(|s| (id.clone(), s)))
+            .collect();
+        let enabled = settings
+            .keys()
+            .chain(sessions_now.keys())
+            .map(|id| {
+                let ev = settings.get(id).cloned().unwrap_or_default();
+                (
+                    id.clone(),
+                    ev.overlay_enabled(sessions_now.contains_key(id)),
+                )
+            })
+            .collect();
+        (Self(enabled), sessions_now)
+    }
+}
+
+/// When the session each EV serves ends, by asset id: what the EV is told as its departure.
+pub fn session_departures(
+    sessions_now: &HashMap<String, crate::entities::device_session::EvSession>,
+) -> HashMap<String, chrono::DateTime<chrono::Utc>> {
+    sessions_now
+        .iter()
+        .map(|(id, s)| (id.clone(), s.departure_time))
         .collect()
 }
 

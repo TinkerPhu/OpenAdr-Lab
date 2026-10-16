@@ -21,7 +21,6 @@ const WARNING_KIND_LABELS: Record<WarningKind, string> = {
   EV_CORE_ENERGY_UNMET: "EV guaranteed charge not delivered",
   TARGET_ABOVE_LIMIT: "Target above the charge limit",
   HEATER_TARGET_UNMET: "Heater target not reached",
-  OPPORTUNISTIC_NO_FORECAST: "Opportunistic, no forecast yet",
   OTHER: "Other",
 };
 
@@ -34,7 +33,6 @@ const WARNING_KIND_COLOR: Record<WarningKind, "error" | "warning" | "default"> =
   EV_CORE_ENERGY_UNMET: "warning",
   TARGET_ABOVE_LIMIT: "warning",
   HEATER_TARGET_UNMET: "warning",
-  OPPORTUNISTIC_NO_FORECAST: "default",
   OTHER: "default",
 };
 

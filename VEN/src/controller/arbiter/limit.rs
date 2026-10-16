@@ -12,6 +12,16 @@
 //! lever; while that is a switching lever (heater stage, EV minimum-charge
 //! floor) the target sits `LIMIT_RELEASE_HYSTERESIS_KW` lower, so a shed stage
 //! is restored only once it fits with room to spare.
+//!
+//! A lagging lever (the EV charger applies a command a tick late) has two powers:
+//! what it draws this tick, which the lever loop sheds against and bridges, and
+//! what this tick's command draws once it lands. Judged on this tick alone, a cut
+//! charger reads as "within the limit" and is released; its full command lands a
+//! tick later above the limit, and the pass alternates between the two every tick
+//! (found by the opportunistic forecast, 051 group 7). `hold_where_commands_land`
+//! keeps the landed power under the target as well. The opportunistic step applies
+//! it; planning mode does not yet (R-145: it changes planning decisions, which this
+//! change keeps identical).
 
 use std::collections::HashMap;
 use ts_rs::TS;
@@ -19,7 +29,8 @@ use ts_rs::TS;
 use super::arbiter_levers::{current_setpoint_kw, kind_of_key, LEVER_EV, LEVER_HEATER_PAUSE};
 pub use super::SetpointBoundsKw;
 use super::{
-    apply_ranked_levers, projected_net_kw, ArbiterTick, LeverInputs, LeverPolicy, DEAD_BAND_KW,
+    apply_ranked_levers, projected_landed_net_kw, projected_net_kw, ArbiterTick, LeverInputs,
+    LeverPolicy, DEAD_BAND_KW,
 };
 
 /// How far below a hard import limit both passes steer (kW) — room for the
@@ -67,6 +78,47 @@ pub fn limit_target_kw(hard_limit_kw: Option<f64>, incumbent_lever: Option<&str>
         0.0
     };
     hard_limit_kw.map(|limit_kw| limit_kw - LIMIT_MARGIN_KW - hysteresis_kw)
+}
+
+/// After the limit pass: cut each lagging lever (the EV charger, the one asset that applies a
+/// command a tick late) so the commands in `setpoints` land within the pass's target too, and
+/// record it on `outcome` (`None`: no limit in force, nothing to hold). This tick's import is
+/// the lever loop's: it already shed and bridged it, and nothing done now changes what a lagging
+/// asset draws this tick, so the cut here is neither bridged nor unresolved. The lever that held
+/// becomes the pass's incumbent for next tick.
+pub fn hold_where_commands_land(
+    tick: &ArbiterTick,
+    setpoints: &mut HashMap<String, f64>,
+    outcome: Option<&mut LimitPassOutcome>,
+) {
+    use crate::entities::asset::ArbiterLeverKind;
+    let Some(outcome) = outcome else {
+        return;
+    };
+    let mut excess_kw =
+        projected_landed_net_kw(tick.sim, setpoints, tick.live_kw) - outcome.target_kw;
+    let mut held = None;
+    for id in tick.sim.lever_asset_ids(&[ArbiterLeverKind::SurplusCharge]) {
+        if excess_kw < DEAD_BAND_KW {
+            break;
+        }
+        let before_kw = current_setpoint_kw(setpoints, tick.sim, id);
+        let effect = super::arbiter_levers::apply_ev_lever(setpoints, tick.sim, id, excess_kw);
+        if effect.landed_kw > 0.0 {
+            excess_kw -= effect.landed_kw;
+            let shift_kw = current_setpoint_kw(setpoints, tick.sim, id) - before_kw;
+            *outcome
+                .adjusted_kw_by_asset
+                .entry(id.to_string())
+                .or_default() += shift_kw;
+            held.get_or_insert_with(|| {
+                super::arbiter_levers::LeverId::of_asset(LEVER_EV, id).key()
+            });
+        }
+    }
+    if let Some(lever) = held {
+        outcome.active_lever.get_or_insert(lever);
+    }
 }
 
 /// What the limit pass saw and did this tick (diagnostics + residual feed).

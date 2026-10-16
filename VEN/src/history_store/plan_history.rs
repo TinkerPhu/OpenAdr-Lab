@@ -216,10 +216,6 @@ mod tests {
             (WarningKind::PeakPenaltyExceeded, "PEAK_PENALTY_EXCEEDED"),
             (WarningKind::EvCoreEnergyUnmet, "EV_CORE_ENERGY_UNMET"),
             (WarningKind::TargetAboveLimit, "TARGET_ABOVE_LIMIT"),
-            (
-                WarningKind::OpportunisticNoForecast,
-                "OPPORTUNISTIC_NO_FORECAST",
-            ),
             (WarningKind::Other, "OTHER"),
         ];
         for (kind, text) in kinds {

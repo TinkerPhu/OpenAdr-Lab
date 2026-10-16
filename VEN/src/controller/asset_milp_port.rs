@@ -244,6 +244,14 @@ pub trait AssetMilpContext: Send + Sync {
     /// How this asset's allocations are priced in the plan.
     fn allocation_basis(&self) -> AllocationBasis;
 
+    /// The solution this asset reads back from the opportunistic forecast instead of a solve
+    /// (openspec `opportunistic-objective` D6). `net_kw` is what it drew in each slot (kW,
+    /// positive = import); `states` is its state at the start of every slot and at the end of
+    /// the horizon (n + 1 entries, keyed as its live `state_values`). Each kind reads its own
+    /// state back, so no kind's readback is written outside the kind.
+    fn solution_from_trace(&self, net_kw: &[f64], states: &[HashMap<String, f64>])
+        -> AssetSolution;
+
     /// Whether the plan schedules this asset or only follows its forecast.
     fn participation(&self) -> Participation<'_> {
         Participation::Dispatched

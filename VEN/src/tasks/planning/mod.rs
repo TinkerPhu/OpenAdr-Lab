@@ -14,6 +14,7 @@ use crate::state::AppState;
 mod assemble;
 mod cycle;
 mod cycle_state;
+mod plan_for;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_planning(
@@ -292,5 +293,62 @@ mod tests {
             .await
             .expect("the first plan is adopted");
         assert_eq!(*leaf.0.lock().unwrap(), vec![adopted.id]);
+    }
+
+    /// 7.4: under the opportunistic objective the cycle adopts the forecast plan, with slots
+    /// over the planner's horizon and the simulated status, and never calls the solver.
+    #[tokio::test]
+    async fn an_opportunistic_cycle_adopts_a_forecast_plan() {
+        let (_trigger_tx, trigger_rx) =
+            watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
+        let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(8);
+        let state = AppState::new();
+        let planner = PlannerParams {
+            planning_initial_delay_s: 0,
+            ..PlannerParams::default()
+        };
+        // A solve would panic into the infeasible fallback, which the status check rejects.
+        let solver = Arc::new(crate::services::test_support::mock_solver_port::PanickingSolverPort);
+        let handle = spawn_planning(
+            state.clone(),
+            planner.clone(),
+            10.0,
+            10.0,
+            vec![],
+            solver,
+            trigger_rx,
+            minimal_sim(),
+            Arc::new(RwLock::new(
+                crate::entities::objective_setting::ObjectiveSetting::from_profile(
+                    PlannerObjective::Opportunistic,
+                ),
+            )),
+            Arc::new(event_bcast_tx),
+            crate::services::notify::Notifier::new(None),
+            Utc::now,
+            Arc::new(crate::controller::NoopWeatherPort),
+            Default::default(),
+            None,
+            Arc::new(crate::controller::telemetry_port::NoTelemetry),
+            0,
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while state.active_plan().await.is_none() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        handle.abort();
+        let plan = state
+            .active_plan()
+            .await
+            .expect("the forecast plan is adopted");
+        assert_eq!(plan.objective, PlannerObjective::Opportunistic);
+        assert_eq!(
+            plan.solve_status,
+            crate::entities::plan::SolveStatus::Simulated
+        );
+        assert_eq!(
+            plan.slots.len(),
+            crate::entities::time_grid::slot_count(&planner.plan_zones)
+        );
     }
 }

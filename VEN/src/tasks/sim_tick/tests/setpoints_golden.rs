@@ -240,7 +240,7 @@ pub(super) fn context(s: &Scenario, sim: &SimState) -> TickContext {
             vec![]
         },
         rates_snap: vec![],
-        overlay_enabled: super::arbiter_glue::OverlayEnabled::from_map(overlay),
+        overlay_enabled: crate::controller::arbiter::OverlayEnabled::from_map(overlay),
         deviation_arbiter_enabled: s.deviation,
         incumbent_lever: None,
         bridge_kw_by_asset: HashMap::new(),

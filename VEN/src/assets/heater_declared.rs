@@ -136,6 +136,55 @@ impl DeclaredAsset for DeclaredHeater<'_> {
 }
 
 impl AssetMilpContext for HeaterMilpContext {
+    fn solution_from_trace(
+        &self,
+        net_kw: &[f64],
+        states: &[std::collections::HashMap<String, f64>],
+    ) -> AssetSolution {
+        let init_temp_c = crate::entities::asset_params::heater_temp_c_from_energy(
+            self.e_init_kwh,
+            self.temp_min_c,
+            self.thermal_mass_kwh_per_c,
+        );
+        let e_tank_kwh: Vec<f64> = super::trace_values(states, "temp_c", init_temp_c)
+            .into_iter()
+            .take(net_kw.len())
+            .map(|temp_c| {
+                crate::entities::asset_params::heater_energy_above_min_kwh(
+                    temp_c,
+                    self.temp_min_c,
+                    self.thermal_mass_kwh_per_c,
+                )
+            })
+            .collect();
+        let planned_state = e_tank_kwh
+            .iter()
+            .map(|&e| heater_future_state(e, self.temp_min_c, self.thermal_mass_kwh_per_c))
+            .collect();
+        let y_heat = net_kw
+            .iter()
+            .map(|&kw| {
+                if self.p_step_kw > 0.0 {
+                    kw / self.p_step_kw
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        AssetSolution {
+            asset_id: self.asset_id.clone(),
+            net_power_kw: net_kw.to_vec(),
+            planned_state,
+            storage: None,
+            warnings: Vec::new(),
+            detail: AssetSolutionDetail::Heater(HeaterSolOutput {
+                y_heat,
+                z_heat_ready: 0.0,
+                e_tank_kwh,
+            }),
+        }
+    }
+
     fn asset_id(&self) -> &str {
         &self.asset_id
     }
@@ -190,6 +239,27 @@ mod tests {
     use crate::controller::milp_planner::asset_port::HeaterMilpMode;
     use crate::controller::milp_planner::{CostWeights, FrictionCosts};
     use good_lp::IntoAffineExpression;
+
+    fn states(key: &str, values: &[f64]) -> Vec<std::collections::HashMap<String, f64>> {
+        values
+            .iter()
+            .map(|&v| std::collections::HashMap::from([(key.to_string(), v)]))
+            .collect()
+    }
+
+    /// Tank temperatures become tank energy above the minimum, power becomes stages.
+    #[test]
+    fn solution_from_trace_reads_the_heater_back_from_its_temperatures() {
+        let ctx = heater();
+        let sol = ctx.solution_from_trace(&[3.0, 0.0], &states("temp_c", &[45.0, 50.0, 49.0]));
+        let AssetSolutionDetail::Heater(out) = &sol.detail else {
+            panic!("a heater reads back a heater detail")
+        };
+        assert_eq!(out.y_heat, vec![2.0, 0.0], "3 kW is two 1.5 kW stages");
+        assert_eq!(out.e_tank_kwh.len(), 2);
+        assert!((out.e_tank_kwh[0] - (45.0 - 40.0) * 0.2).abs() < 1e-12);
+        assert!((sol.planned_state[1]["temp_c"] - 50.0).abs() < 1e-9);
+    }
 
     fn heater() -> HeaterMilpContext {
         HeaterMilpContext {

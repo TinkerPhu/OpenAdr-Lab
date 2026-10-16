@@ -79,9 +79,6 @@ pub enum WarningKind {
     /// A heater target the plan cannot reach by its ready-by time: a thermostat latch
     /// holds the heater off for part of the window, or power and time are too short.
     HeaterTargetUnmet,
-    /// The opportunistic objective is active but its forecast is not built yet: the plan has
-    /// no slots, and dispatch runs without look-ahead all the same.
-    OpportunisticNoForecast,
     /// Reserved for future warning sites not yet classified above.
     Other,
 }

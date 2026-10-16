@@ -184,6 +184,37 @@ impl AssetMilpContext for BatteryMilpContext {
     }
 
     /// Storage takes the surplus the loads leave: it claims last.
+    fn solution_from_trace(
+        &self,
+        net_kw: &[f64],
+        states: &[std::collections::HashMap<String, f64>],
+    ) -> AssetSolution {
+        let energy_kwh: Vec<f64> =
+            super::trace_values(states, "soc", self.e_init_kwh / self.e_nom_kwh)
+                .into_iter()
+                .map(|soc| soc * self.e_nom_kwh)
+                .collect();
+        AssetSolution {
+            asset_id: self.asset_id.clone(),
+            net_power_kw: net_kw.to_vec(),
+            planned_state: (0..net_kw.len())
+                .map(|t| battery_future_state(energy_kwh[t], self.e_nom_kwh))
+                .collect(),
+            storage: Some(StorageLegs {
+                charge_kw: net_kw.iter().map(|&kw| kw.max(0.0)).collect(),
+                discharge_kw: net_kw.iter().map(|&kw| (-kw).max(0.0)).collect(),
+                energy_kwh,
+            }),
+            warnings: Vec::new(),
+            detail: AssetSolutionDetail::Battery {
+                direction: net_kw
+                    .iter()
+                    .map(|&kw| if kw > 1e-6 { 1.0 } else { 0.0 })
+                    .collect(),
+            },
+        }
+    }
+
     fn surplus_claim_rank(&self) -> u8 {
         SURPLUS_CLAIM_RANK
     }
@@ -221,6 +252,32 @@ mod tests {
             eff_dis: 0.96,
             c_terminal_eur_kwh: 0.0,
         }
+    }
+
+    fn states(key: &str, values: &[f64]) -> Vec<std::collections::HashMap<String, f64>> {
+        values
+            .iter()
+            .map(|&v| std::collections::HashMap::from([(key.to_string(), v)]))
+            .collect()
+    }
+
+    /// The forecast readback: net power per slot, the two legs, the stored energy at every
+    /// step boundary from the traced state of charge, the planned state at each slot's start.
+    #[test]
+    fn solution_from_trace_reads_the_battery_back_from_its_states() {
+        let ctx = battery();
+        let sol = ctx.solution_from_trace(&[2.0, -1.0, 0.0], &states("soc", &[0.5, 0.6, 0.5, 0.5]));
+        assert_eq!(sol.net_power_kw, vec![2.0, -1.0, 0.0]);
+        let legs = sol.storage.as_ref().unwrap();
+        assert_eq!(legs.charge_kw, vec![2.0, 0.0, 0.0]);
+        assert_eq!(legs.discharge_kw, vec![0.0, 1.0, 0.0]);
+        assert_eq!(legs.energy_kwh.len(), 4, "n + 1 boundaries");
+        assert!((legs.energy_kwh[1] - 0.6 * 11.0).abs() < 1e-12);
+        assert_eq!(sol.planned_state.len(), 3);
+        assert!((sol.planned_state[1]["soc"] - 0.6).abs() < 1e-12);
+        assert!(
+            matches!(&sol.detail, AssetSolutionDetail::Battery { direction } if direction == &vec![1.0, 0.0, 0.0])
+        );
     }
 
     /// R-97: `u_bat` is the battery's *direction selector*, not an activity flag

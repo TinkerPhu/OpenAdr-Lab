@@ -147,21 +147,21 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 
 - [x] 7.1 Extract the per-slot skeleton (tariffs, caps, baseline, PV) shared by `fallback_plan`
       and `translate_to_plan` into one function; both call it. `plans_golden.rs` holds.
-- [ ] 7.2 `simulator/opportunistic_forecast.rs` (D6): per slot build snapshot, tick, base
+- [x] 7.2 `simulator/opportunistic_forecast.rs` (D6): per slot build snapshot, tick, base
       setpoints, call `opportunistic_step`, then `SimState::tick` with slot-mean PV and base load
       as measured overrides, `now` = slot start (the EV's own usage schedule decides plugging) and
       `dt_s` = slot length; request targets injected as in 3.2. Returns a per-slot, per-asset power and state trace. Tests: noon surplus
       charges battery, evening discharges to floor; scheduled 3 kW limit respected; forecast PV
       equals the input series (smoothing bypassed).
-- [ ] 7.3 `AssetMilpContext::solution_from_trace(net_kw, states)` per kind (each in its own
+- [x] 7.3 `AssetMilpContext::solution_from_trace(net_kw, states)` per kind (each in its own
       `*_declared.rs`, unit-tested there), and `milp_planner::plan_from_forecast` building the
       `SolveOutput` from those and calling `translate_to_plan` with the same contexts
       (`Simulated`, friction 0, marginal values of D8). Test: exporting slot's
       marginal fields equal the export tariff; plan carries `objective: opportunistic`.
-- [ ] 7.4 `cycle.rs` guard calls the forecaster instead of 4.1's empty plan;
+- [x] 7.4 `cycle.rs` guard calls the forecaster instead of 4.1's empty plan;
       `OpportunisticNoForecast` deleted. Guard test: one forecast step and one live tick given the
       same states, PV, base load, limits and requests command the same setpoints.
-- [ ] 7.5 Reporter test: under opportunistic, `USAGE_FORECAST` intervals equal the forecast's net
+- [x] 7.5 Reporter test: under opportunistic, `USAGE_FORECAST` intervals equal the forecast's net
       power per slot.
 
 ## 8. Fleet side — BFF and VTN UI

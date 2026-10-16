@@ -38,7 +38,7 @@ pub(crate) struct TickContext {
     pub alert_windows: Vec<crate::entities::capacity::AlertWindow>,
     pub rates_snap: Vec<crate::entities::tariff_snapshot::TariffSnapshot>,
     /// Each EV's opportunistic-charging switch this tick.
-    pub overlay_enabled: super::arbiter_glue::OverlayEnabled,
+    pub overlay_enabled: crate::controller::arbiter::OverlayEnabled,
     pub deviation_arbiter_enabled: bool,
     pub incumbent_lever: Option<String>,
     /// Last tick's storage bridges (R-104), so each carried storage command drops its own.
@@ -146,10 +146,7 @@ pub(crate) async fn resolve_tick_context(
         bridge_kw_by_asset: state.arbiter_bridge_kw_by_asset().await,
         limit_enforcement_enabled: state.limit_enforcement_enabled().await,
         limit_incumbent_lever: state.limit_active_lever().await,
-        ev_departure_by_asset: ev_sessions_now
-            .into_iter()
-            .map(|(id, s)| (id, s.departure_time))
-            .collect(),
+        ev_departure_by_asset: crate::controller::arbiter::session_departures(&ev_sessions_now),
         comms_loss,
         opportunistic,
     }

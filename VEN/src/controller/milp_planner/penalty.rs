@@ -78,6 +78,22 @@ pub(crate) fn penalty_constraints(
     out
 }
 
+/// The window slack a known import series needs, per window of `rule`: the most any slot in
+/// the window imports above the threshold, zero where none does. What `penalty_constraints`
+/// would force the slack to for this import, for a plan that was stepped rather than solved.
+pub(crate) fn window_exceedance_kw(
+    cum_s: &[i64],
+    rule: &PenaltyRuleParams,
+    p_imp_kw: &[f64],
+) -> Vec<f64> {
+    let mut slack_kw = vec![0.0; num_windows(cum_s, rule.measurement_window_s)];
+    for (t, &p_kw) in p_imp_kw.iter().enumerate() {
+        let w = window_index(cum_s, t, rule.measurement_window_s);
+        slack_kw[w] = f64::max(slack_kw[w], p_kw - rule.threshold_kw);
+    }
+    slack_kw
+}
+
 /// Objective contribution: `penalty_eur_per_kw` per kW of window slack, once
 /// per window — a demand-charge-style peak cost, not an energy cost, so
 /// (unlike `s_imp_viol`'s per-slot violation penalty) there is no `dt_h` factor.

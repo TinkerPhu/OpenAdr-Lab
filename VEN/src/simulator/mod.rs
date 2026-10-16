@@ -5,6 +5,7 @@ pub mod forecast;
 mod grid_meter;
 mod handle;
 pub mod inject;
+pub mod opportunistic_forecast;
 pub mod persist;
 pub mod plan_context;
 pub mod power_model;

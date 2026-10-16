@@ -191,6 +191,38 @@ impl DeclaredAsset for DeclaredEv<'_> {
 }
 
 impl AssetMilpContext for EvMilpContext {
+    fn solution_from_trace(
+        &self,
+        net_kw: &[f64],
+        states: &[std::collections::HashMap<String, f64>],
+    ) -> AssetSolution {
+        let soc_ev = super::trace_values(states, "soc", self.soc_init_frac);
+        let plugged = super::trace_values(states, "plugged", 0.0);
+        let planned_state = (0..net_kw.len())
+            .map(|t| ev_future_state_at(soc_ev[t], plugged[t] > 0.5))
+            .collect();
+        let sol = EvSolOutput {
+            p_ev_kw: net_kw.to_vec(),
+            soc_ev,
+            // Nothing is guaranteed without look-ahead, so nothing falls short of a guarantee.
+            shortfall_kwh: Vec::new(),
+            z_ev_on: net_kw
+                .iter()
+                .map(|&kw| if kw > 1e-6 { 1.0 } else { 0.0 })
+                .collect(),
+            e_ev_extra_kwh: 0.0,
+            e_seg_kwh: 0.0,
+        };
+        AssetSolution {
+            asset_id: self.asset_id.clone(),
+            net_power_kw: net_kw.to_vec(),
+            planned_state,
+            storage: None,
+            warnings: Vec::new(),
+            detail: AssetSolutionDetail::Ev(sol),
+        }
+    }
+
     fn asset_id(&self) -> &str {
         &self.asset_id
     }
@@ -303,6 +335,38 @@ mod tests {
 
     fn now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 4, 11, 6, 0, 0).unwrap()
+    }
+
+    fn soc_states(soc: &[f64], plugged: &[f64]) -> Vec<std::collections::HashMap<String, f64>> {
+        soc.iter()
+            .zip(plugged)
+            .map(|(&s, &p)| {
+                std::collections::HashMap::from([
+                    ("soc".to_string(), s),
+                    ("plugged".to_string(), p),
+                ])
+            })
+            .collect()
+    }
+
+    /// The traced state of charge and plug state become the plan's EV state, slot by slot; a
+    /// forecast guarantees nothing, so it reports no shortfall.
+    #[test]
+    fn solution_from_trace_reads_the_ev_back_from_its_states() {
+        let ctx = ev(&[]);
+        let sol =
+            ctx.solution_from_trace(&[0.0, 7.0], &soc_states(&[0.4, 0.4, 0.5], &[0.0, 1.0, 1.0]));
+        assert_eq!(sol.net_power_kw, vec![0.0, 7.0]);
+        assert_eq!(sol.planned_state.len(), 2);
+        assert_eq!(sol.planned_state[0]["plugged"], 0.0);
+        assert_eq!(sol.planned_state[1]["plugged"], 1.0);
+        assert!(sol.warnings.is_empty());
+        let AssetSolutionDetail::Ev(out) = &sol.detail else {
+            panic!("an EV reads back an EV detail")
+        };
+        assert_eq!(out.soc_ev, vec![0.4, 0.4, 0.5]);
+        assert_eq!(out.z_ev_on, vec![0.0, 1.0]);
+        assert!(out.shortfall_kwh.is_empty());
     }
 
     fn charger() -> crate::assets::EvCharger {

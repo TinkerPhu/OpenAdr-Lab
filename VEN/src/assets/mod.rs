@@ -142,6 +142,19 @@ pub struct GridState {
     pub export_limit_kw: f64,
 }
 
+/// One state value of every step boundary in a forecast trace, `default` where the trace does
+/// not carry the key.
+fn trace_values(
+    states: &[std::collections::HashMap<String, f64>],
+    key: &str,
+    default: f64,
+) -> Vec<f64> {
+    states
+        .iter()
+        .map(|s| s.get(key).copied().unwrap_or(default))
+        .collect()
+}
+
 #[cfg(test)]
 mod phase2a_battery_tests {
     //! Spec A Phase 2a (`asset-dispatch-trait-objects` tasks.md 4.1): Battery's

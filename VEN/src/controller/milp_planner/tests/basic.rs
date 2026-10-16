@@ -332,28 +332,3 @@ fn weights_preset_custom_uses_fields() {
     assert!((w.w_grid - 0.1).abs() < 1e-9);
     assert!((w.c_storage_wear_eur_kwh - 0.02).abs() < 1e-9);
 }
-
-/// The interim plan of the opportunistic objective (4.1): it carries the objective to the
-/// tick, solves nothing, and says it has no forecast.
-#[test]
-fn plan_without_forecast_carries_the_objective_and_says_so() {
-    let plan = crate::controller::milp_planner::plan_without_forecast(
-        &crate::entities::planner_params::PlannerParams::default(),
-        chrono::Utc::now(),
-        crate::entities::asset::PlanTrigger::UserRequest,
-        crate::entities::planner_params::PlannerObjective::Opportunistic,
-    );
-    assert_eq!(
-        plan.objective,
-        crate::entities::planner_params::PlannerObjective::Opportunistic
-    );
-    assert_eq!(
-        plan.solve_status,
-        crate::entities::plan::SolveStatus::Simulated
-    );
-    assert!(plan.slots.is_empty());
-    assert_eq!(
-        plan.warnings.iter().map(|w| w.kind).collect::<Vec<_>>(),
-        vec![crate::entities::plan::WarningKind::OpportunisticNoForecast]
-    );
-}

@@ -82,7 +82,7 @@ pub(super) async fn run_plan_cycle(
             st,
         )
         .await;
-        plan_for(obj, solver, solve_req, planner, now, &trigger).await
+        super::plan_for::plan_for(obj, solver, solve_req, state, &sim_snap).await
     })
     .await;
     // created_at records true wall-clock time so gate decay (elapsed_s) measures
@@ -187,26 +187,4 @@ async fn announced_solve(
     let _ = cancel_tx.send(());
     ticker_task.await.ok();
     (plan, solver_ms)
-}
-
-/// The one guard of the planning cycle (openspec `opportunistic-objective` D0): every planning
-/// objective solves exactly as before; the opportunistic one is not solved.
-async fn plan_for(
-    objective: PlannerObjective,
-    solver: &Arc<dyn SolverPort>,
-    solve_req: crate::controller::SolveRequest,
-    planner: &PlannerParams,
-    now: DateTime<Utc>,
-    trigger: &crate::entities::asset::PlanTrigger,
-) -> crate::entities::plan::Plan {
-    if objective.dispatches_from_plan() {
-        crate::services::PlanningService::solve_plan(solver, solve_req).await
-    } else {
-        crate::controller::milp_planner::plan_without_forecast(
-            planner,
-            now,
-            trigger.clone(),
-            objective,
-        )
-    }
 }
