@@ -16,9 +16,6 @@ use crate::controller::SimSnapshot;
 use crate::entities::capacity::effective_capacity_limit;
 
 use super::context::TickContext;
-use super::dispatch_override::{
-    apply_comms_loss_clamp, apply_dispatch_override, comms_loss_setpoint_bounds_kw,
-};
 
 /// PHASE 2: build the plan's base setpoint allocation, then the arbiter's
 /// reactive layer on top of it (`controller::arbiter`): deviation correction
@@ -80,19 +77,23 @@ pub(crate) fn build_tick_setpoints(
         prev_bridge_kw_by_asset: &ctx.bridge_kw_by_asset,
     };
 
-    let mut outcome = if let Some(requests) = &ctx.opportunistic {
-        // The opportunistic objective: no plan allocation is followed (D1, D5), the pass
-        // decides from this tick's balance; the stages below bound it like any dispatch.
+    let stages = controller::arbiter::DispatchStages {
+        dispatch_windows: &ctx.dispatch_windows,
+        alert_windows: &ctx.alert_windows,
+        comms_loss: ctx.comms_loss,
+        limit_incumbent_lever: ctx.limit_incumbent_lever.as_deref(),
+    };
+    if let Some(requests) = &ctx.opportunistic {
+        // The opportunistic objective: no plan allocation is followed (D1, D5); the one step
+        // the forecast runs too (D6) decides from this tick's balance and bounds it.
         let defaults =
             controller::dispatcher::build_setpoints_without_plan(sim_snap, thermostat_setpoints_kw);
-        let (base, excluded) = controller::arbiter::request_regime(
-            sim_snap,
-            defaults,
-            &requests.dispatch_by_asset,
-            |id| ctx.overlay_enabled.of(id),
+        let ev_switch = |id: &str| ctx.overlay_enabled.of(id);
+        return controller::arbiter::opportunistic_step(
+            &tick, defaults, requests, ev_switch, now, &stages,
         );
-        controller::arbiter::opportunistic_pass(&tick, &base, &excluded)
-    } else if ctx.deviation_arbiter_enabled {
+    }
+    let outcome = if ctx.deviation_arbiter_enabled {
         controller::arbiter::reconcile(&tick, &base_sp, ctx.incumbent_lever.as_deref())
     } else {
         let mut sp = base_sp;
@@ -103,25 +104,5 @@ pub(crate) fn build_tick_setpoints(
         }
     };
 
-    let sp = &mut outcome.setpoints;
-    let (dispatch, alerts) = (&ctx.dispatch_windows, &ctx.alert_windows);
-    apply_dispatch_override(sp, &tick, now, dispatch, alerts);
-    apply_comms_loss_clamp(sp, sim_snap, ctx.comms_loss);
-    let bounds_kw = comms_loss_setpoint_bounds_kw(sim_snap, ctx.comms_loss);
-    // A deviation-pass PV curtailment lowers generation, so the limit pass
-    // projects PV after it.
-    let pv_tighten_kw = outcome.pv_generation_limit_tighten_kw.unwrap_or(0.0);
-    let tightened = controller::arbiter::tighten_generation(live_kw, sim_snap, pv_tighten_kw);
-    let limit_tick = controller::arbiter::ArbiterTick {
-        live_kw: &tightened,
-        ..tick
-    };
-    let incumbent = ctx.limit_incumbent_lever.as_deref();
-    outcome.limit = limit::enforce_import_limit(&limit_tick, sp, incumbent, &bounds_kw);
-    // Limit-pass Curtail (alerts only) overrides a deviation-pass Absorb, heater by heater.
-    let limit_modes = outcome.limit.iter().flat_map(|l| &l.heater_emergency_mode);
-    let limit_modes: Vec<(String, (bool, bool))> =
-        limit_modes.map(|(id, m)| (id.clone(), *m)).collect();
-    outcome.heater_emergency_mode.extend(limit_modes);
-    outcome
+    controller::arbiter::dispatch_stages(outcome, &tick, now, &stages)
 }

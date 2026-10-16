@@ -27,20 +27,22 @@ mod live;
 mod opportunistic;
 mod ranked;
 mod release;
+mod stages;
 
 pub use decision::decision_event;
 pub use dispatch::meet_dispatch_setpoint;
 pub use emergency::heater_emergency_modes;
 pub use live::{projected_net_kw, projected_net_kw_except, tighten_generation, LiveKwByAsset};
 pub use opportunistic::{
-    opportunistic_pass, opportunistic_requests, request_regime, OpportunisticOutcome,
-    OpportunisticRequests, RequestTargets,
+    opportunistic_requests, opportunistic_step, OpportunisticOutcome, OpportunisticRequests,
+    RequestTargets,
 };
 #[cfg(test)]
 use ranked::rank_levers;
 pub use ranked::SetpointBoundsKw;
 pub(crate) use ranked::{apply_ranked_levers, LeverInputs, LeverPolicy, ALL_LEVERS};
 use ranked::{DEVIATION_POLICY, DISPATCH_POLICY};
+pub use stages::{dispatch_stages, DispatchStages};
 
 use crate::controller::SimSnapshot;
 use crate::entities::asset::ArbiterLeverKind;

@@ -1,10 +1,61 @@
-// WP3.4 (BL-06) DISPATCH_SETPOINT override, split out of `helpers.rs` to keep
-// the `tasks/` file-size cap.
+//! The stages every tick's setpoints pass through after the pass that proposed them (deviation
+//! correction, the opportunistic pass or the plan as it stands): a VTN dispatch window, the
+//! comms-loss fail-safe and last the import-limit pass. One function, `dispatch_stages`, so the
+//! live tick and the opportunistic forecast bound a proposal the same way. Reads the tick and
+//! the windows it is given; holds no state and reads no clock.
 
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
+use super::{limit, tighten_generation, ArbiterOutcome, ArbiterTick};
 use crate::controller::SimSnapshot;
+use crate::entities::capacity::{AlertWindow, DispatchWindow};
+
+/// What the stages read besides the tick.
+#[derive(Clone, Copy)]
+pub struct DispatchStages<'a> {
+    pub dispatch_windows: &'a [DispatchWindow],
+    pub alert_windows: &'a [AlertWindow],
+    /// `None` where comms-loss does not apply (the profile opts out, or a forecast).
+    pub comms_loss: Option<crate::controller::comms_loss::CommsLossState>,
+    /// The lever the limit pass held last tick.
+    pub limit_incumbent_lever: Option<&'a str>,
+}
+
+/// Bound a pass's proposal: the DISPATCH_SETPOINT override, the comms-loss clamp, and last the
+/// limit-enforcement pass, which therefore also bounds a dispatch setpoint above a hard import
+/// limit while staying inside the comms-loss bounds. A limit-pass Curtail (alerts only)
+/// overrides a deviation-pass Absorb, heater by heater.
+pub fn dispatch_stages(
+    mut outcome: ArbiterOutcome,
+    tick: &ArbiterTick,
+    now: DateTime<Utc>,
+    stages: &DispatchStages,
+) -> ArbiterOutcome {
+    let sp = &mut outcome.setpoints;
+    apply_dispatch_override(sp, tick, now, stages.dispatch_windows, stages.alert_windows);
+    apply_comms_loss_clamp(sp, tick.sim, stages.comms_loss);
+    let bounds_kw = comms_loss_setpoint_bounds_kw(tick.sim, stages.comms_loss);
+    // A deviation-pass PV curtailment lowers generation, so the limit pass
+    // projects PV after it.
+    let pv_tighten_kw = outcome.pv_generation_limit_tighten_kw.unwrap_or(0.0);
+    let tightened = tighten_generation(tick.live_kw, tick.sim, pv_tighten_kw);
+    let limit_tick = ArbiterTick {
+        live_kw: &tightened,
+        ..*tick
+    };
+    outcome.limit = limit::enforce_import_limit(
+        &limit_tick,
+        &mut outcome.setpoints,
+        stages.limit_incumbent_lever,
+        &bounds_kw,
+    );
+    let limit_modes = outcome.limit.iter().flat_map(|l| &l.heater_emergency_mode);
+    let limit_modes: Vec<(String, (bool, bool))> =
+        limit_modes.map(|(id, m)| (id.clone(), *m)).collect();
+    outcome.heater_emergency_mode.extend(limit_modes);
+    outcome
+}
 
 /// While a DISPATCH_SETPOINT window is active, steer the storage levers so net site
 /// power hits the commanded setpoint (`arbiter::meet_dispatch_setpoint`), overriding the
@@ -12,7 +63,7 @@ use crate::controller::SimSnapshot;
 /// running underneath and resumes when the window ends).
 /// Precedence (recorded decision): an active alert window wins - safety over
 /// instruction - so the override is skipped entirely while one is active.
-pub(crate) fn apply_dispatch_override(
+fn apply_dispatch_override(
     sp: &mut HashMap<String, f64>,
     tick: &crate::controller::arbiter::ArbiterTick,
     now: DateTime<Utc>,
@@ -37,7 +88,7 @@ pub(crate) fn apply_dispatch_override(
 /// outranks a VTN-instructed dispatch window: if the VTN can't be reached,
 /// any window it set is stale/unverifiable. No-op when `comms_loss` is `None`
 /// (profile opt-out) or not yet `active` (debounce not elapsed).
-pub(crate) fn apply_comms_loss_clamp(
+fn apply_comms_loss_clamp(
     sp: &mut HashMap<String, f64>,
     sim_snap: &SimSnapshot,
     comms_loss: Option<crate::controller::comms_loss::CommsLossState>,
@@ -52,7 +103,7 @@ pub(crate) fn apply_comms_loss_clamp(
 /// The comms-loss clamp's per-asset `(min, max)` setpoint bounds — applied by
 /// `apply_comms_loss_clamp` and handed to the arbiter's limit pass, which runs
 /// after it and must stay inside them. Empty while comms-loss is not active.
-pub(crate) fn comms_loss_setpoint_bounds_kw(
+fn comms_loss_setpoint_bounds_kw(
     sim_snap: &SimSnapshot,
     comms_loss: Option<crate::controller::comms_loss::CommsLossState>,
 ) -> crate::controller::arbiter::SetpointBoundsKw {

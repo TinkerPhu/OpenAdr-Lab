@@ -136,6 +136,29 @@ pub fn request_regime(
 ///
 /// The result goes to `ArbiterOutcome::opportunistic` only, never to `active_lever` or
 /// `displaced_kw_by_asset`: nothing the deviation pass or the residual tracker reads.
+/// The opportunistic objective's whole decision for one step, live and in the forecast (D6):
+/// requests set the regime (`request_regime`), the pass shares the site balance out in
+/// declared rank order (`opportunistic_pass`), and the shared stages bound the result
+/// (`dispatch_stages`). `defaults` is each asset's setpoint without a plan; `ev_surplus_switch_on`
+/// is each EV's opportunistic toggle.
+pub fn opportunistic_step(
+    tick: &ArbiterTick,
+    defaults: HashMap<String, f64>,
+    requests: &OpportunisticRequests,
+    ev_surplus_switch_on: impl Fn(&str) -> bool,
+    now: chrono::DateTime<chrono::Utc>,
+    stages: &super::DispatchStages,
+) -> ArbiterOutcome {
+    let (base, excluded) = request_regime(
+        tick.sim,
+        defaults,
+        &requests.dispatch_by_asset,
+        ev_surplus_switch_on,
+    );
+    let outcome = opportunistic_pass(tick, &base, &excluded);
+    super::dispatch_stages(outcome, tick, now, stages)
+}
+
 pub fn opportunistic_pass(
     tick: &ArbiterTick,
     base: &HashMap<String, f64>,

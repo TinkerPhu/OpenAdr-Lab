@@ -4,7 +4,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use super::super::{opportunistic_pass, ArbiterOutcome, ArbiterTick, EvOverlays};
+use super::super::{ArbiterOutcome, ArbiterTick, EvOverlays};
+use super::opportunistic_pass;
 use crate::controller::SimSnapshot;
 use crate::entities::asset_params::{
     AssetParams, BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
@@ -211,7 +212,7 @@ fn the_same_balance_commands_the_same_setpoints_every_tick() {
 
 mod request_regime {
     use super::*;
-    use crate::controller::arbiter::request_regime;
+    use crate::controller::arbiter::opportunistic::request_regime;
     use crate::entities::design_vocabulary::NonPlanningDispatch::{StartNow, SurplusOnly};
 
     fn defaults(sim: &SimSnapshot) -> HashMap<String, f64> {
