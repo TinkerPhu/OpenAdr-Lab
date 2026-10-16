@@ -16138,3 +16138,9 @@ spellings of enums were consolidated on the way (`PlannerObjective`'s three list
 store's `SolveStatus`/`WarningKind`). `entities/plan.rs` crossed 500 lines; the plan's outcome
 vocabulary moved to `entities/plan_outcome.rs`. Groups 5-10 (objective source, fleet channel,
 forecast, VTN UI, BDD, docs) are still open.
+
+**Group 5 (objective and its source).** `ObjectiveSetting` (objective, source `profile` /
+`ven_ui` / `fleet`, when it was set, the profile's objective, the accepted objectives) replaced the
+bare `ActiveObjective` value; `services::objective::set_objective` is the one setter, `GET
+/plan/objective` serves the setting, and the Planner page and Dashboard say who set the objective.
+Releasing fleet control was left for group 6, which brings its only caller.
