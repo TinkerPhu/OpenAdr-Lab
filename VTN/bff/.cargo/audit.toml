@@ -1,0 +1,8 @@
+# Advisories the project has looked at and accepted; each one is a row in docs/BACKLOG.md with
+# the reason and when to look again. `cargo audit` (also the CI runner's) fails on anything else.
+[advisories]
+ignore = [
+    # rsa 0.9.10 (Marvin timing side channel): lockfile-only. It arrives through sqlx-mysql,
+    # an optional driver the BFF never enables, so it is not compiled; no fixed release exists.
+    "RUSTSEC-2023-0071",
+]

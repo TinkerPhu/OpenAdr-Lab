@@ -15930,4 +15930,8 @@ key for this repository on Node3 so the runner pushes `main` itself; the runner 
 **Issues.** The first draft carried its own toolchain Dockerfile; the repo already had the
 unit-test harness with the cargo caches as volumes, so the runner uses that (one concept, one
 implementation). R-66 (calibrating the pre-flight memory floor) stays open: it needs a real degraded
-run, not this change.
+run, not this change. The first tickets found three defects of their own: the host had no `behave`
+for the step audit (now a venv), the BFF audit failed on the accepted `rsa` advisory (now
+`VTN/bff/.cargo/audit.toml`, the config `cargo audit` reads), and a red result's excerpt came out
+empty (`tail` over a missing file). The first cargo run on the harness's new cache volumes was cold
+(28 min clippy, 35 min test); a later ticket compiles only what changed.
