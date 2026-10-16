@@ -122,16 +122,16 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 
 ## 6. Fleet channel — VEN side
 
-- [ ] 6.1 Publish the `objective` leaf (retained, QoS 1) on connect and on every change, body =
+- [x] 6.1 Publish the `objective` leaf (retained, QoS 1) on connect and on every change, body =
       `GET /plan/objective`, with `try_publish` from a spawned task (D10). Unit tests: topic and
       body; with a full request queue the caller returns at once and logs the drop.
-- [ ] 6.2 Subscribe to `<topic_root>/command/objective` after every ConnAck; forward payloads over
+- [x] 6.2 Subscribe to `<topic_root>/command/objective` after every ConnAck; forward payloads over
       an mpsc channel to a `tasks/` consumer calling `set_objective(.., Fleet, ..)`. The consumer
       ignores a command whose `requested_at` it already applied (reconnect redelivery); an empty
       payload reverts to the profile objective only while the source is `Fleet`; malformed → warn
       and keep. Unit tests on the consumer's decision function: apply, redelivery ignored, clear
       while fleet-sourced, clear after a local change ignored, malformed.
-- [ ] 6.3 Publish the adopted plan on the `plan` leaf (retained, QoS 1) on every adoption, same
+- [x] 6.3 Publish the adopted plan on the `plan` leaf (retained, QoS 1) on every adoption, same
       non-blocking path as 6.1; serialization happens in the spawned task, not in the cycle.
 - [ ] 6.4 `report_timing`: `frequency: 0` = VEN's choice. Forecast obligations are re-armed as due
       on the first adoption after an objective change, otherwise at most once per 15 minutes,

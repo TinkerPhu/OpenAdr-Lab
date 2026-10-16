@@ -42,11 +42,13 @@ pub struct SetObjectiveBody {
 pub async fn put_plan_objective(
     State(active_objective): State<ActiveObjective>,
     State(trigger_tx): State<PlanTriggerTx>,
+    State(telemetry): State<crate::app_ctx::Telemetry>,
     Json(body): Json<SetObjectiveBody>,
 ) -> impl IntoResponse {
     crate::services::objective::set_objective(
         &active_objective,
         &trigger_tx,
+        telemetry.as_ref(),
         body.objective,
         crate::entities::objective_setting::ObjectiveSource::VenUi,
         chrono::Utc::now(),
@@ -355,9 +357,12 @@ mod objective_route_tests {
             tokio::sync::watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
         let tx = Arc::new(tx);
         rx.mark_unchanged();
+        let telemetry: crate::app_ctx::Telemetry =
+            Arc::new(crate::controller::telemetry_port::NoTelemetry);
         let status = put_plan_objective(
             State(setting.clone()),
             State(tx.clone()),
+            State(telemetry),
             Json(SetObjectiveBody {
                 objective: PlannerObjective::Opportunistic,
             }),

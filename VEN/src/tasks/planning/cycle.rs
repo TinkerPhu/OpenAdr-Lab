@@ -44,6 +44,7 @@ pub(super) async fn run_plan_cycle(
     wall_now: DateTime<Utc>,
     now: DateTime<Utc>,
     history: Option<Arc<dyn HistoryPort>>,
+    telemetry: &dyn crate::controller::telemetry_port::TelemetryPort,
 ) {
     let trigger = signal.trigger.clone();
     let reason = format!("{trigger:?}");
@@ -59,45 +60,34 @@ pub(super) async fn run_plan_cycle(
     // applied it yet (no-op when the tick ran first — see fn docs).
     apply_pending_pv_inject(&mut sim_snap, &st.inject_snap, now);
 
-    // ── Emit solving_started ──────────────────────────────────────
-    let num_slots = planner.plan_horizon_h as usize * 3600 / planner.plan_step_s as usize;
-    let _ = event_tx.send(PlannerEvent::SolvingStarted {
-        objective: st.obj,
-        num_slots,
-        triggered_at: now,
-    });
-
-    // ── Spawn 1 s progress ticker ─────────────────────────────────
-    let (ticker_task, cancel_tx) = spawn_progress_ticker(event_tx.clone());
-
-    // ── Run blocking HiGHS solve off the async runtime ────────────
-    let solve_start = std::time::Instant::now();
-
     // The plan in force: the heater anchor pins against it, and the adoption
     // gate needs the same value again after the solve.
     let current_plan = state.active_plan().await;
     let obj = st.obj;
-    let solve_req = super::assemble::assemble_solve_request(
-        super::assemble::SolveAssembly {
-            state,
-            sim_snap: &sim_snap,
-            planner,
-            asset_params,
-            grid_max_import_kw,
-            grid_max_export_kw,
-            history: history.as_ref(),
-            now,
-            trigger: trigger.clone(),
-            current_plan: current_plan.as_ref(),
-        },
-        st,
-    )
+    let num_slots = planner.plan_horizon_h as usize * 3600 / planner.plan_step_s as usize;
+    let (mut plan, solver_ms) = announced_solve(event_tx, obj, num_slots, now, async {
+        let solve_req = super::assemble::assemble_solve_request(
+            super::assemble::SolveAssembly {
+                state,
+                sim_snap: &sim_snap,
+                planner,
+                asset_params,
+                grid_max_import_kw,
+                grid_max_export_kw,
+                history: history.as_ref(),
+                now,
+                trigger: trigger.clone(),
+                current_plan: current_plan.as_ref(),
+            },
+            st,
+        )
+        .await;
+        plan_for(obj, solver, solve_req, planner, now, &trigger).await
+    })
     .await;
-    let mut plan = plan_for(obj, solver, solve_req, planner, now, &trigger).await;
     // created_at records true wall-clock time so gate decay (elapsed_s) measures
     // real plan age. horizon.start_time = now (aligned) is the slot grid origin.
     plan.created_at = wall_now;
-    let solver_ms = solve_start.elapsed().as_millis() as u64;
     info!(
         solver_ms,
         trigger = %trigger_reason,
@@ -105,10 +95,6 @@ pub(super) async fn run_plan_cycle(
         objective_eur = plan.objective_eur,
         "planner: solve complete"
     );
-
-    // ── Cancel ticker, delegate adoption + events to PlanningService ──
-    let _ = cancel_tx.send(());
-    ticker_task.await.ok();
 
     let cycle = crate::services::PlanningService::adopt_if_warranted(
         plan,
@@ -126,6 +112,11 @@ pub(super) async fn run_plan_cycle(
         wall_now, // gate decay measures real plan age; aligned `now` can lag replan_s
     )
     .await;
+    if cycle.adopted {
+        // The fleet's view of the plan in force (openspec `opportunistic-objective` 6.3);
+        // serialised and sent from a task of its own, so the cycle never waits on the broker.
+        telemetry.publish_plan(Arc::new(cycle.plan.clone()));
+    }
 
     // Post-cycle outputs: WP4.3 notifications + WP3.6 forecasts.
     let prev = current_plan.as_ref();
@@ -149,6 +140,29 @@ pub(super) async fn run_plan_cycle(
         adopted = cycle.adopted,
         "plan cycle complete"
     );
+}
+
+/// The solve as SSE clients see it: `SolvingStarted`, then a progress tick every second until
+/// `work` (assembly and solve) is done. Returns the plan and how long `work` took [ms].
+async fn announced_solve(
+    event_tx: &PlannerEventTx,
+    objective: PlannerObjective,
+    num_slots: usize,
+    now: DateTime<Utc>,
+    work: impl std::future::Future<Output = crate::entities::plan::Plan>,
+) -> (crate::entities::plan::Plan, u64) {
+    let _ = event_tx.send(PlannerEvent::SolvingStarted {
+        objective,
+        num_slots,
+        triggered_at: now,
+    });
+    let (ticker_task, cancel_tx) = spawn_progress_ticker(event_tx.clone());
+    let solve_start = std::time::Instant::now();
+    let plan = work.await;
+    let solver_ms = solve_start.elapsed().as_millis() as u64;
+    let _ = cancel_tx.send(());
+    ticker_task.await.ok();
+    (plan, solver_ms)
 }
 
 /// The one guard of the planning cycle (openspec `opportunistic-objective` D0): every planning

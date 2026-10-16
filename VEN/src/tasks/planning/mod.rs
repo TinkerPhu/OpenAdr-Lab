@@ -32,6 +32,7 @@ pub(crate) fn spawn_planning(
     weather: Arc<dyn WeatherForecastPort>,
     weather_pv_params: crate::entities::asset_params::PvWeatherParams,
     history: Option<Arc<dyn HistoryPort>>,
+    telemetry: Arc<dyn crate::controller::telemetry_port::TelemetryPort>,
     // GB-54 — this VEN's stable phase within the replan grid. Built from the
     // VEN's name by `planner_params::replan_phase_offset_s` at start-up.
     replan_phase_offset_s: u64,
@@ -47,24 +48,9 @@ pub(crate) fn spawn_planning(
         // from mis-classifying timeout cycles as hard triggers, bypassing the gate.
         let mut wake_trigger = PlanTriggerSignal::bare(PlanTrigger::Periodic);
         loop {
-            // GB-55: hold a rate-change reaction for a jittered moment before
-            // solving. A VTN rate update reaches the whole fleet at once and hard
-            // triggers bypass GB-54's periodic grid, so without this every VEN
-            // solves on the same instant. Held *before* `now_fn()` so the plan is
-            // built from the time it is actually solved at, not from when the
-            // trigger arrived.
-            if matches!(wake_trigger.trigger, PlanTrigger::RateChange) {
-                let delay_s = crate::entities::planner_params::rate_change_delay_s(
-                    planner.rate_change_trigger_delay_s,
-                    planner.rate_change_trigger_jitter_pct,
-                    planner.replan_interval_s,
-                    rand::random::<f64>(),
-                );
-                if delay_s > 0 {
-                    info!(delay_s, "planner loop: holding RateChange replan (GB-55)");
-                    tokio::time::sleep(std::time::Duration::from_secs(delay_s)).await;
-                }
-            }
+            // Held *before* `now_fn()` so the plan is built from the time it is
+            // actually solved at, not from when the trigger arrived.
+            hold_rate_change(&planner, &wake_trigger.trigger).await;
 
             let wall_now = now_fn();
             // Align to the nearest step boundary so all replans within the same window
@@ -100,6 +86,7 @@ pub(crate) fn spawn_planning(
                 wall_now,
                 now,
                 history.clone(),
+                telemetry.as_ref(),
             )
             .await;
 
@@ -125,6 +112,25 @@ pub(crate) fn spawn_planning(
             };
         }
     })
+}
+
+/// GB-55: hold a rate-change reaction for a jittered moment before solving. A VTN rate update
+/// reaches the whole fleet at once and hard triggers bypass GB-54's periodic grid, so without
+/// this every VEN solves on the same instant.
+async fn hold_rate_change(planner: &PlannerParams, trigger: &PlanTrigger) {
+    if !matches!(trigger, PlanTrigger::RateChange) {
+        return;
+    }
+    let delay_s = crate::entities::planner_params::rate_change_delay_s(
+        planner.rate_change_trigger_delay_s,
+        planner.rate_change_trigger_jitter_pct,
+        planner.replan_interval_s,
+        rand::random::<f64>(),
+    );
+    if delay_s > 0 {
+        info!(delay_s, "planner loop: holding RateChange replan (GB-55)");
+        tokio::time::sleep(std::time::Duration::from_secs(delay_s)).await;
+    }
 }
 
 #[cfg(test)]
@@ -216,10 +222,75 @@ mod tests {
             Arc::new(crate::controller::NoopWeatherPort),
             Default::default(),
             None,
+            Arc::new(crate::controller::telemetry_port::NoTelemetry),
             0,
         );
         handle.abort();
         let _ = trigger_tx; // keep alive until abort
                             // passes if no panic during construction and abort
+    }
+
+    /// Records the plans published on the `plan` leaf.
+    #[derive(Default)]
+    struct PlanLeaf(std::sync::Mutex<Vec<uuid::Uuid>>);
+
+    #[async_trait::async_trait]
+    impl crate::controller::telemetry_port::TelemetryPort for PlanLeaf {
+        async fn publish_telemetry(&self, _: crate::controller::telemetry_port::TelemetryBody<'_>) {
+        }
+        fn is_connected(&self) -> bool {
+            true
+        }
+        fn publish_plan(&self, plan: Arc<crate::entities::plan::Plan>) {
+            self.0.lock().unwrap().push(plan.id);
+        }
+    }
+
+    /// 6.3: the plan a cycle adopts goes out on the fleet channel's `plan` leaf.
+    #[tokio::test]
+    async fn an_adopted_plan_is_published_on_the_plan_leaf() {
+        let (_trigger_tx, trigger_rx) =
+            watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
+        let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(8);
+        let plan = minimal_plan();
+        let state = AppState::new();
+        let leaf = Arc::new(PlanLeaf::default());
+        let planner = PlannerParams {
+            planning_initial_delay_s: 0,
+            ..PlannerParams::default()
+        };
+        let handle = spawn_planning(
+            state.clone(),
+            planner,
+            10.0,
+            10.0,
+            vec![],
+            Arc::new(MockSolverPort::returning(plan.clone())),
+            trigger_rx,
+            minimal_sim(),
+            Arc::new(RwLock::new(
+                crate::entities::objective_setting::ObjectiveSetting::from_profile(
+                    PlannerObjective::MinCost,
+                ),
+            )),
+            Arc::new(event_bcast_tx),
+            crate::services::notify::Notifier::new(None),
+            Utc::now,
+            Arc::new(crate::controller::NoopWeatherPort),
+            Default::default(),
+            None,
+            leaf.clone(),
+            0,
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while state.active_plan().await.is_none() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        handle.abort();
+        let adopted = state
+            .active_plan()
+            .await
+            .expect("the first plan is adopted");
+        assert_eq!(*leaf.0.lock().unwrap(), vec![adopted.id]);
     }
 }

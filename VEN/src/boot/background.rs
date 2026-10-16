@@ -141,7 +141,7 @@ fn spawn_planning(w: &World, trigger_rx: watch::Receiver<PlanTriggerSignal>) {
         &w.ven_name,
         w.planner_params.replan_interval_s,
     );
-    let (s, pp, ap, sv, rx, sim, ao, etx, nf, wp, wpp, hp) = (
+    let (s, pp, ap, sv, rx, sim, ao, etx, nf, wp, wpp, hp, tl) = (
         w.state.clone(),
         w.planner_params.clone(),
         w.asset_params.clone(),
@@ -154,6 +154,7 @@ fn spawn_planning(w: &World, trigger_rx: watch::Receiver<PlanTriggerSignal>) {
         w.ports.weather.clone(),
         w.asset_feeds.pv_weather.clone(),
         w.ports.history.clone(),
+        w.ports.telemetry.clone(),
     );
     let (gi, ge) = (w.grid_max_import_kw, w.grid_max_export_kw);
     tasks::supervised_spawn("planning", TASK_COOLDOWN_S, w.state.clone(), move || {
@@ -173,6 +174,7 @@ fn spawn_planning(w: &World, trigger_rx: watch::Receiver<PlanTriggerSignal>) {
             wp.clone(),
             wpp.clone(),
             hp.clone(),
+            tl.clone(),
             replan_offset_s,
         )
     });
@@ -247,4 +249,25 @@ pub fn spawn_fleet_trace(
     ven_name: String,
 ) {
     tasks::fleet_trace::spawn(state.subscribe_controller_trace(), telemetry, ven_name);
+}
+
+/// The objective on the fleet channel (openspec `opportunistic-objective` D10): the
+/// start-up setting goes out on the `objective` leaf (the publisher re-sends it on every
+/// connect), and the commands arriving on `command/objective` are carried out. Spawned during
+/// assembly like the trace bridge, so a retained command is consumed as soon as it arrives.
+pub async fn spawn_fleet_commands(
+    commands: Option<tokio::sync::mpsc::Receiver<Vec<u8>>>,
+    active_objective: &crate::app_ctx::ActiveObjective,
+    trigger_tx: &crate::app_ctx::PlanTriggerTx,
+    telemetry: &crate::app_ctx::Telemetry,
+) {
+    telemetry.publish_objective(&*active_objective.read().await);
+    if let Some(commands) = commands {
+        tasks::fleet_command::spawn(
+            commands,
+            active_objective.clone(),
+            trigger_tx.clone(),
+            telemetry.clone(),
+        );
+    }
 }

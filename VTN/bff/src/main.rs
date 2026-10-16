@@ -107,9 +107,9 @@ async fn main() -> anyhow::Result<()> {
     match fleet::FleetMqttConfig::from_env() {
         Some(cfg) => {
             tracing::info!(
-                broker = %cfg.broker_host,
-                port = cfg.broker_port,
-                topic = %cfg.subscription(),
+                broker = %cfg.host,
+                port = cfg.port,
+                topic = %lab_core::fleet_channel::fleet_subscription(&cfg.root),
                 "fleet ingest: subscribing"
             );
             fleet_status.write().await.enabled = true;

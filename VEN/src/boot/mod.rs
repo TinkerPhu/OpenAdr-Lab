@@ -118,9 +118,21 @@ impl World {
     ) -> Self {
         let (sim_params, planner_params, asset_params) = build_domain_params(&profile);
         let data_dir = data_dir_from(cfg);
-        let ports = Ports::build(cfg, &profile, &data_dir);
+        let mut ports = Ports::build(cfg, &profile, &data_dir);
 
         background::spawn_fleet_trace(&state, ports.telemetry.clone(), cfg.ven_name.clone());
+        let active_objective = Arc::new(RwLock::new(
+            crate::entities::objective_setting::ObjectiveSetting::from_profile(
+                planner_params.objective,
+            ),
+        ));
+        background::spawn_fleet_commands(
+            ports.fleet_commands.take(),
+            &active_objective,
+            &trigger_tx,
+            &ports.telemetry,
+        )
+        .await;
         seed_from_store(&state, &ports).await;
 
         // Asset configs are always rebuilt from the profile, so profile
@@ -147,11 +159,7 @@ impl World {
 
         Self {
             notifier: services::notify::Notifier::new(ports.history.clone()),
-            active_objective: Arc::new(RwLock::new(
-                crate::entities::objective_setting::ObjectiveSetting::from_profile(
-                    planner_params.objective,
-                ),
-            )),
+            active_objective,
             ven_name: cfg.ven_name.clone(),
             listen_addr: cfg.listen_addr.clone(),
             persist_path: cfg.persist_path.clone(),

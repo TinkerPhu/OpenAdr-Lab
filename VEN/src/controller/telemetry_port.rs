@@ -13,15 +13,22 @@
 //!
 //! Deliberately an outbound port with no reply. A VEN publishes what it is
 //! doing; nothing it publishes here can change what it does. Anything that
-//! *instructs* a VEN arrives as an OpenADR event through `VtnPort`, where the
-//! spec's rules about targeting and priority apply — a side channel that could
-//! also command would be a way around them.
+//! *instructs* a VEN about the grid arrives as an OpenADR event through
+//! `VtnPort`, where the spec's rules about targeting and priority apply. The
+//! one inbound message on the same broker, `command/objective`, is not a grid
+//! instruction but the lab operator's version of the VEN UI's objective switch
+//! (openspec `opportunistic-objective` D10); it reaches the VEN through its own
+//! channel to `tasks::fleet_command`, not through this port.
+
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::Serialize;
 
 use crate::controller::sim_snapshot::SimSnapshot;
 use crate::controller::trace::ControllerEvent;
+use crate::entities::objective_setting::ObjectiveSetting;
+use crate::entities::plan::Plan;
 
 /// What a VEN publishes about itself, and where.
 ///
@@ -72,6 +79,15 @@ pub trait TelemetryPort: Send + Sync {
     fn publishes(&self) -> bool {
         true
     }
+
+    /// The objective in force and its source, on the retained `objective` leaf:
+    /// at start-up and on every change. Returns at once whatever the broker is
+    /// doing, because its callers are a route and the objective setter.
+    fn publish_objective(&self, _setting: &ObjectiveSetting) {}
+
+    /// The plan just adopted, on the retained `plan` leaf. Returns at once and
+    /// serialises elsewhere, because its caller is the planning cycle.
+    fn publish_plan(&self, _plan: Arc<Plan>) {}
 }
 
 /// The port when no broker is configured.

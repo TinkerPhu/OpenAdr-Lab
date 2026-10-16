@@ -52,20 +52,9 @@ pub struct FleetIngestStatus {
     pub last_error: Option<String>,
 }
 
-/// Split `openadr-lab/fleet/<ven>/<leaf>` into the VEN and the leaf.
-///
-/// Returns `None` for anything that is not shaped like a fleet topic, so a
-/// stray publish on a neighbouring topic cannot invent a VEN. The root is a
-/// parameter because it is configurable on the publishing side, and the two
-/// have to agree.
-pub fn parse_topic<'a>(root: &str, topic: &'a str) -> Option<(&'a str, &'a str)> {
-    let prefix = format!("{root}/fleet/");
-    let rest = topic.strip_prefix(&prefix)?;
-    let mut parts = rest.splitn(2, '/');
-    let ven = parts.next().filter(|v| !v.is_empty())?;
-    let leaf = parts.next().filter(|v| !v.is_empty())?;
-    Some((ven, leaf))
-}
+use lab_core::fleet_channel::{fleet_subscription, leaf};
+/// The topic shape, leaf names and broker settings are shared with the VEN.
+pub use lab_core::fleet_channel::{parse_topic, BrokerConfig as FleetMqttConfig};
 
 /// Apply one received message to the fleet state.
 ///
@@ -87,7 +76,7 @@ pub fn apply_message(
     entry.received_at = now;
 
     match leaf {
-        "telemetry" => {
+        leaf::TELEMETRY => {
             match serde_json::from_slice::<serde_json::Value>(payload) {
                 Ok(body) => entry.telemetry = Some(body),
                 // Keep the previous value rather than replacing it with
@@ -95,7 +84,7 @@ pub fn apply_message(
                 Err(e) => tracing::warn!(ven, error = %e, "unreadable fleet telemetry"),
             }
         }
-        "status" => {
+        leaf::STATUS => {
             let parsed = serde_json::from_slice::<serde_json::Value>(payload).ok();
             entry.state = parsed
                 .as_ref()
@@ -120,44 +109,6 @@ pub fn net_power_kw(telemetry: &serde_json::Value) -> Option<f64> {
     telemetry.get("grid")?.get("net_power_kw")?.as_f64()
 }
 
-/// Where the BFF subscribes, and as whom.
-#[derive(Clone, Debug)]
-pub struct FleetMqttConfig {
-    pub broker_host: String,
-    pub broker_port: u16,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub root: String,
-}
-
-impl FleetMqttConfig {
-    /// `FLEET_MQTT_HOST` gates the whole feature, exactly as it does on the
-    /// publishing side: unset means this deployment has no fleet feed, which
-    /// is a configuration and not a fault.
-    pub fn from_env() -> Option<Self> {
-        Self::from_vars(|k| std::env::var(k).ok())
-    }
-
-    fn from_vars(get: impl Fn(&str) -> Option<String>) -> Option<Self> {
-        let broker_host = get("FLEET_MQTT_HOST").filter(|v| !v.is_empty())?;
-        let non_empty = |k: &str| get(k).filter(|v| !v.is_empty());
-        Some(Self {
-            broker_host,
-            broker_port: get("FLEET_MQTT_PORT")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(1884),
-            username: non_empty("FLEET_MQTT_USERNAME"),
-            password: non_empty("FLEET_MQTT_PASSWORD"),
-            root: get("FLEET_MQTT_ROOT").unwrap_or_else(|| "openadr-lab".into()),
-        })
-    }
-
-    /// The one subscription: every leaf of every VEN.
-    pub fn subscription(&self) -> String {
-        format!("{}/fleet/+/#", self.root)
-    }
-}
-
 /// Subscribe and keep `state` current until the process ends.
 ///
 /// `store` is where the same messages are kept for later. It is optional
@@ -172,17 +123,13 @@ pub fn spawn_ingest(
 ) {
     use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 
-    let mut opts = MqttOptions::new(
-        "vtn-bff-fleet",
-        config.broker_host.clone(),
-        config.broker_port,
-    );
+    let mut opts = MqttOptions::new("vtn-bff-fleet", config.host.clone(), config.port);
     opts.set_keep_alive(std::time::Duration::from_secs(30));
     if let (Some(u), Some(p)) = (&config.username, &config.password) {
         opts.set_credentials(u.clone(), p.clone());
     }
     let (client, mut eventloop) = AsyncClient::new(opts, 128);
-    let topic = config.subscription();
+    let topic = fleet_subscription(&config.root);
     let root = config.root.clone();
 
     tokio::spawn(async move {
@@ -208,13 +155,13 @@ pub fn spawn_ingest(
                     }
                 }
                 Ok(Event::Incoming(Packet::Publish(p))) => {
-                    if let Some((ven, leaf)) = parse_topic(&root, &p.topic) {
+                    if let Some((ven, ven_leaf)) = parse_topic(&root, &p.topic) {
                         let now = Utc::now();
-                        apply_message(&mut *state.write().await, ven, leaf, &p.payload, now);
+                        apply_message(&mut *state.write().await, ven, ven_leaf, &p.payload, now);
                         // Store what was stored in the live state, from the
                         // live state -- so the history cannot end up holding a
                         // differently-parsed version of the same message.
-                        if let (Some(store), "trace") = (&store, leaf) {
+                        if let (Some(store), leaf::TRACE) = (&store, ven_leaf) {
                             match serde_json::from_slice::<serde_json::Value>(&p.payload)
                                 .ok()
                                 .and_then(|body| {
@@ -224,7 +171,7 @@ pub fn spawn_ingest(
                                 None => tracing::warn!(ven, "unreadable fleet trace message"),
                             }
                         }
-                        if let (Some(store), "telemetry") = (&store, leaf) {
+                        if let (Some(store), leaf::TELEMETRY) = (&store, ven_leaf) {
                             if let Some(body) = state
                                 .read()
                                 .await
@@ -262,31 +209,6 @@ mod tests {
 
     fn now() -> DateTime<Utc> {
         DateTime::from_timestamp(1_700_000_000, 0).unwrap()
-    }
-
-    #[test]
-    fn parse_topic_reads_the_ven_and_the_leaf() {
-        assert_eq!(
-            parse_topic("openadr-lab", "openadr-lab/fleet/ven-7/telemetry"),
-            Some(("ven-7", "telemetry"))
-        );
-    }
-
-    /// A stray publish on a neighbouring topic must not invent a VEN.
-    #[test]
-    fn parse_topic_rejects_anything_not_shaped_like_a_fleet_topic() {
-        for topic in [
-            "openadr-lab/measurement/ven-7/pv",
-            "openadr-lab/fleet/ven-7",
-            "openadr-lab/fleet//telemetry",
-            "other-root/fleet/ven-7/telemetry",
-            "openadr-lab/fleet/",
-        ] {
-            assert!(
-                parse_topic("openadr-lab", topic).is_none(),
-                "{topic} should not parse as a fleet topic"
-            );
-        }
     }
 
     #[test]
