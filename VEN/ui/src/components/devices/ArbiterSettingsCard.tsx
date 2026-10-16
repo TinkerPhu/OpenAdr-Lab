@@ -13,6 +13,7 @@ import type {
   ArbiterDiagnostics,
   ArbiterSettings,
   LimitPassOutcome,
+  OpportunisticOutcome,
   UpdateArbiterSettingsBody,
 } from "../../api/types";
 import { formatKwOrDash } from "@lab/ui/unitFormat";
@@ -87,12 +88,34 @@ function LimitReadout({ limit }: { limit: LimitPassOutcome | null }) {
   );
 }
 
+/** The opportunistic objective's pass (no plan followed): the site balance it shared out,
+ * the asset that led, and what no asset could take. */
+function OpportunisticReadout({ result }: { result: OpportunisticOutcome }) {
+  return (
+    <Stack spacing={0.5} data-testid="arbiter-opportunistic-diagnostics">
+      <Typography variant="subtitle2">Opportunistic dispatch (no plan followed)</Typography>
+      <Typography variant="body2">
+        Site balance before the ranked assets: <strong>{formatKwOrDash(result.site_kw)}</strong>
+      </Typography>
+      <Typography variant="body2">
+        Leading: <strong>{result.leading_asset_id ?? "none"}</strong>
+        {result.leading_asset_id !== null && (result.absorbing ? " (taking surplus)" : " (covering import)")}
+      </Typography>
+      <Typography variant="body2" color={Math.abs(result.unresolved_kw) > 0 ? "warning.main" : undefined}>
+        Unresolved: <strong>{formatKwOrDash(result.unresolved_kw)}</strong>
+      </Typography>
+    </Stack>
+  );
+}
+
 function DiagnosticsReadout(props: {
   diagnostics: ArbiterDiagnostics | undefined;
   deviationEnabled: boolean;
   limitEnabled: boolean;
 }) {
   const { diagnostics, deviationEnabled, limitEnabled } = props;
+  // Absent from a diagnostics payload older than the opportunistic objective.
+  const opportunistic = props.diagnostics?.opportunistic ?? null;
   if (!diagnostics || diagnostics.updated_at === null) {
     return (
       <Typography variant="body2" color="text.secondary" data-testid="arbiter-diagnostics-empty">
@@ -102,7 +125,8 @@ function DiagnosticsReadout(props: {
   }
   return (
     <Stack spacing={1.5}>
-      {deviationEnabled && <DeviationReadout diagnostics={diagnostics} />}
+      {opportunistic !== null && <OpportunisticReadout result={opportunistic} />}
+      {deviationEnabled && opportunistic === null && <DeviationReadout diagnostics={diagnostics} />}
       {limitEnabled && <LimitReadout limit={diagnostics.limit} />}
       <Typography variant="body2" data-testid="arbiter-storage-bridge">
         {/* Covers a command that lands a tick late; dropped, not carried, next tick (R-104). */}

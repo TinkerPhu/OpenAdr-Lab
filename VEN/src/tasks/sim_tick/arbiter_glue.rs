@@ -114,6 +114,7 @@ pub(crate) async fn record_arbiter_outcome(
             measured_net_kw,
             limit: outcome.limit.clone(),
             bridge_kw_by_asset: both_passes_bridge_kw(outcome),
+            opportunistic: outcome.opportunistic.clone(),
             updated_at: Some(now),
         })
         .await;

@@ -110,6 +110,11 @@ pub(crate) async fn tick_once(
             ev_plugged_override: ctx.inject.ev_plugged,
             ev_soc_target_override: ctx.inject.ev_soc_target,
             ev_departure_by_asset: ctx.ev_departure_by_asset.clone(),
+            request_targets: ctx
+                .opportunistic
+                .as_ref()
+                .map(|r| r.targets.clone())
+                .unwrap_or_default(),
             feeds: ctx.feeds.clone(),
             ..crate::simulator::TickInputs::new(dt_s, now, std::mem::take(&mut outcome.setpoints))
         });

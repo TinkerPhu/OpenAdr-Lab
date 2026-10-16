@@ -46,6 +46,11 @@ pub struct TickInputs {
     /// The departure of the session governing each EV now, by EV id.
     pub ev_departure_by_asset: HashMap<String, DateTime<Utc>>,
 
+    /// Request targets per asset under the opportunistic objective (empty under every planning
+    /// objective): an EV's session target, a heater's start-now ceiling. A sim inject of the
+    /// same quantity wins.
+    pub request_targets: crate::controller::arbiter::RequestTargets,
+
     /// This tick's external feeds, each for the asset it belongs to.
     pub feeds: AssetTickFeeds,
 }
@@ -126,6 +131,7 @@ impl TickInputs {
             ev_plugged_override: None,
             ev_soc_target_override: None,
             ev_departure_by_asset: HashMap::new(),
+            request_targets: Default::default(),
             feeds: AssetTickFeeds::default(),
         }
     }

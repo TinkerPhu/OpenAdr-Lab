@@ -240,6 +240,17 @@ mod request_regime {
         assert!(!excluded.contains("battery"));
     }
 
+    /// The switch is an EV's setting: a battery or heater takes surplus whatever it says.
+    #[test]
+    fn the_surplus_switch_governs_only_surplus_charging_assets() {
+        let sim = site(&[ev(), battery(0.5), heater_at(50.0)]);
+        let (_, excluded) = request_regime(&sim, defaults(&sim), &HashMap::new(), |_| false);
+        assert_eq!(
+            excluded.into_iter().collect::<Vec<_>>(),
+            vec!["ev".to_string()]
+        );
+    }
+
     /// A start-now EV under the opportunistic pass: full rate now, whatever the PV output.
     #[test]
     fn a_start_now_ev_charges_at_full_rate_without_pv() {
@@ -271,5 +282,76 @@ mod request_regime {
         let bat_max = BatteryParams::default().max_discharge_kw;
         let import = 0.5 + EvParams::default().max_charge_kw;
         assert!((o.setpoints["battery"] + import.min(bat_max)).abs() < 1e-9);
+    }
+}
+
+mod requests {
+    use crate::controller::arbiter::opportunistic_requests;
+    use crate::entities::design_vocabulary::NonPlanningDispatch::{StartNow, SurplusOnly};
+    use crate::entities::design_vocabulary::UserRequestMode;
+    use crate::entities::device_session::{EvSession, HeaterTarget, ShiftableLoad};
+    use chrono::{Duration, TimeZone, Utc};
+    use std::collections::{BTreeMap, HashMap};
+
+    fn now() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 7, 14, 12, 0, 0).unwrap()
+    }
+
+    fn heater_target(mode: UserRequestMode) -> HeaterTarget {
+        HeaterTarget {
+            id: uuid::Uuid::new_v4(),
+            asset_id: "heater".into(),
+            target_temp_c: 55.0,
+            ready_by: now() + Duration::hours(3),
+            mode,
+            comfort_rates: vec![],
+            created_at: now(),
+            updated_at: now(),
+        }
+    }
+
+    fn shiftable(mode: UserRequestMode, start_in_h: i64) -> ShiftableLoad {
+        ShiftableLoad {
+            id: uuid::Uuid::new_v4(),
+            asset_id: "washer".into(),
+            power_kw: 2.0,
+            duration_min: 60,
+            earliest_start: now() + Duration::hours(start_in_h),
+            latest_end: now() + Duration::hours(start_in_h + 4),
+            mode,
+            created_at: now(),
+            updated_at: now(),
+        }
+    }
+
+    #[test]
+    fn each_request_is_served_as_its_mode_declares_with_its_target() {
+        let mut session = EvSession::simulated("ev", 0.8, now(), now() + Duration::hours(5), now());
+        session.mode = UserRequestMode::Opportunistic;
+        let sessions = HashMap::from([("ev".to_string(), session)]);
+        let heaters = BTreeMap::from([(
+            "heater".to_string(),
+            heater_target(UserRequestMode::ByDeadline),
+        )]);
+        let loads = [shiftable(UserRequestMode::Asap, 0)];
+        let r = opportunistic_requests(now(), &sessions, &heaters, &loads);
+        assert_eq!(r.dispatch_by_asset["ev"], SurplusOnly);
+        assert_eq!(r.dispatch_by_asset["heater"], StartNow);
+        assert_eq!(r.dispatch_by_asset["washer"], StartNow);
+        assert_eq!(r.targets.ev_soc_target_frac_by_asset["ev"], 0.8);
+        assert_eq!(r.targets.heater_ceiling_c_by_asset["heater"], 55.0);
+    }
+
+    #[test]
+    fn a_surplus_only_heater_target_sets_no_ceiling_and_a_future_load_is_not_active() {
+        let heaters = BTreeMap::from([(
+            "heater".to_string(),
+            heater_target(UserRequestMode::ByDeadlineFree),
+        )]);
+        let loads = [shiftable(UserRequestMode::Asap, 2)];
+        let r = opportunistic_requests(now(), &HashMap::new(), &heaters, &loads);
+        assert_eq!(r.dispatch_by_asset["heater"], SurplusOnly);
+        assert!(r.targets.heater_ceiling_c_by_asset.is_empty());
+        assert!(!r.dispatch_by_asset.contains_key("washer"));
     }
 }

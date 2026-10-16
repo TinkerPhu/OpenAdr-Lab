@@ -1090,6 +1090,7 @@ mod tests {
             ev_plugged_override: None,
             ev_soc_target_override: None,
             ev_departure_time: None,
+            heater_request_ceiling_c: None,
         };
         let mut asset_state = AssetState::Pv(state);
         pv.apply_tick_overrides(&mut asset_state, &overrides);

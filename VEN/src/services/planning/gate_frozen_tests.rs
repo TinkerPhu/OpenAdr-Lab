@@ -168,3 +168,46 @@ fn gate_matches_the_frozen_gate_between_planning_plans() {
         assert_eq!(got, want, "case {case}");
     }
 }
+
+/// An opportunistic forecast replaces the plan in force on a periodic trigger, whatever it
+/// costs; switching back adopts the first planning plan even when its solve failed.
+#[test]
+fn a_change_of_dispatch_regime_always_adopts() {
+    let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+    let stages: BTreeMap<String, f64> = BTreeMap::new();
+    let mut current = random_plan(&mut rng);
+    current.solve_status = SolveStatus::Optimal;
+    current.objective = PlannerObjective::MinCost;
+    current.objective_eur = -5.0;
+    let mut forecast = random_plan(&mut rng);
+    forecast.objective = PlannerObjective::Opportunistic;
+    forecast.solve_status = SolveStatus::Simulated;
+    forecast.objective_eur = 9.0;
+    let gate = |cur: &Plan, new: &Plan| {
+        evaluate_acceptance_gate(
+            Some(cur),
+            new,
+            &PlanTrigger::Periodic,
+            0.2,
+            1500.0,
+            0.05,
+            &stages,
+            now(),
+        )
+    };
+    assert!(
+        gate(&current, &forecast),
+        "to opportunistic, despite the higher cost"
+    );
+    assert!(
+        gate(&forecast, &forecast.clone()),
+        "opportunistic to opportunistic, periodic"
+    );
+    let mut failed = random_plan(&mut rng);
+    failed.objective = PlannerObjective::MinCost;
+    failed.solve_status = SolveStatus::Infeasible;
+    assert!(
+        gate(&forecast, &failed),
+        "back to a planning objective, even a failed solve"
+    );
+}

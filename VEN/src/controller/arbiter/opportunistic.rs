@@ -24,9 +24,10 @@ use super::{projected_net_kw_except, ArbiterOutcome, ArbiterTick, DEAD_BAND_KW};
 use crate::controller::sim_snapshot::AssetSnapshot;
 use crate::entities::asset::ArbiterLeverKind;
 use crate::entities::design_vocabulary::NonPlanningDispatch;
+use crate::entities::device_session::{EvSession, HeaterTarget, ShiftableLoad};
 
 /// What one opportunistic tick did (diagnostics, `GET /arbiter-diagnostics`).
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, ts_rs::TS)]
 pub struct OpportunisticOutcome {
     /// The site's balance before the ranked assets (kW, import positive): base load, PV,
     /// start-now requests and every unranked or excluded asset.
@@ -39,19 +40,73 @@ pub struct OpportunisticOutcome {
     pub unresolved_kw: f64,
 }
 
+/// The active requests under the opportunistic objective, per asset: how each is served
+/// (`UserRequestMode::non_planning_dispatch`) and the targets the assets must know to say
+/// when they are done (D4). Read only in the opportunistic arm of the tick.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OpportunisticRequests {
+    pub dispatch_by_asset: HashMap<String, NonPlanningDispatch>,
+    pub targets: RequestTargets,
+}
+
+/// Request targets handed to the simulator per asset (`TickInputs::request_targets`): each
+/// EV's session target SoC, and each heater's start-now target as its cut-out ceiling (the
+/// heater caps it at its own `temp_max_c`). A sim inject of the same quantity wins.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RequestTargets {
+    pub ev_soc_target_frac_by_asset: HashMap<String, f64>,
+    pub heater_ceiling_c_by_asset: HashMap<String, f64>,
+}
+
+/// Collect the requests that are active at `now`: each EV's current session, each heater's
+/// target, each shiftable load inside its window.
+pub fn opportunistic_requests(
+    now: chrono::DateTime<chrono::Utc>,
+    ev_sessions_now: &HashMap<String, EvSession>,
+    heater_targets: &std::collections::BTreeMap<String, HeaterTarget>,
+    shiftable_loads: &[ShiftableLoad],
+) -> OpportunisticRequests {
+    let mut out = OpportunisticRequests::default();
+    for (id, session) in ev_sessions_now {
+        out.dispatch_by_asset
+            .insert(id.clone(), session.mode.non_planning_dispatch());
+        out.targets
+            .ev_soc_target_frac_by_asset
+            .insert(id.clone(), session.target_soc_frac);
+    }
+    for (id, target) in heater_targets {
+        let dispatch = target.mode.non_planning_dispatch();
+        out.dispatch_by_asset.insert(id.clone(), dispatch);
+        if dispatch == NonPlanningDispatch::StartNow {
+            out.targets
+                .heater_ceiling_c_by_asset
+                .insert(id.clone(), target.target_temp_c);
+        }
+    }
+    for load in shiftable_loads
+        .iter()
+        .filter(|l| l.earliest_start <= now && now < l.latest_end)
+    {
+        out.dispatch_by_asset
+            .insert(load.asset_id.clone(), load.mode.non_planning_dispatch());
+    }
+    out
+}
+
 /// How the active requests shape this tick (openspec `opportunistic-objective` D4): the base
 /// commands the pass starts from, and the assets it leaves alone.
 ///
 /// A start-now request runs its asset at full effort (`cap_max_import_kw`, which the asset
 /// already reports as zero once the request's target, injected into the asset, is reached) and
 /// takes no surplus on top. A surplus-only request makes its asset take surplus whatever its
-/// surplus switch says. An asset with no request takes surplus only if its own switch is on
-/// (`surplus_switch_on`: an EV's opportunistic-charging setting; true for every other kind).
+/// surplus switch says. An asset with no request takes surplus unless it is a surplus-charging
+/// asset (an EV, by its declared lever kind) whose own switch is off (`ev_surplus_switch_on`:
+/// its opportunistic-charging setting, `PUT /ev-settings`).
 pub fn request_regime(
     sim: &crate::controller::SimSnapshot,
     mut base: HashMap<String, f64>,
     requests: &HashMap<String, NonPlanningDispatch>,
-    surplus_switch_on: impl Fn(&str) -> bool,
+    ev_surplus_switch_on: impl Fn(&str) -> bool,
 ) -> (HashMap<String, f64>, BTreeSet<String>) {
     let mut excluded = BTreeSet::new();
     for (id, snap) in &sim.assets {
@@ -61,7 +116,11 @@ pub fn request_regime(
                 excluded.insert(id.clone());
             }
             Some(NonPlanningDispatch::SurplusOnly) => {}
-            None if !surplus_switch_on(id) => {
+            None if snap
+                .arbiter_lever
+                .is_some_and(|l| l.kind == ArbiterLeverKind::SurplusCharge)
+                && !ev_surplus_switch_on(id) =>
+            {
                 excluded.insert(id.clone());
             }
             None => {}

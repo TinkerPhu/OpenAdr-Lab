@@ -167,6 +167,9 @@ pub struct TickOverrides {
     pub heater_temp_max_override: Option<f64>,
     pub heater_emergency_curtail_override: Option<bool>,
     pub heater_emergency_absorb_override: Option<bool>,
+    /// A start-now request's target as this heater's cut-out ceiling (opportunistic objective
+    /// only); the heater caps it at its own `temp_max_c`, and `heater_temp_max_override` wins.
+    pub heater_request_ceiling_c: Option<f64>,
 
     // BaseLoad — `base_load_baseline_kw` is the pre-resolved
     // `self.base_load_smoothing.update(...)` result, `None` if no BaseLoad

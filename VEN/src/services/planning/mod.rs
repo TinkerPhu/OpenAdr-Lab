@@ -387,6 +387,17 @@ pub fn evaluate_acceptance_gate(
     heater_stage_sizes_kw: &BTreeMap<String, f64>,
     now: DateTime<Utc>,
 ) -> bool {
+    // A change of dispatch regime, or a forecast of the opportunistic objective, always
+    // adopts: there is no cost to compare across regimes, and a failed first solve after
+    // switching back must still replace the opportunistic plan, or the VEN would keep
+    // dispatching without the plan under a planning objective (openspec
+    // `opportunistic-objective` D7). Two planning plans never reach this rule.
+    let regime_changes = current.is_some_and(|c| {
+        c.objective.dispatches_from_plan() != new_plan.objective.dispatches_from_plan()
+    });
+    if regime_changes || !new_plan.objective.dispatches_from_plan() {
+        return true;
+    }
     // A failed solve has nothing to dispatch and reports objective 0: whatever the trigger,
     // it never displaces a plan that solved, and a failed plan in force yields to the
     // first that did. Compared on cost, "0 EUR" won both ways (E2E 2026-10-06).

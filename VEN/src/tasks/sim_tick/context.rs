@@ -51,6 +51,10 @@ pub(crate) struct TickContext {
     /// result; each EV gets its own (`TickInputs::ev_departure_by_asset`).
     pub ev_departure_by_asset: std::collections::HashMap<String, chrono::DateTime<chrono::Utc>>,
     pub comms_loss: Option<CommsLossState>,
+    /// The active requests, read only while the adopted plan's objective dispatches without
+    /// it (the opportunistic objective); `None` under every planning objective, which reads no
+    /// request state here (openspec `opportunistic-objective` D0).
+    pub opportunistic: Option<crate::controller::arbiter::OpportunisticRequests>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -101,6 +105,17 @@ pub(crate) async fn resolve_tick_context(
     };
     let (overlay_enabled, ev_sessions_now) =
         super::arbiter_glue::resolve_overlay_enabled(state, now).await;
+    let opportunistic = match plan_snap.as_ref() {
+        Some(plan) if !plan.objective.dispatches_from_plan() => {
+            Some(crate::controller::arbiter::opportunistic_requests(
+                now,
+                &ev_sessions_now,
+                &state.heater_targets().await,
+                &state.shiftable_loads().await,
+            ))
+        }
+        _ => None,
+    };
 
     TickContext {
         inject,
@@ -125,6 +140,7 @@ pub(crate) async fn resolve_tick_context(
             .map(|(id, s)| (id, s.departure_time))
             .collect(),
         comms_loss,
+        opportunistic,
     }
 }
 

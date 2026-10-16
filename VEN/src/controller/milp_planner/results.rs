@@ -20,6 +20,27 @@ use super::types::*;
 /// so tests asserting on per-slot fields still find data, and each asset's session
 /// flexibility estimated without a schedule.
 #[allow(clippy::too_many_arguments)]
+/// The plan the opportunistic objective adopts while its forecast is not built: no slots, a
+/// simulated status and a warning saying so (openspec `opportunistic-objective` 4.1). Dispatch
+/// runs without look-ahead all the same; the plan only carries the objective to the tick.
+pub fn plan_without_forecast(
+    planner: &PlannerParams,
+    now: DateTime<Utc>,
+    trigger: PlanTrigger,
+    objective: PlannerObjective,
+) -> Plan {
+    let mut plan = fallback_plan(planner, now, trigger, &[], None, String::new(), objective);
+    plan.solve_status = SolveStatus::Simulated;
+    plan.warnings = vec![PlanWarning {
+        severity: WarningSeverity::Info,
+        kind: WarningKind::OpportunisticNoForecast,
+        message: "Opportunistic objective: dispatch runs without look-ahead; no forecast yet"
+            .into(),
+        suggested_action: None,
+    }];
+    plan
+}
+
 pub(crate) fn fallback_plan(
     planner: &PlannerParams,
     now: DateTime<Utc>,

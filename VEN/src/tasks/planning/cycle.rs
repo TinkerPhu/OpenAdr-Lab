@@ -93,7 +93,13 @@ pub(super) async fn run_plan_cycle(
         st,
     )
     .await;
-    let mut plan = crate::services::PlanningService::solve_plan(solver, solve_req).await;
+    // The one guard of the planning cycle (openspec `opportunistic-objective` D0): every
+    // planning objective solves exactly as before; the opportunistic one is not solved.
+    let mut plan = if obj.dispatches_from_plan() {
+        crate::services::PlanningService::solve_plan(solver, solve_req).await
+    } else {
+        crate::controller::milp_planner::plan_without_forecast(planner, now, trigger.clone(), obj)
+    };
     // created_at records true wall-clock time so gate decay (elapsed_s) measures
     // real plan age. horizon.start_time = now (aligned) is the slot grid origin.
     plan.created_at = wall_now;

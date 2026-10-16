@@ -163,6 +163,7 @@ const emptyArbiterDiagnostics: ArbiterDiagnostics = {
   measured_net_kw: null,
   limit: null,
   bridge_kw_by_asset: {},
+  opportunistic: null,
   updated_at: null,
 };
 const mockArbiterDiagnosticsData = vi.fn((): ArbiterDiagnostics => emptyArbiterDiagnostics);
@@ -748,6 +749,7 @@ describe("DevicesPage", () => {
         bridge_kw_by_asset: {},
       },
       bridge_kw_by_asset: {},
+      opportunistic: null,
       updated_at: "2026-09-15T08:00:00Z",
     });
     renderPage();
@@ -755,6 +757,23 @@ describe("DevicesPage", () => {
     expect(readout.textContent).toMatch(/0\.90 kW/);
     expect(readout.textContent).toMatch(/battery/);
     expect(readout.textContent).toMatch(/0\.30 kW/);
+  });
+
+  // 16f'. The opportunistic pass's decision is visible, in place of the deviation readout
+  it("shows the opportunistic pass's balance, leading asset and what it could not take", () => {
+    mockArbiterSettingsData.mockReturnValue({
+      deviation_arbiter_enabled: true,
+      limit_enforcement_enabled: true,
+    });
+    mockArbiterDiagnosticsData.mockReturnValue({
+      ...emptyArbiterDiagnostics,
+      opportunistic: { site_kw: -2.5, leading_asset_id: "ev", absorbing: true, unresolved_kw: 0 },
+      updated_at: "2026-10-16T08:00:00Z",
+    });
+    renderPage();
+    const readout = screen.getByTestId("arbiter-opportunistic-diagnostics");
+    expect(readout.textContent).toMatch(/-2\.50 kW/);
+    expect(readout.textContent).toMatch(/ev \(taking surplus\)/);
   });
 
   // 16g. Why a correction is still held (R-88) is visible: the deviation it would leave

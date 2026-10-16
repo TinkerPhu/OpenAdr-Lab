@@ -80,7 +80,19 @@ pub(crate) fn build_tick_setpoints(
         prev_bridge_kw_by_asset: &ctx.bridge_kw_by_asset,
     };
 
-    let mut outcome = if ctx.deviation_arbiter_enabled {
+    let mut outcome = if let Some(requests) = &ctx.opportunistic {
+        // The opportunistic objective: no plan allocation is followed (D1, D5), the pass
+        // decides from this tick's balance; the stages below bound it like any dispatch.
+        let defaults =
+            controller::dispatcher::build_setpoints_without_plan(sim_snap, thermostat_setpoints_kw);
+        let (base, excluded) = controller::arbiter::request_regime(
+            sim_snap,
+            defaults,
+            &requests.dispatch_by_asset,
+            |id| ctx.overlay_enabled.of(id),
+        );
+        controller::arbiter::opportunistic_pass(&tick, &base, &excluded)
+    } else if ctx.deviation_arbiter_enabled {
         controller::arbiter::reconcile(&tick, &base_sp, ctx.incumbent_lever.as_deref())
     } else {
         let mut sp = base_sp;

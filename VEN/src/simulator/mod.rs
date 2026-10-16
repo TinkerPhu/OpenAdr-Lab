@@ -348,6 +348,7 @@ impl SimState {
             ev_plugged_override,
             ev_soc_target_override,
             ev_departure_by_asset,
+            request_targets,
             feeds,
         } = inputs;
         let natural_irradiance = crate::entities::solar::natural_irradiance_at(now);
@@ -393,6 +394,7 @@ impl SimState {
             ev_plugged_override,
             ev_soc_target_override,
             ev_departure_time: None,
+            heater_request_ceiling_c: None,
         };
 
         let dt = chrono::Duration::milliseconds((dt_s * 1000.0) as i64);
@@ -408,6 +410,16 @@ impl SimState {
             tick_overrides.heater_emergency_curtail_override = curtail;
             tick_overrides.heater_emergency_absorb_override = absorb;
             tick_overrides.ev_departure_time = ev_departure_by_asset.get(&entry.id).copied();
+            // A request's target (opportunistic objective only); the sim inject still wins.
+            tick_overrides.ev_soc_target_override = ev_soc_target_override.or_else(|| {
+                (request_targets.ev_soc_target_frac_by_asset)
+                    .get(&entry.id)
+                    .copied()
+            });
+            tick_overrides.heater_request_ceiling_c = request_targets
+                .heater_ceiling_c_by_asset
+                .get(&entry.id)
+                .copied();
             // Its own feeds (W5b): an array's weather and generation-limit share, a measured
             // asset's reading, a base load's heuristic and its own Behaviour B baseline.
             let id = entry.id.as_str();

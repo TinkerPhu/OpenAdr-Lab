@@ -31,7 +31,7 @@ const GOLDEN_PATH: &str = concat!(
 );
 const TICKS: usize = 30;
 
-fn t0() -> DateTime<Utc> {
+pub(super) fn t0() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 7, 14, 12, 0, 0).unwrap()
 }
 
@@ -42,7 +42,7 @@ fn profile_params() -> Vec<crate::entities::asset_params::AssetParams> {
     profile.asset_params()
 }
 
-fn sim() -> SimState {
+pub(super) fn sim() -> SimState {
     SimState::from_params_seeded(
         &profile_params(),
         t0(),
@@ -64,7 +64,7 @@ fn alloc(asset_id: &str, power_kw: f64) -> AssetAllocation {
 
 /// A 1 h plan of 15-minute slots from 5 minutes before `t0`, net import 1 kW planned, with
 /// the given allocations in every slot.
-fn plan_with(allocations: &[(&str, f64)]) -> Plan {
+pub(super) fn plan_with(allocations: &[(&str, f64)]) -> Plan {
     let mut plan =
         crate::services::test_support::plans::flat_plan(900, 4, t0() - Duration::minutes(5));
     for slot in &mut plan.slots {
@@ -90,7 +90,7 @@ fn expired_plan() -> Plan {
     plan
 }
 
-struct Scenario {
+pub(super) struct Scenario {
     name: &'static str,
     plan: Option<Plan>,
     deviation: bool,
@@ -103,7 +103,7 @@ struct Scenario {
 }
 
 impl Scenario {
-    fn new(name: &'static str, plan: Option<Plan>) -> Self {
+    pub(super) fn new(name: &'static str, plan: Option<Plan>) -> Self {
         Self {
             name,
             plan,
@@ -187,7 +187,7 @@ fn scenarios() -> Vec<Scenario> {
     ]
 }
 
-fn context(s: &Scenario, sim: &SimState) -> TickContext {
+pub(super) fn context(s: &Scenario, sim: &SimState) -> TickContext {
     let window_end = t0() + Duration::hours(1);
     let mut inject = crate::entities::sim_inject::SimInjectState::default();
     inject.heater_setpoint_c = s.heater_setpoint_c;
@@ -245,6 +245,7 @@ fn context(s: &Scenario, sim: &SimState) -> TickContext {
         limit_enforcement_enabled: true,
         limit_incumbent_lever: None,
         ev_departure_by_asset: HashMap::new(),
+        opportunistic: None,
         comms_loss: s.comms_loss.then_some(CommsLossState {
             active: true,
             max_power_pct: 0.7,

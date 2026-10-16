@@ -60,6 +60,7 @@ import type { HistoryPage } from "./generated/HistoryPage";
 import type { KeyFeature } from "./generated/KeyFeature";
 import type { LedgerPeriod } from "./generated/LedgerPeriod";
 import type { LimitPassOutcome } from "./generated/LimitPassOutcome";
+import type { OpportunisticOutcome } from "./generated/OpportunisticOutcome";
 import type { MeasurementResponse } from "./generated/MeasurementResponse";
 import type { MeasurementStatus } from "./generated/MeasurementStatus";
 import type { NextTrip } from "./generated/NextTrip";
@@ -181,6 +182,7 @@ export type {
   KeyFeature,
   LedgerPeriod,
   LimitPassOutcome,
+  OpportunisticOutcome,
   MeasurementResponse,
   MeasurementStatus,
   NextTrip,

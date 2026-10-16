@@ -63,6 +63,7 @@ use self::inputs::*;
 use self::results::*;
 
 pub(crate) use self::results::fallback_plan;
+pub use self::results::plan_without_forecast;
 #[cfg(test)]
 use self::solver_duals::*;
 #[cfg(test)]
