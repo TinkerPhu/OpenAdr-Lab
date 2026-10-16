@@ -91,15 +91,15 @@ fn expired_plan() -> Plan {
 }
 
 pub(super) struct Scenario {
-    name: &'static str,
-    plan: Option<Plan>,
-    deviation: bool,
-    overlay: bool,
-    import_limit_kw: Option<f64>,
-    dispatch_kw: Option<f64>,
-    comms_loss: bool,
-    alert: bool,
-    heater_setpoint_c: Option<f64>,
+    pub(super) name: &'static str,
+    pub(super) plan: Option<Plan>,
+    pub(super) deviation: bool,
+    pub(super) overlay: bool,
+    pub(super) import_limit_kw: Option<f64>,
+    pub(super) dispatch_kw: Option<f64>,
+    pub(super) comms_loss: bool,
+    pub(super) alert: bool,
+    pub(super) heater_setpoint_c: Option<f64>,
 }
 
 impl Scenario {
@@ -189,8 +189,10 @@ fn scenarios() -> Vec<Scenario> {
 
 pub(super) fn context(s: &Scenario, sim: &SimState) -> TickContext {
     let window_end = t0() + Duration::hours(1);
-    let mut inject = crate::entities::sim_inject::SimInjectState::default();
-    inject.heater_setpoint_c = s.heater_setpoint_c;
+    let inject = crate::entities::sim_inject::SimInjectState {
+        heater_setpoint_c: s.heater_setpoint_c,
+        ..Default::default()
+    };
     let overlay = sim
         .iter_assets()
         .map(|(entry, _)| (entry.id.clone(), s.overlay))

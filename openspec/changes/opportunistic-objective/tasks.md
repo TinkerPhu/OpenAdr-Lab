@@ -35,9 +35,9 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       (4.1) never sends this objective to the MILP.
 - [x] 1.2 `SolveStatus::Simulated` (`solved()` true) and `WarningKind::OpportunisticNoForecast`;
       regenerate TS; VEN UI shows both (Plan history status, warnings list).
-- [ ] 1.3 `UserRequestMode::non_planning_dispatch()` → `NonPlanningDispatch::{StartNow,
+- [x] 1.3 `UserRequestMode::non_planning_dispatch()` → `NonPlanningDispatch::{StartNow,
       SurplusOnly}` with the mapping of D4, and a test over every variant.
-- [ ] 1.4 One rank constant per asset kind, returned by both the kind's
+- [x] 1.4 One rank constant per asset kind, returned by both the kind's
       `AssetMilpContext::surplus_claim_rank` (`*_declared.rs`) and a new
       `Asset::surplus_claim_rank() -> Option<u8>` (PV/base load `None`; their context keeps
       `u8::MAX`), carried on `AssetSnapshot` via `simulator/snapshot.rs::to_sim_snapshot`;
@@ -61,22 +61,22 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       taken, night base load covered, never beyond the import, never charges from the grid,
       empty battery leaves the import, balanced site moves nothing, excluded asset keeps its
       base, no deviation state written, same balance gives the same commands every tick.
-- [ ] 2.3 `ArbiterTick.active_requests`; start-now base setpoint = `cap_max_import_kw` for every
+- [x] 2.3 `ArbiterTick.active_requests`; start-now base setpoint = `cap_max_import_kw` for every
       asset kind (D4; the targets that make it fall to zero are injected in 3.2); a
       start-now asset is not also an absorb candidate; surplus-only requests make their asset an
       absorb candidate regardless of the EV toggle.
       Tests: BY_DEADLINE EV starts now and stops at target, OPPORTUNISTIC EV idle without
       surplus, ASAP shiftable starts at earliest start, BY_DEADLINE heater drives toward target,
       MAX_COST is surplus-only, start-now EV bounded by the limit pass.
-- [ ] 2.4 Opportunistic decisions in the decision trace and `/arbiter-diagnostics` (pass, direction,
+- [x] 2.4 Opportunistic decisions in the decision trace and `/arbiter-diagnostics` (pass, direction,
       leading lever); extend the diagnostics route test and the VEN UI arbiter diagnostics panel.
 
 ## 3. Live dispatch
 
-- [ ] 3.1 `dispatcher::build_setpoints(.., follow_allocations)`; every planning call passes `true`,
+- [x] 3.1 `dispatcher::build_setpoints(.., follow_allocations)`; every planning call passes `true`,
       only the opportunistic arm passes `false`; the planning no-plan base is untouched. Test:
       forecast allocations ignored when `false`; existing tests unchanged; tick golden holds.
-- [ ] 3.2 `build_tick_setpoints` gains one arm, taken only when the adopted plan's objective has
+- [x] 3.2 `build_tick_setpoints` gains one arm, taken only when the adopted plan's objective has
       `!dispatches_from_plan()`, that calls `opportunistic_step`, independent of
       `deviation_arbiter_enabled`. `reconcile` and the no-plan path stay as they are. Inside that
       arm only, collect `active_requests` in `tasks/sim_tick` from
@@ -92,7 +92,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       unchanged; opportunistic plan with a 3 kW battery allocation commands 0 kW on a balanced
       site; toggle off → EV takes no surplus without a request; a planning tick reads no request
       state. Tick golden holds.
-- [ ] 3.4 Switch-back test: run the opportunistic arm for 3 600 ticks, switch to a `min_cost`
+- [x] 3.4 Switch-back test: run the opportunistic arm for 3 600 ticks, switch to a `min_cost`
       plan; assert the residual tracker, `arbiter_active_lever` and `limit_active_lever` hold
       nothing the opportunistic pass wrote, and that the next tick's setpoints equal those of a
       `min_cost` VEN that never ran opportunistic, given the same asset states and last commands.
@@ -102,10 +102,10 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 
 ## 4. Planning cycle without a forecast yet
 
-- [ ] 4.1 `tasks/planning/cycle.rs`: under `!dispatches_from_plan()` skip the solve and adopt an
+- [x] 4.1 `tasks/planning/cycle.rs`: under `!dispatches_from_plan()` skip the solve and adopt an
       empty-slot plan with `SolveStatus::Simulated` and `OpportunisticNoForecast` (removed again
       in 7.4).
-- [ ] 4.2 `evaluate_acceptance_gate`: one leading rule (D7) — adopt when `dispatches_from_plan()`
+- [x] 4.2 `evaluate_acceptance_gate`: one leading rule (D7) — adopt when `dispatches_from_plan()`
       differs between the two plans or the new plan is opportunistic. Tests: periodic
       opportunistic replan adopts despite higher cost; switching back adopts the first `min_cost`
       plan even when it failed; gate golden (0.3) unchanged for every planning pair.

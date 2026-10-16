@@ -33,11 +33,20 @@ fn heater_at(temp_c: f64) -> AssetParams {
     })
 }
 
+/// The site with a PV array and a base load, every EV idle (a new EV starts out charging at
+/// full rate, which an excluded EV would keep drawing this tick).
 fn site(params: &[AssetParams]) -> SimSnapshot {
     let mut all = params.to_vec();
     all.push(AssetParams::Pv(PvParams::default()));
     all.push(AssetParams::BaseLoad(BaseLoadParams::default()));
-    crate::simulator::SimState::from_params(&all, chrono::Utc::now()).to_sim_snapshot()
+    let mut sim = crate::simulator::SimState::from_params(&all, chrono::Utc::now());
+    if let Some(entry) = sim.asset_mut(crate::ids::ASSET_EV) {
+        if let crate::assets::AssetState::Ev(s) = &mut entry.state {
+            s.actual_power_kw = 0.0;
+            s.pending_command_kw = 0.0;
+        }
+    }
+    sim.to_sim_snapshot()
 }
 
 /// One pass with PV generating `pv_kw` and the base load drawing `base_kw`.
@@ -106,9 +115,10 @@ fn ample_surplus_fills_every_asset_in_order_and_exports_the_rest() {
 fn a_full_asset_passes_the_surplus_on() {
     let sim = site(&[
         battery(1.0),
-        heater_at(HeaterParams::default().temp_min_c + 5.0),
+        heater_at(HeaterParams::default().temp_min_c + 2.0),
     ]);
-    let o = pass(&sim, 2.5, 0.5, &[]);
+    // 3 kW of surplus: room for one 2.5 kW heater stage.
+    let o = pass(&sim, 3.5, 0.5, &[]);
     assert_eq!(sp(&o, "battery"), 0.0, "a full battery takes nothing");
     assert!(sp(&o, "heater") > 0.0, "the heater takes the surplus");
 }
@@ -277,10 +287,11 @@ mod request_regime {
         };
         let o = opportunistic_pass(&tick, &base, &excluded);
         assert_eq!(o.setpoints["ev"], EvParams::default().max_charge_kw);
-        // A meter-following home battery covers what the meter would import, the EV's
-        // charge included, as far as its own rate allows.
+        // A meter-following home battery covers what the meter imports this tick, the EV's
+        // draw included (here still 0: its command lands next tick), as far as its rate allows.
         let bat_max = BatteryParams::default().max_discharge_kw;
-        let import = 0.5 + EvParams::default().max_charge_kw;
+        let import = o.opportunistic.as_ref().unwrap().site_kw;
+        assert!(import >= 0.5 - 1e-9);
         assert!((o.setpoints["battery"] + import.min(bat_max)).abs() < 1e-9);
     }
 }
