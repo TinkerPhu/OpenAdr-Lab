@@ -39,7 +39,9 @@ fn split_kinds(s: &str) -> Result<Vec<WarningKind>, DomainError> {
     if s.is_empty() {
         return Ok(Vec::new());
     }
-    s.split(',').map(|k| parse_stored(k, "warning_kind")).collect()
+    s.split(',')
+        .map(|k| parse_stored(k, "warning_kind"))
+        .collect()
 }
 
 pub(super) fn append(conn: &mut Connection, rows: &[PlanHistorySample]) -> Result<(), DomainError> {
@@ -201,7 +203,10 @@ mod tests {
         ];
         for (status, text) in statuses {
             assert_eq!(stored(status), text);
-            assert_eq!(parse_stored::<SolveStatus>(text, "solve_status").unwrap(), status);
+            assert_eq!(
+                parse_stored::<SolveStatus>(text, "solve_status").unwrap(),
+                status
+            );
         }
         let kinds = [
             (WarningKind::SolverInfeasible, "SOLVER_INFEASIBLE"),
@@ -211,12 +216,18 @@ mod tests {
             (WarningKind::PeakPenaltyExceeded, "PEAK_PENALTY_EXCEEDED"),
             (WarningKind::EvCoreEnergyUnmet, "EV_CORE_ENERGY_UNMET"),
             (WarningKind::TargetAboveLimit, "TARGET_ABOVE_LIMIT"),
-            (WarningKind::OpportunisticNoForecast, "OPPORTUNISTIC_NO_FORECAST"),
+            (
+                WarningKind::OpportunisticNoForecast,
+                "OPPORTUNISTIC_NO_FORECAST",
+            ),
             (WarningKind::Other, "OTHER"),
         ];
         for (kind, text) in kinds {
             assert_eq!(stored(kind), text);
-            assert_eq!(parse_stored::<WarningKind>(text, "warning_kind").unwrap(), kind);
+            assert_eq!(
+                parse_stored::<WarningKind>(text, "warning_kind").unwrap(),
+                kind
+            );
         }
         assert!(parse_stored::<SolveStatus>("NOPE", "solve_status").is_err());
     }

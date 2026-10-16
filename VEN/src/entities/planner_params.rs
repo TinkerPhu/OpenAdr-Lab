@@ -253,7 +253,15 @@ mod tests {
             PlannerObjective::ALL.len(),
             "ALL must list every variant: {ts}"
         );
-        let _ = (MinCost, MinGhg, MinGrid, MinImport, MaxRevenue, Custom, Opportunistic);
+        let _ = (
+            MinCost,
+            MinGhg,
+            MinGrid,
+            MinImport,
+            MaxRevenue,
+            Custom,
+            Opportunistic,
+        );
     }
 
     /// Every objective reads back from its own wire spelling, and the deserializer's list of
