@@ -123,6 +123,14 @@ planned under (from each VEN's reported objective).
   forecast series reflects the new plans
 - **AND** each slot reports which objectives its contributing VENs planned under
 
+#### Scenario: The forecast from before the switch is kept
+- **WHEN** a VEN's reported objective changes
+- **THEN** the BFF keeps that VEN's newest forecast report as of that moment, and the fleet
+  forecast route serves the sum of those reports as a second series, `before`, with the time of
+  the change
+- **AND** a VEN with no forecast report at the moment of change contributes nothing to `before`
+- **AND** the next objective change of that VEN replaces its kept report
+
 #### Scenario: Offline VEN excluded
 - **WHEN** a VEN's status is offline
 - **THEN** its last forecast is not included in the fleet forecast, and the contributing count
@@ -148,6 +156,11 @@ allocations when its row is expanded.
 ### Requirement: The Fleet power chart overlays forecast on recorded power
 The VTN UI Fleet power chart SHALL show the fleet forecast series alongside the recorded fleet
 power, distinguishable at a glance, with a legend naming the objectives the forecast is made of.
+
+#### Scenario: Before and after a switch
+- **WHEN** the fleet forecast has a `before` series
+- **THEN** the chart draws it as a faint dashed line beside the current forecast, labelled with
+  the time of the change
 
 #### Scenario: Mixed objectives
 - **WHEN** half the fleet runs `min_cost` and half runs opportunistic

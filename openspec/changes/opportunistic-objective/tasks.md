@@ -166,6 +166,10 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 
 ## 8. Fleet side — BFF and VTN UI
 
+- [ ] 8.0 `VTN/mosquitto/fleet-acl.conf`: `topic write openadr-lab/fleet/+/command/objective` for
+      `openadr-bff` (that leaf only). Test first: the two new `scripts/test_fleet_acl.sh` cases
+      (BFF's command reaches the VEN; a VEN cannot command another) fail on the old ACL, pass on
+      the new. Deploy the broker config on Node1 and run the script before 8.2 goes live.
 - [ ] 8.1 `bff/src/fleet.rs::apply_message` ingests `objective`, `plan` and `command/objective`
       leaves (unit tests: each leaf, garbled body keeps the previous value, empty command = no
       command).
@@ -185,9 +189,12 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       interval, summed with `group_and_resample` / `sum_over_grid`, each slot with VEN count and
       objectives. Tests: kWh→kW conversion, offline VEN excluded, mixed objectives listed, report
       and MQTT objective joined on `venName`, a VEN with no objective leaf counted as `unknown`.
+      Also the `before` series (D11): a change of a VEN's `objective` leaf keeps its newest forecast
+      report id in `fleet_store.rs`; tests: change keeps it, second change replaces it, VEN with no
+      report omitted, offline VEN excluded, kWh→kW on the `before` series.
 - [ ] 8.6 VTN UI Fleet page: Objective column (value, source, pending), per-row and fleet
       selectors, Release per row and for all; expandable row with the VEN's plan chart.
-      `FleetPowerChart` forecast overlay with objective legend. UI unit tests; eslint clean.
+      `FleetPowerChart` forecast overlay with objective legend and the faint dashed `before` series. UI unit tests; eslint clean.
 
 ## 9. Use cases, BDD, docs
 
@@ -199,7 +206,8 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 - [ ] 9.2 BDD `tests/features/fleet_objective_control.feature` (test stack has `mosquitto`,
       `FLEET_MQTT_HOST`, `test-bff`): switch one VEN and the fleet through the BFF; VEN reports
       source `fleet`; restart restores it; clearing returns to `profile`; forecast report arrives
-      after adoption and the fleet forecast route sums it.
+      after adoption and the fleet forecast route sums it; after a second switch the route returns the
+      first forecast as `before`.
 - [ ] 9.3 Use cases: a new `UC-19: Running Without Planning (opportunistic objective)` in
       `docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md` (switch, surplus order, battery
       covering import, request modes, objective source); a new section `13. Comparing the Fleet
@@ -209,7 +217,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       `docs/plans/fleet-monitor/phase-0-foundation.md` §6.2 gains the `objective` and
       `command/objective` rows and marks `plan` as published.
 - [ ] 9.4 `docs/reference/TECHNICAL_DEBTS.md` (Severity/Kind/Cost/Why-open each): lab-mqtt per-VEN
-      ACL now also guards objective commands (extend the existing row or file one); per-kind
+      ACL needs no debt row (8.0 extends it and tests it); per-kind
       `apply_ev_lever_opportunistic` (planning overlay) and `opportunistic_pass` answer "how
       much surplus does the EV take"
       under different rules, first step: an equivalence test that shows where they differ; the

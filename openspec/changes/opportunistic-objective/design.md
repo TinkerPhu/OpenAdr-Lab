@@ -118,7 +118,7 @@ targets and shiftable loads carry a `mode`; only the MILP reads it today.
   exports what it cannot use. The existing export handling is unchanged.
 - A per-asset "charging strategy" setting. The EV overlay toggle stays the only per-asset
   opportunistic switch.
-- A per-VEN topic ACL on `lab-mqtt` (phase 0 §6.1 still owns that).
+- Changing the per-VEN topic ACL on `lab-mqtt` beyond the one command leaf the BFF needs (8.0).
 - Persisting a VEN-UI objective change across restarts (only a retained fleet command persists).
 - Changing the heater model: one parameterised heater with a temperature-only deadband (no
   minimum off-time) stays as it is, for space-heating buffers and hot-water boilers alike.
@@ -355,13 +355,19 @@ instead of 12. The BFF reads, per VEN, the newest
 `USAGE_FORECAST` report from the recorder's table, converts each interval with `lab_core::units::mean_power_kw`
 (declared unit and interval duration → mean kW; a declared `KW` is taken as-is), and sums with
 `group_and_resample` / `sum_over_grid`. `GET /api/fleet/forecast` serves `{slots: [{start, kw,
-vens, objectives}]}`. The `plan` leaf is published on adoption; the BFF keeps the latest per VEN
+vens, objectives}], before: {changed_at, slots: [...]} | null}`. `before` answers "what did the
+fleet forecast say just before I flipped it": when the BFF ingests a change of a VEN's `objective`
+leaf, it keeps that VEN's newest forecast report id as of that moment (no new store: the report
+stays in the recorder table; the id is held in `fleet_store.rs` beside the VEN's objective), and
+`before` is summed from those with the same conversion and grid as the current series. During a
+fleet-wide switch (10 s spacing per VEN) VENs change at different times, so `changed_at` is the
+earliest change and the per-slot `objectives` list shows the mix. The `plan` leaf is published on adoption; the BFF keeps the latest per VEN
 and serves `GET /api/fleet/vens/:ven/plan` for the Fleet page drill-down.
 
 ### D12. VTN UI
 Fleet table gains Objective (value, source, pending marker) with a per-row selector and a fleet
 selector above the table, plus "Release" (clear) per row and for all. `FleetPowerChart` overlays
-the forecast series (dashed) with a legend listing objectives and VEN counts. A row expands to a
+the forecast series (dashed) and, when present, the `before` series (fainter, dashed) with a legend listing objectives and VEN counts. A row expands to a
 small chart of that VEN's plan (net and per-asset allocation).
 
 ## Risks / Trade-offs
@@ -374,8 +380,10 @@ small chart of that VEN's plan (net and per-asset allocation).
   that the forecast PV equals the input series.
 - [Retained `plan` messages are large (≈100 kB for a 24 h horizon)] → QoS 1, retained, one per
   adoption; mosquitto's default size limit is far above it. Measured in the BDD run.
-- [Any lab-mqtt client can switch objectives] → Recorded in `TECHNICAL_DEBTS.md` against the
-  phase-0 ACL item; commands only change the objective.
+- [The BFF's command is dropped silently if the ACL lacks the write grant] → `fleet-acl.conf`
+  grants the BFF `fleet/+/command/objective` only; `test_fleet_acl.sh` checks delivery both ways
+  and runs against the live broker before the BFF is deployed. The test broker is anonymous
+  (GB-52), so BDD alone cannot catch this.
 - [Fleet command and VEN UI both set the objective; a restart restores the fleet value] → Source
   is shown on both UIs; documented in the use case.
 - [The fleet switch makes many VENs replan at once (each solve 18-60 s on a Node host), which can

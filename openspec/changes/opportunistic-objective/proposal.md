@@ -98,5 +98,7 @@ the same instant — no day-long recordings, no confounded comparison.
   test, BFF topic/command unit tests, VEN and VTN UI unit tests, and BDD scenarios in
   `tests/features/` for VEN dispatch and for the fleet switch (the test stack already runs
   `mosquitto`, `FLEET_MQTT_HOST` and `test-bff`).
-- **Risk:** the lab broker has no per-VEN topic ACL yet (fleet-monitor phase 0 §6.1), so any
-  authenticated lab client can switch a VEN's objective. Acceptable for the lab; recorded.
+- **Broker ACL:** `VTN/mosquitto/fleet-acl.conf` gives the BFF read-only access to the fleet, so
+  it gains one write grant, `openadr-lab/fleet/+/command/objective`; without it the broker acks
+  the command and drops it. A VEN is confined to its own subtree, so it cannot command another
+  VEN. `scripts/test_fleet_acl.sh` pins both. The broker config must be deployed before the BFF.

@@ -41,8 +41,7 @@ SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort*
   non-planning HEMS behaviour: PV surplus absorbed in a declared order, battery covers import, no
   look-ahead), its forecast plan, and fleet objective control from the VTN UI with a fleet
   forecast over OpenADR `USAGE_FORECAST`, so switching the fleet shows the forecast change at
-  once instead of requiring a day-long recording comparison. Its forecast part waits for
-  `asset-declared-planner-model`.
+  once instead of requiring a day-long recording comparison.
 - `docs/plans/mqtt_notifier_conformance.md` — planned, not scheduled: make the VTN's MQTT notifier
   binding conform to 3.1 (TLS for every broker client, bearer-token login, per-client topic
   access). Records seven verified gaps, among them that the announced login cannot work today.
