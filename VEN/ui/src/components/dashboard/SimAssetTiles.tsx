@@ -1,6 +1,7 @@
 import { Grid, Stack, Typography } from "@mui/material";
 import type { AssetSnapshot, SimSnapshot } from "../../api/types";
-import { ASSET_LABELS } from "../controller/types";
+import type { AssetKind } from "../../api/generated/AssetKind";
+import { assetLabel } from "../controller/assetDisplay";
 import { formatFixedOrDash } from "@lab/ui/unitFormat";
 import { assetValue } from "../../api/assetValue";
 
@@ -13,7 +14,7 @@ const soc: Field = (a) => `SOC: ${formatFixedOrDash((assetValue(a, "soc") ?? 0) 
  * What each asset kind shows beyond its label. A kind absent from this table still gets a
  * tile (label + power), so a new asset type is visible here without editing this file.
  */
-const EXTRA_FIELDS: Record<string, Field[]> = {
+const EXTRA_FIELDS: Partial<Record<AssetKind, Field[]>> = {
   ev: [soc, power, (a) => `Plugged: ${(assetValue(a, "plugged") ?? 0) !== 0 ? "Yes" : "No"}`],
   heater: [(a) => `Temp: ${formatFixedOrDash(assetValue(a, "temp_c"), 1)}°C`, power],
   pv: [
@@ -33,8 +34,8 @@ export function SimAssetTiles({ assets }: { assets: SimSnapshot["assets"] }) {
       {Object.entries(assets).map(([id, asset]) => (
         <Grid item xs={4} key={id}>
           <Stack spacing={0.5} data-testid={`sim-asset-${id}`}>
-            <Typography variant="subtitle2">{ASSET_LABELS[id] ?? id.toUpperCase()}</Typography>
-            {(EXTRA_FIELDS[id] ?? [power]).map((field, i) => (
+            <Typography variant="subtitle2">{assetLabel({ assets }, id)}</Typography>
+            {(EXTRA_FIELDS[asset.asset_type] ?? [power]).map((field, i) => (
               <Typography key={i}>{field(asset)}</Typography>
             ))}
           </Stack>

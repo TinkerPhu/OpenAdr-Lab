@@ -7,7 +7,8 @@
  */
 import type { StateShadingSpec } from "@lab/ui/StateShading";
 import type { TimestampedRow } from "@lab/ui/mergeSeries";
-import { ASSET_COLORS } from "./types";
+import type { AssetKind } from "../../api/generated/AssetKind";
+import { KIND_COLORS } from "./assetDisplay";
 
 export interface AssetChartSpec {
   /** The asset's state line on the hidden state axis: SoC (0..1) or tank temperature. */
@@ -107,14 +108,14 @@ const EV_UNPLUGGED_SHADING: StateShadingSpec<UnpluggedKind> = {
     };
   },
   styles: {
-    unplugged: { rgb: hexToRgb(ASSET_COLORS.ev), alpha: 0.28 },
-    predicted_away: { rgb: hexToRgb(ASSET_COLORS.ev), alpha: 0.14 },
+    unplugged: { rgb: hexToRgb(KIND_COLORS.ev), alpha: 0.28 },
+    predicted_away: { rgb: hexToRgb(KIND_COLORS.ev), alpha: 0.14 },
   },
 };
 
 // ─── The table ────────────────────────────────────────────────────────────────
 
-const ASSET_CHART_SPECS: Record<string, AssetChartSpec> = {
+const ASSET_CHART_SPECS: Partial<Record<AssetKind, AssetChartSpec>> = {
   ev: { stateKey: "soc", shadings: [EV_UNPLUGGED_SHADING] },
   battery: { stateKey: "soc" },
   heater: { stateKey: "temp_c" },
@@ -125,6 +126,6 @@ const NO_SPEC: AssetChartSpec = {};
 
 /** The chart declaration of an asset type (`asset_type`, W6: whatever the asset's id). Other
  * types (shiftable loads, base load) draw the power line alone. */
-export function assetChartSpec(assetType: string): AssetChartSpec {
-  return ASSET_CHART_SPECS[assetType] ?? NO_SPEC;
+export function assetChartSpec(assetType: AssetKind | undefined): AssetChartSpec {
+  return (assetType && ASSET_CHART_SPECS[assetType]) ?? NO_SPEC;
 }

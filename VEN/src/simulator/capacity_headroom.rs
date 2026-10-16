@@ -145,7 +145,7 @@ fn site_capacity_curve_from<'s>(
         // max_effort_schedule (weather/decay-aware), which is now
         // authoritative for this the same way it is for every other asset
         // kind (see this module's own doc comment, revised).
-        if cfg.asset_type_str() == "base_load" {
+        if cfg.kind() == crate::entities::asset::AssetKind::BaseLoad {
             continue;
         }
         let series = asset_max_power_series(

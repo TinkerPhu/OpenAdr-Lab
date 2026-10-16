@@ -6,9 +6,14 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import type { ReactNode } from "react";
 import { StackedAreaTooltip } from "../components/charts/StackedTimeSeriesChart";
-import { ASSET_COLORS } from "../components/controller/types";
+import { KIND_COLORS, KIND_LABELS, assetLegendLabel } from "../components/controller/assetDisplay";
+import type { AssetKind } from "../api/generated/AssetKind";
 
-const colorMap = ASSET_COLORS;
+const colorMap: Record<string, string> = KIND_COLORS;
+// The chart shows the labels its caller hands it (`assetDisplay.ts::assetLegend`).
+const labelMap: Record<string, string> = Object.fromEntries(
+  (Object.keys(KIND_LABELS) as AssetKind[]).map((k) => [k, assetLegendLabel(KIND_LABELS[k], k)]),
+);
 
 const { xAxes } = vi.hoisted(() => ({ xAxes: [] as Array<Record<string, unknown>> }));
 
@@ -35,14 +40,14 @@ function makePayload(entries: { name: string; value: number }[]) {
 describe("StackedAreaTooltip", () => {
   it("renders nothing when not active", () => {
     const { container } = render(
-      <StackedAreaTooltip active={false} payload={[]} label={1000} colorMap={colorMap} />
+      <StackedAreaTooltip active={false} payload={[]} label={1000} colorMap={colorMap} labelMap={labelMap} />
     );
     expect(container.firstChild).toBeNull();
   });
 
   it("renders nothing when payload is empty", () => {
     const { container } = render(
-      <StackedAreaTooltip active={true} payload={[]} label={1000} colorMap={colorMap} />
+      <StackedAreaTooltip active={true} payload={[]} label={1000} colorMap={colorMap} labelMap={labelMap} />
     );
     expect(container.firstChild).toBeNull();
   });
@@ -61,7 +66,7 @@ describe("StackedAreaTooltip", () => {
         active={true}
         payload={payload as never}
         label={new Date("2026-01-01T10:00:00Z").getTime()}
-        colorMap={colorMap}
+        colorMap={colorMap} labelMap={labelMap}
       />
     );
 
@@ -83,7 +88,7 @@ describe("StackedAreaTooltip", () => {
         active={true}
         payload={payload as never}
         label={1000}
-        colorMap={colorMap}
+        colorMap={colorMap} labelMap={labelMap}
       />
     );
     expect(screen.getByText(/\+3\.5 kW/)).toBeInTheDocument();
@@ -99,7 +104,7 @@ describe("StackedAreaTooltip", () => {
         active={true}
         payload={payload as never}
         label={1000}
-        colorMap={colorMap}
+        colorMap={colorMap} labelMap={labelMap}
       />
     );
     expect(screen.getByText(/-4\.2 kW/)).toBeInTheDocument();
@@ -116,7 +121,7 @@ describe("StackedAreaTooltip", () => {
         active={true}
         payload={payload as never}
         label={1000}
-        colorMap={colorMap}
+        colorMap={colorMap} labelMap={labelMap}
       />
     );
     expect(screen.getByText(/\+1 kW/)).toBeInTheDocument();
@@ -131,7 +136,7 @@ describe("StackedAreaTooltip", () => {
       { name: "ev -", value: -0.0002 },
     ]);
     render(
-      <StackedAreaTooltip active={true} payload={payload as never} label={1000} colorMap={colorMap} />
+      <StackedAreaTooltip active={true} payload={payload as never} label={1000} colorMap={colorMap} labelMap={labelMap} />
     );
     expect(screen.getByText(/-0 W/)).toBeInTheDocument();
   });
@@ -147,7 +152,7 @@ describe("StackedAreaTooltip", () => {
         active={true}
         payload={payload as never}
         label={1000}
-        colorMap={colorMap}
+        colorMap={colorMap} labelMap={labelMap}
       />
     );
     expect(screen.getByText(/Grid:/)).toBeInTheDocument();
@@ -177,7 +182,7 @@ describe("StackedTimeSeriesChart — time axis never stretches past its window",
       <StackedTimeSeriesChart
         data={[stackedPoint(1000), stackedPoint(2000)]}
         assetIds={["ev"]}
-        colorMap={colorMap}
+        colorMap={colorMap} labelMap={labelMap}
         nowMs={1500}
         hoursBack={0.5}
         hoursForward={0.5}

@@ -21,6 +21,19 @@ vi.mock("../components/controller/charts/AssetTimelineChart", () => ({
   },
 }));
 
+const roster = vi.hoisted(() => ({
+  assets: Object.fromEntries(
+    (
+      [
+        ["ev", "ev"],
+        ["heater", "heater"],
+        ["pv", "pv"],
+        ["wm", "shiftable_load"],
+      ] as const
+    ).map(([id, kind], i) => [id, { asset_type: kind, roster_index: i }]),
+  ),
+}));
+
 const T0 = Date.UTC(2026, 0, 1, 6);
 const minute = 60_000;
 const mockTicks = [
@@ -38,8 +51,8 @@ const mockTicks = [
 
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
-  // No snapshot: each asset's chart takes the type its id names, as on a default profile.
-  useSim: () => ({ data: undefined }),
+  // The roster says each asset's kind; the History page never takes it from the id.
+  useSim: () => ({ data: roster }),
   useHistoryTicks: () => ({ data: mockTicks, refetch: vi.fn() }),
   useHistoryGrid: () => ({ data: [], refetch: vi.fn() }),
   useHistoryEvents: () => ({ data: { rows: [], total: 0 }, refetch: vi.fn() }),

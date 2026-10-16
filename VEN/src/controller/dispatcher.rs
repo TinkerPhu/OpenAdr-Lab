@@ -210,7 +210,7 @@ mod tests {
         });
         (
             "battery".to_string(),
-            snapshot_from_asset(&battery, state, "battery", 0.0, 0.0),
+            snapshot_from_asset(&battery, state, 0.0, 0.0),
         )
     }
 
@@ -239,10 +239,7 @@ mod tests {
             pending_command_kw: 0.0,
             was_away_by_usage_sim: false,
         });
-        (
-            "ev".to_string(),
-            snapshot_from_asset(&ev, state, "ev", 0.0, 0.0),
-        )
+        ("ev".to_string(), snapshot_from_asset(&ev, state, 0.0, 0.0))
     }
 
     // Both fixtures come from the real asset, like `ev_entry` above: a
@@ -266,7 +263,7 @@ mod tests {
         let state = crate::assets::AssetState::Pv(state);
         (
             "pv".to_string(),
-            snapshot_from_asset(&pv, state, "pv", last_power_kw, f64::MAX),
+            snapshot_from_asset(&pv, state, last_power_kw, f64::MAX),
         )
     }
 
@@ -281,7 +278,7 @@ mod tests {
         });
         (
             "base_load".to_string(),
-            snapshot_from_asset(&base_load, state, "base_load", last_power_kw, 0.0),
+            snapshot_from_asset(&base_load, state, last_power_kw, 0.0),
         )
     }
 

@@ -268,12 +268,8 @@ impl Asset for Battery {
         Some(self)
     }
 
-    fn asset_type(&self) -> crate::entities::asset::AssetType {
-        crate::entities::asset::AssetType::Battery
-    }
-
-    fn asset_type_str(&self) -> &'static str {
-        "battery"
+    fn kind(&self) -> crate::entities::asset::AssetKind {
+        crate::entities::asset::AssetKind::Battery
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

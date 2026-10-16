@@ -22,7 +22,6 @@ fn battery_snap(setpoint_kw: f64, soc_frac: f64) -> AssetSnapshot {
     crate::services::test_support::asset_snapshots::snapshot_from_asset(
         &battery,
         state,
-        "battery",
         setpoint_kw,
         setpoint_kw,
     )
@@ -56,7 +55,6 @@ fn ev_snap(setpoint_kw: f64, soc_frac: f64, soc_target_frac: f64, plugged: bool)
     crate::services::test_support::asset_snapshots::snapshot_from_asset(
         &ev,
         state,
-        "ev",
         setpoint_kw,
         setpoint_kw,
     )
@@ -113,7 +111,7 @@ fn heater_snap_in(
         ceiling_latched: false,
     });
     crate::services::test_support::asset_snapshots::snapshot_from_asset(
-        &heater, state, "heater", last_kw, 0.0,
+        &heater, state, last_kw, 0.0,
     )
 }
 
@@ -129,11 +127,7 @@ fn base_snap(power_kw: f64) -> AssetSnapshot {
         actual_power_kw: power_kw,
     });
     crate::services::test_support::asset_snapshots::snapshot_from_asset(
-        &base_load,
-        state,
-        "base_load",
-        power_kw,
-        power_kw,
+        &base_load, state, power_kw, power_kw,
     )
 }
 
@@ -602,7 +596,6 @@ fn projected_net_kw_asks_every_stepped_asset_not_just_the_heater() {
             elapsed_min: 0.0,
             actual_power_kw: 0.0,
         }),
-        "shiftable_load",
         0.0,
         0.0,
     );
@@ -1216,7 +1209,6 @@ impl LaggedSite {
         let ev_snapshot = crate::services::test_support::asset_snapshots::snapshot_from_asset(
             &self.ev,
             crate::assets::AssetState::Ev(self.ev_state.clone()),
-            "ev",
             self.ev_state.actual_power_kw,
             self.ev_cmd_kw,
         );

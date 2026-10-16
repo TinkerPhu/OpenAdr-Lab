@@ -14,7 +14,8 @@ import type {
   AssetSummary,
   TariffConditions,
 } from "./types";
-import { ASSET_COLORS, ASSET_LABELS, COLOR_ASSET_FALLBACK } from "./types";
+import { assetColor, assetLabel } from "./assetDisplay";
+import type { AssetKind } from "../../api/generated/AssetKind";
 import type {
   AssetSnapshot,
   TariffSnapshot as ApiTariffSnapshot,
@@ -89,11 +90,10 @@ type SummaryFields = {
   capacityKwh?: number | null;
 };
 
-/** Each asset type's cell: its label and what it reads from the asset's snapshot — declared per
+/** Each asset kind's cell: what it reads from the asset's snapshot — declared per
  * type, not branched on per id (`declare-dont-branch`, W6). */
-const SUMMARY_BY_TYPE: Record<string, { label: string; read: (a: AssetSnapshot) => SummaryFields }> = {
+const SUMMARY_BY_TYPE: Partial<Record<AssetKind, { read: (a: AssetSnapshot) => SummaryFields }>> = {
   ev: {
-    label: "EV",
     read: (a) => ({
       powerKw: a.power_kw,
       socPct: (assetValue(a, "soc") ?? 0) * 100,
@@ -102,7 +102,6 @@ const SUMMARY_BY_TYPE: Record<string, { label: string; read: (a: AssetSnapshot) 
     }),
   },
   heater: {
-    label: "Heater",
     read: (a) => {
       const tempMinC = numeric(assetValue(a, "temp_min_c"));
       const tempMaxC = numeric(assetValue(a, "temp_max_c"));
@@ -119,14 +118,12 @@ const SUMMARY_BY_TYPE: Record<string, { label: string; read: (a: AssetSnapshot) 
     },
   },
   pv: {
-    label: "PV",
     read: (a) => ({
       powerKw: -Math.abs(a.power_kw),
       maxExportKw: numeric(assetValue(a, "rated_kw")),
     }),
   },
   battery: {
-    label: "Battery",
     read: (a) => ({
       powerKw: a.power_kw,
       socPct: (assetValue(a, "soc") ?? 0) * 100,
@@ -135,11 +132,11 @@ const SUMMARY_BY_TYPE: Record<string, { label: string; read: (a: AssetSnapshot) 
       capacityKwh: numeric(assetValue(a, "capacity_kwh")),
     }),
   },
-  base_load: { label: "Base Load", read: (a) => ({ powerKw: a.power_kw }) },
+  base_load: { read: (a) => ({ powerKw: a.power_kw }) },
 };
 
 /** The order the Controller lists cells in, by asset type; others follow. */
-const SUMMARY_TYPE_ORDER = ["ev", "heater", "pv", "battery", "base_load"];
+const SUMMARY_TYPE_ORDER: AssetKind[] = ["ev", "heater", "pv", "battery", "base_load"];
 
 /**
  * Build AssetSummary[] from live sim data, tariffs, user requests, and plan.
@@ -174,7 +171,7 @@ export function deriveAssetSummaries(
     maxImportKw: number | null = null,
     maxExportKw: number | null = null,
     capacityKwh: number | null = null,
-    assetType: string | null = null
+    assetType: AssetKind | undefined = undefined
   ): AssetSummary {
     // For consuming assets (powerKw >= 0) scale by gridFraction so only the
     // grid-sourced portion incurs cost. Generating assets (powerKw < 0) are
@@ -192,9 +189,9 @@ export function deriveAssetSummaries(
 
     return {
       assetId,
-      assetType: assetType ?? assetId,
+      assetType,
       label,
-      color: ASSET_COLORS[assetId] ?? ASSET_COLORS[assetType ?? ""] ?? COLOR_ASSET_FALLBACK,
+      color: assetColor(sim, assetId),
       powerKw,
       costRateEurH,
       co2RateGH,
@@ -209,16 +206,15 @@ export function deriveAssetSummaries(
     };
   }
 
-  // One summary per asset of the roster (W6), ordered by type as the cells always were, then
-  // by roster; each read from its own snapshot through its type's declaration. A second asset
-  // of a kind is labelled with its id ("EV · car-b"); an asset of no declared type (a
-  // shiftable load: wm, dw, ...) by its own label or id.
+  // One summary per asset of the roster (W6), ordered by kind as the cells always were, then
+  // by roster; each read from its own snapshot through its kind's declaration and labelled by
+  // `assetLabel` ("EV · car-b" when the VEN holds two EVs).
   // Invariant this relies on: every key in `sim.assets` is a real simulator asset with a
   // `GET /capability/:asset_id` endpoint behind it. A backend-only pseudo-asset injected
   // into the same map would be summarized here as if it were a device, rendering a tile and
   // firing a capability request that 404s — which is exactly what the removed `site-residual`
   // virtual asset did (see docs/architecture/forecasting_model.md).
-  const typeRank = (t: string) => {
+  const typeRank = (t: AssetKind) => {
     const i = SUMMARY_TYPE_ORDER.indexOf(t);
     return i < 0 ? SUMMARY_TYPE_ORDER.length : i;
   };
@@ -227,14 +223,13 @@ export function deriveAssetSummaries(
   );
   for (const [assetId, asset] of ordered) {
     const spec = SUMMARY_BY_TYPE[asset.asset_type];
+    const label = assetLabel(sim, assetId);
     if (!spec) {
-      const label = ASSET_LABELS[assetId] ?? assetId.toUpperCase();
       summaries.push(
         makeSummary(assetId, label, asset.power_kw, null, null, null, null, null, asset.asset_type),
       );
       continue;
     }
-    const label = assetId === asset.asset_type ? spec.label : `${spec.label} · ${assetId}`;
     const f = spec.read(asset);
     summaries.push(
       makeSummary(

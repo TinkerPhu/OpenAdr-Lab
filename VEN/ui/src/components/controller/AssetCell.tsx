@@ -4,7 +4,7 @@ import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import type { AssetId, AssetSummary, AssetTimelinePoint } from "./types";
-import { ASSET_COLORS, COLOR_ASSET_FALLBACK } from "./types";
+import { assetColor } from "./assetDisplay";
 import type { ZoneDef } from "../../api/types";
 import { AssetLeftSection } from "./AssetLeftSection";
 import { AssetMidSection } from "./AssetMidSection";
@@ -52,8 +52,7 @@ export function AssetCell({
   onResetSoc,
 }: AssetCellProps) {
   const cellId = `asset:${assetId}`;
-  const color =
-    ASSET_COLORS[assetId] ?? ASSET_COLORS[assetTypeOf(simSnapshot, assetId)] ?? COLOR_ASSET_FALLBACK;
+  const color = assetColor(simSnapshot, assetId);
 
   // Display window: each cell clips its chart domain independently.
   // The shared useAllTimelines query on the page always fetches the widest

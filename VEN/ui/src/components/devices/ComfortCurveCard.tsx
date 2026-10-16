@@ -1,3 +1,4 @@
+import type { AssetKind } from "../../api/generated/AssetKind";
 import { useState } from "react";
 import {
   Box,
@@ -26,7 +27,7 @@ import { CurveChart } from "../charts/CurveChart";
  *  declared per type rather than branched on at the field (`declare-dont-branch`). For an EV
  *  it is state of charge — `ev-comfort-piecewise-core` prices every kWh from the current SoC to
  *  full, so "50 %" is the battery being half full, not a task being half done. */
-const FILL_LABEL_BY_TYPE: Record<string, string> = {
+const FILL_LABEL_BY_TYPE: Partial<Record<AssetKind, string>> = {
   ev: "State of charge (%)",
   heater: "Fill (%)",
   battery: "Fill (%)",
@@ -57,8 +58,8 @@ export function ComfortCurveCard({ sim }: { sim: SimSnapshot | undefined }) {
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   }
 
-  const assetType = curveAssets.find(([id]) => id === assetId)?.[1].asset_type ?? "";
-  const fillLabel = FILL_LABEL_BY_TYPE[assetType] ?? DEFAULT_FILL_LABEL;
+  const assetType = curveAssets.find(([id]) => id === assetId)?.[1].asset_type;
+  const fillLabel = (assetType && FILL_LABEL_BY_TYPE[assetType]) ?? DEFAULT_FILL_LABEL;
   // The API refuses a rising curve and names the offending point; show that
   // rather than letting a failed save look like nothing happened.
   const saveError = setMut.error instanceof Error ? setMut.error.message : null;

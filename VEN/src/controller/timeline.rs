@@ -382,7 +382,7 @@ pub fn build_asset_timeline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entities::asset::{AssetType, PlanTrigger};
+    use crate::entities::asset::PlanTrigger;
     use crate::entities::plan::{
         AssetAllocation, CostBreakdown, Plan, PlanSummary, PlanTimeSlot, PlanningHorizon,
     };
@@ -413,7 +413,6 @@ mod tests {
             id.to_string(),
             TimelineAssetData {
                 asset_id: id.to_string(),
-                asset_type: AssetType::GenericConsumer,
                 history,
                 current_power_kw,
                 current_state_values,
@@ -442,7 +441,6 @@ mod tests {
             id.to_string(),
             TimelineAssetData {
                 asset_id: id.to_string(),
-                asset_type: AssetType::Ev,
                 history,
                 current_power_kw,
                 current_state_values,
@@ -999,7 +997,6 @@ mod tests {
             "osc".to_string(),
             TimelineAssetData {
                 asset_id: "osc".to_string(),
-                asset_type: AssetType::GenericConsumer,
                 history: vec![],
                 current_power_kw: 1.25, // pre-computed smoothed value (set by infra layer)
                 current_state_values: HashMap::new(),

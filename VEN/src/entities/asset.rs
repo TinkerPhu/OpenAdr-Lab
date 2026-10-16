@@ -1,19 +1,24 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// Asset type classification (§1.1).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum AssetType {
-    Pv,              // photovoltaic producer
-    Battery,         // bidirectional storage
-    Ev,              // electric vehicle (consumer, storage-like)
-    Heater,          // thermal consumer with storage characteristics
-    HeatPump,        // thermal consumer with storage characteristics
-    WashingMachine,  // batch consumer
-    CookingStove,    // heuristic/uncontrollable consumer
-    GenericConsumer, // fallback
-    GenericProducer, // fallback
+/// What kind of asset this is — the one identifier of an asset's type, declared by the asset
+/// itself (`Asset::kind`), never derived from its id. Closed: a new kind of asset is a new
+/// variant, and every exhaustive `match` and the UI's generated union learn of it.
+///
+/// For classification, routing and display only. What an asset can do (a state of charge, an
+/// arbiter lever, a request kind) stays a question asked of the asset, and the planner core
+/// knows no kind at all (`scripts/audit_ven_architecture.py`). Spelled lowercase on the wire
+/// (`"ev"`, `"base_load"`), as in a profile's `type:`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetKind {
+    Pv,
+    Battery,
+    Ev,
+    Heater,
+    BaseLoad,
+    /// Created by a request (a washing machine, a dishwasher), not by the profile.
+    ShiftableLoad,
 }
 
 /// How adjustable an asset's power consumption/generation is (§1.2). Reported
@@ -851,5 +856,28 @@ mod capability_view_wire_tests {
         by_hand.as_object_mut().unwrap().extend(cap);
 
         assert_eq!(serde_json::to_value(&view).unwrap(), by_hand);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The kind keeps the lowercase spelling profiles (`type: ev`), history and the UI use.
+    #[test]
+    fn asset_kind_is_spelled_lowercase_on_the_wire() {
+        use super::AssetKind;
+        for (kind, wire) in [
+            (AssetKind::Pv, "pv"),
+            (AssetKind::Battery, "battery"),
+            (AssetKind::Ev, "ev"),
+            (AssetKind::Heater, "heater"),
+            (AssetKind::BaseLoad, "base_load"),
+            (AssetKind::ShiftableLoad, "shiftable_load"),
+        ] {
+            assert_eq!(serde_json::to_value(kind).unwrap(), wire);
+            assert_eq!(
+                serde_json::from_value::<AssetKind>(wire.into()).unwrap(),
+                kind
+            );
+        }
     }
 }

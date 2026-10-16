@@ -104,7 +104,7 @@ mod tests {
         let pv = PvInverter::from_params(&params);
         let state = crate::assets::AssetState::Pv(PvInverter::initial_state(&params));
         let mut s = crate::services::test_support::asset_snapshots::snapshot_from_asset(
-            &pv, state, "pv", 0.0, 0.0,
+            &pv, state, 0.0, 0.0,
         );
         s.ac_ceiling_kw = ac_ceiling_kw;
         s

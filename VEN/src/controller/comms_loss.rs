@@ -111,10 +111,8 @@ mod tests {
             };
             let pv = PvInverter::from_params(&params);
             let state = crate::assets::AssetState::Pv(PvInverter::initial_state(&params));
-            snap.assets.insert(
-                id.to_string(),
-                snapshot_from_asset(&pv, state, "pv", 0.0, 0.0),
-            );
+            snap.assets
+                .insert(id.to_string(), snapshot_from_asset(&pv, state, 0.0, 0.0));
         }
         snap
     }

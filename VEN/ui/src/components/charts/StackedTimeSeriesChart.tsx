@@ -12,7 +12,8 @@ import {
 } from "recharts";
 import type { TooltipProps } from "recharts";
 import type { AssetId, StackedAreaPoint } from "../controller/types";
-import { ASSET_LABELS, ASSET_PLANNING_ROLE, COLOR_ASSET_FALLBACK, SERIES_COLORS } from "../controller/types";
+import { SERIES_COLORS } from "../controller/types";
+import { COLOR_ASSET_FALLBACK } from "../controller/assetDisplay";
 import type { ZoneDef } from "../../api/types";
 import { minSpanDomain, MIN_POWER_SPAN_KW, formatPowerTick, roundedTimeTicks, niceAxis, POWER_AXIS_WIDTH_PX } from "@lab/ui/axisDomain";
 import { formatSignedPowerValue } from "@lab/ui/unitFormat";
@@ -29,6 +30,8 @@ interface StackedTimeSeriesChartProps {
   data: StackedAreaPoint[];
   assetIds: AssetId[];
   colorMap: Record<string, string>;
+  /** Each asset's legend label, role included (`assetDisplay.ts::assetLegend`). */
+  labelMap: Record<string, string>;
   nowMs: number;
   hoursBack?: number;
   hoursForward?: number;
@@ -47,19 +50,17 @@ function formatTs(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function assetLabel(id: string): string {
-  const label = ASSET_LABELS[id] ?? id;
-  const role = ASSET_PLANNING_ROLE[id] ?? "planned";
-  return `${label} (${role})`;
-}
-
 /** Merges _pos/_neg series back into a single net kW row per asset. */
 export function StackedAreaTooltip({
   active,
   payload,
   label,
   colorMap,
-}: TooltipProps<number, string> & { colorMap: Record<string, string> }) {
+  labelMap,
+}: TooltipProps<number, string> & {
+  colorMap: Record<string, string>;
+  labelMap: Record<string, string>;
+}) {
   if (!active || !payload || payload.length === 0) return null;
 
   // Aggregate net kW per asset; collect grid separately.
@@ -83,7 +84,7 @@ export function StackedAreaTooltip({
       <div style={{ marginBottom: 1, fontWeight: "bold" }}>{time}</div>
       {Object.entries(netByAsset).map(([assetId, kw]) => (
         <div key={assetId} style={{ color: colorMap[assetId] ?? COLOR_ASSET_FALLBACK }}>
-          {assetLabel(assetId)}: {formatSignedPowerValue(kw)}
+          {labelMap[assetId] ?? assetId}: {formatSignedPowerValue(kw)}
         </div>
       ))}
       {gridKw !== null && (
@@ -117,6 +118,7 @@ export function StackedTimeSeriesChart({
   data,
   assetIds,
   colorMap,
+  labelMap,
   nowMs,
   hoursBack = 1.0,
   hoursForward = 1.0,
@@ -170,7 +172,7 @@ export function StackedTimeSeriesChart({
   // hardcoded 4th legend entry — it isn't a member of the per-asset family.
   const assetSeries = renderOrder.map((id) => ({
     id,
-    label: assetLabel(id),
+    label: labelMap[id] ?? id,
     color: colorMap[id] ?? COLOR_ASSET_FALLBACK,
   }));
   const legendEntries: ChartLegendEntry[] = [
@@ -204,7 +206,7 @@ export function StackedTimeSeriesChart({
             domain={powerAxis.domain}
             ticks={powerAxis.ticks}
           />
-          <Tooltip content={<StackedAreaTooltip colorMap={colorMap} />} />
+          <Tooltip content={<StackedAreaTooltip colorMap={colorMap} labelMap={labelMap} />} />
           <Legend
             content={
               <ChartLegend

@@ -1,8 +1,6 @@
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
-use crate::entities::asset::AssetType;
-
 /// One sampled moment in an asset's history — domain-side type, no infra deps.
 pub struct TimelinePoint {
     pub ts: DateTime<Utc>,
@@ -36,7 +34,6 @@ impl HeaterPlanTrajectory {
 /// Per-asset data needed to render timelines — domain-only, no infra deps.
 pub struct TimelineAssetData {
     pub asset_id: String,
-    pub asset_type: AssetType,
     pub history: Vec<TimelinePoint>,
     pub current_power_kw: f64,
     pub current_state_values: HashMap<String, f64>,

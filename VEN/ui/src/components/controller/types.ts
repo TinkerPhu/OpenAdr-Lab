@@ -6,11 +6,14 @@
  */
 
 import { COLOR_IMPORT_TARIFF, COLOR_EXPORT_TARIFF } from "@lab/ui/types";
+import type { AssetKind } from "../../api/generated/AssetKind";
 
 // ─── Asset identifiers ────────────────────────────────────────────────────────
 
-/** Known physics assets. Dynamic shiftable loads (e.g. "wm") are also valid. */
-export type AssetId = "ev" | "heater" | "pv" | "battery" | "base_load" | (string & {});
+/** An asset's id: free, set by the profile (or by the request that created a shiftable load).
+ * Its kind is `AssetSnapshot.asset_type`, never this string; display goes through
+ * `assetDisplay.ts`. */
+export type AssetId = string;
 
 // ─── Shared UI colors ─────────────────────────────────────────────────────────
 
@@ -18,21 +21,6 @@ export type AssetId = "ev" | "heater" | "pv" | "battery" | "base_load" | (string
 // Moved to the shared UI source (`@lab/ui`) with NowLine; re-exported so the
 // controller components that already import it here keep working.
 export { COLOR_NOW } from "@lab/ui/types";
-
-/** Fallback color for unknown/unregistered asset IDs. */
-export const COLOR_ASSET_FALLBACK = "#888";
-
-// ─── Asset color palette (fixed per asset type) ───────────────────────────────
-
-export const ASSET_COLORS: Record<string, string> = {
-  ev: "#2196F3",
-  heater: "#FF5722",
-  pv: "#FFC107",
-  battery: "#9C27B0",
-  base_load: "#607D8B",
-  wm: "#FF9800",
-  dw: "#795548",
-};
 
 /**
  * Non-asset series colors — tariff/cost/CO2/grid semantics that appear in more than one
@@ -57,28 +45,6 @@ export const SERIES_COLORS: Record<string, string> = {
   export_capacity_limit: "#00838f",
 };
 
-/** Human-readable labels for known asset IDs. */
-export const ASSET_LABELS: Record<string, string> = {
-  ev: "EV",
-  heater: "Heater",
-  pv: "PV",
-  battery: "Battery",
-  base_load: "Base Load",
-  wm: "Washing Machine",
-  dw: "Dishwasher",
-};
-
-/**
- * Planning role per asset type.
- * "forecast" = physics-predicted, non-controllable (pv, base_load).
- * "planned"  = MILP-assigned, controllable (ev, battery, heater, shiftable loads).
- * Unknown assets default to "planned" at call site.
- */
-export const ASSET_PLANNING_ROLE: Record<string, "forecast" | "planned"> = {
-  pv: "forecast",
-  base_load: "forecast",
-};
-
 // ─── Summary (left section of each asset cell) ───────────────────────────────
 
 export type UserRequestSummary = {
@@ -89,8 +55,8 @@ export type UserRequestSummary = {
 export type AssetSummary = {
   assetId: AssetId;
   label: string;
-  /** The asset's declared type (`asset_type`); a shiftable load's is `shiftable_load` (W6). */
-  assetType: string;
+  /** The asset's declared kind (`asset_type`); undefined for an asset the roster does not hold. */
+  assetType: AssetKind | undefined;
   color: string;
   /** Signed kW — positive = import from grid, negative = export */
   powerKw: number;
