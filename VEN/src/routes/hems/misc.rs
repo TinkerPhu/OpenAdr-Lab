@@ -55,6 +55,11 @@ pub async fn put_plan_objective(
     StatusCode::NO_CONTENT
 }
 
+/// `/plan/objective`: PUT changes the objective, GET reads the setting.
+pub fn plan_objective_methods() -> axum::routing::MethodRouter<crate::app_ctx::AppCtx> {
+    axum::routing::put(put_plan_objective).get(get_plan_objective)
+}
+
 /// GET /plan/objective — the objective in force, who set it and when, the profile's objective
 /// and the objectives this VEN accepts (the Planner page and the Dashboard read it).
 pub async fn get_plan_objective(
