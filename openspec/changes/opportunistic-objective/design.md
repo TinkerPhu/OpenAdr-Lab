@@ -72,7 +72,7 @@ targets and shiftable loads carry a `mode`; only the MILP reads it today.
 | Max effort of an asset | `Asset::max_effort_setpoint` (import = `capability.max_import_kw`), on the snapshot as `cap_max_import_kw` | Start-now requests (D4) |
 | Request semantics | `UserRequestMode::{states_a_firm_deadline, charges_until_departure}` | Gains `non_planning_dispatch()` beside them |
 | Heater thermostat rule | `assets/heater_thermostat.rs` (cut-out at `temp_max_c`, latched off until `temp_max_c − thermostat_delta_c`; emergency at `temp_min_c`); per-tick `TickInputs::heater_temp_max_override` (snaps back to the profile value when `None`) | A start-now heater request regulates at its target through this rule (D4) |
-| Bare on/off thermostat | `Thermostat::thermostat_setpoint_kw` (`assets/heater_capabilities.rs`: full power below target, off at or above, no hysteresis) | **Not used** by this change: at a 1 s tick it would switch every tick around the target. R-140 (`TECHNICAL_DEBTS.md`) moves the sim's comfort-target inject onto the same ceiling override and deletes it; whichever lands second keeps one precedence: a sim inject beats a request target |
+| Bare on/off thermostat | `Thermostat::thermostat_setpoint_kw` (`assets/heater_capabilities.rs`: full power below target, off at or above, no hysteresis) | **Not used** by this change: at a 1 s tick it would switch every tick around the target. R-144 (`TECHNICAL_DEBTS.md`) moves the sim's comfort-target inject onto the same ceiling override and deletes it; whichever lands second keeps one precedence: a sim inject beats a request target |
 | EV target and plugging | `TickInputs::{ev_soc_target_override, ev_departure_time}`; `EvCharger::apply_usage_sim_tick` (plugging follows the EV's own usage schedule at `now`) | Session target injected under opportunistic dispatch (D4); the forecaster's slot `now` drives plugging (D6) |
 | Base setpoints | `dispatcher::build_setpoints`; the no-plan base in `build_tick_setpoints` (defaults only, no thermostat setpoints) | `build_setpoints` gains `follow_allocations`, `true` for every planning objective; the no-plan base is untouched (D0, D5) |
 | Limit pass | `limit::enforce_import_limit`, `hard_import_limit_kw`, `limit_target_kw` | Reused unchanged, live and in the forecast |
@@ -151,7 +151,7 @@ command, exactly as they start from the previous plan's command after any plan c
 dead-beat step and the release rule (R-88) bring them onto the new plan within a tick or two. This
 is today's plan-change behaviour, not a new one, so nothing is reset.
 
-**What changes in planning mode on purpose:** nothing in this change. R-140 (the sim's
+**What changes in planning mode on purpose:** nothing in this change. R-144 (the sim's
 comfort-target chatter) is a separate fix on its own branch.
 
 **Load added in planning mode:** the VEN publishes its objective and plan on the lab broker
