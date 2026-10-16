@@ -124,15 +124,38 @@ dispatch exactly as it bounds planned dispatch, including start-now requests.
 - **THEN** site import stays at or below the limit target and the limit pass reports the lever it
   used
 
-### Requirement: The no-plan window dispatches opportunistically
-Whenever the VEN has no plan slot covering the current tick (startup before the first plan, or
-an expired plan), it SHALL dispatch with the opportunistic pass, whatever the configured objective
-and whether or not deviation correction is enabled.
+### Requirement: Planning objectives behave exactly as before
+Under every objective other than `opportunistic`, the VEN SHALL decide every tick's setpoints and
+every plan exactly as it did before this capability existed, given the same inputs and state.
+This covers the plan-following tick, the no-plan window (startup and expired plans), the EV
+surplus overlay, deviation correction, the limit pass, DISPATCH_SETPOINT and comms-loss handling,
+the MILP model and the translated plan. No state the opportunistic objective writes SHALL be read
+by a planning objective's decisions.
 
-#### Scenario: Battery covers import before the first plan
-- **WHEN** the VEN has just started, has no plan yet, and the site imports 1 kW with a charged
-  battery
-- **THEN** the battery discharges to cover the import
+#### Scenario: Recorded planned ticks are unchanged
+- **WHEN** each recorded planned-tick scenario is replayed (plan slot present and absent, EV
+  overlay on and off, deviation correction on and off, an import limit, a DISPATCH_SETPOINT window,
+  comms loss)
+- **THEN** every asset's setpoint and every arbiter outcome field equal the recording made before
+  this change
+
+#### Scenario: No-plan window unchanged under a planning objective
+- **WHEN** a `min_cost` VEN has no plan yet and the site imports 1 kW with a charged battery
+- **THEN** the battery is commanded exactly what it was commanded before this change (0 kW), and
+  only the existing EV surplus overlay acts
+
+#### Scenario: Switching back leaves no opportunistic memory
+- **WHEN** a VEN ran opportunistic for an hour and is switched to `min_cost`
+- **THEN** the residual tracker, the deviation pass's leading lever and the limit pass's leading
+  lever hold nothing written by the opportunistic pass
+- **AND** from the adoption of the first `min_cost` plan on, the tick decides as a `min_cost` VEN
+  in the same physical state would
+
+#### Scenario: A failed solve after switching back still leaves opportunistic dispatch
+- **WHEN** a VEN is switched from opportunistic to `min_cost` and the first `min_cost` solve fails
+- **THEN** the failed plan replaces the opportunistic plan, and the VEN dispatches as a `min_cost`
+  VEN without a usable plan does today
+- **AND** it does not keep dispatching opportunistically under a `min_cost` objective
 
 ### Requirement: The leading opportunistic lever is visible
 The VEN SHALL expose, through its arbiter diagnostics and decision trace, that the opportunistic

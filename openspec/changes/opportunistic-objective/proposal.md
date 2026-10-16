@@ -22,9 +22,12 @@ the same instant — no day-long recordings, no confounded comparison.
 - **User requests keep their mode's meaning without look-ahead.** `ASAP` and `BY_DEADLINE`
   requests start now at full effort; `ASAP_FREE`, `BY_DEADLINE_FREE`, `OPPORTUNISTIC` and
   `MAX_COST` requests take surplus only. Declared on `UserRequestMode`, beside the variants.
-- **The no-plan startup window uses the same pass.** The EV-only fallback in
-  `arbiter::reconcile` is replaced by the opportunistic pass, so a VEN without a plan behaves
-  like a non-planning HEMS instead of leaving battery and heater idle.
+- **Planning objectives are untouched.** Under every other objective the VEN decides every tick
+  and every plan exactly as before: the opportunistic code sits behind two guards on the
+  objective, the planning no-plan window and the EV surplus overlay are not changed, and a
+  recorded tick golden, the plan golden and the gate golden must hold unchanged. Switching back
+  from opportunistic always adopts the next plan, even a failed one, so a VEN never keeps
+  dispatching opportunistically under a planning objective.
 - **Opportunistic forecast.** Under the objective the planning cycle produces a normal `Plan` by
   stepping a clone of the simulator forward at the plan step with the opportunistic pass deciding
   each step — no MILP. `/plan`, `/forecast`, `/history/plans`, envelopes, the `USAGE_FORECAST`
@@ -48,7 +51,7 @@ the same instant — no day-long recordings, no confounded comparison.
   fleet-monitor phase 0) for a per-VEN drill-down on the Fleet page.
 - **Objective source visible on the VEN.** The VEN UI shows whether the active objective comes
   from the profile, the VEN UI or the fleet command.
-- **Removed:** the EV-only no-plan fallback and `RequestResolvable::surplus_charge_kw`. (The
+- **Removed:** `RequestResolvable::surplus_charge_kw` (test-only). (The
   former master plan `docs/plans/opportunistic-objective-fleet-forecast.md` is replaced by this
   change.)
 
@@ -57,7 +60,7 @@ the same instant — no day-long recordings, no confounded comparison.
 ### New Capabilities
 - `opportunistic-dispatch`: how a VEN dispatches without look-ahead — the opportunistic objective,
   the surplus and import directions, the surplus-claim order, request-mode behaviour, and the
-  no-plan startup window.
+  guarantee that planning objectives are left exactly as they are.
 - `opportunistic-forecast`: the forecast a VEN publishes under the opportunistic objective, its
   shape, its adoption, and its agreement with live dispatch.
 - `fleet-objective-control`: switching VEN objectives from the VTN UI through the lab broker,

@@ -33,7 +33,8 @@ it.
 
 #### Scenario: Switch the whole fleet
 - **WHEN** the user picks "opportunistic" for all VENs on the Fleet page
-- **THEN** the BFF publishes one retained command per known VEN
+- **THEN** the BFF publishes one retained command per known VEN, one VEN at a time with a
+  configurable spacing, so the VENs do not all replan at the same moment
 - **AND** each VEN applies it, replans, and reports source `fleet`
 
 #### Scenario: Unknown objective rejected
@@ -90,13 +91,20 @@ per VEN and for the fleet.
 ### Requirement: The fleet requests every VEN's forecast over OpenADR
 The standing fleet-monitoring event SHALL request a `USAGE_FORECAST` report (`historical: false`,
 `readingType: FORECAST`, `frequency: 0`), declared in the program's report payload descriptors
-with its unit. A VEN given `frequency: 0` for a forecast report SHALL submit one whenever it
-adopts a plan, carrying one interval per plan slot at the plan's own slot boundaries.
+with its unit. A VEN given `frequency: 0` for a forecast report SHALL submit one when it adopts
+the first plan after an objective change, and otherwise on adoption at most once per 15 minutes,
+carrying one interval per plan slot at the plan's own slot boundaries. Reporting SHALL never
+delay or block a planning cycle.
 
 #### Scenario: Forecast report on adoption
-- **WHEN** a VEN enrolled in the fleet-monitoring program adopts a new plan
+- **WHEN** a VEN enrolled in the fleet-monitoring program adopts the first plan after its
+  objective changed
 - **THEN** it submits a `USAGE_FORECAST` report whose intervals cover the plan's slots
 - **AND** the report declares its unit
+
+#### Scenario: Routine replans are throttled
+- **WHEN** a VEN adopts periodic plans every 5 minutes without an objective change
+- **THEN** it submits at most one forecast report per 15 minutes
 
 #### Scenario: Ad hoc frequency on a measurement report
 - **WHEN** a measurement report (`historical: true`) is requested with `frequency: 0`
@@ -126,7 +134,9 @@ planned under (from each VEN's reported objective).
 
 ### Requirement: Each VEN's adopted plan is inspectable from the VTN UI
 Every VEN SHALL publish its adopted plan, retained, under `openadr-lab/fleet/<venName>/plan` on
-every adoption, in the shape `GET /plan` serves. The BFF SHALL keep the latest plan per VEN and
+every adoption, in the shape `GET /plan` serves. Publishing on the lab broker (plan, objective)
+SHALL never wait on the broker: an unreachable broker drops the message with a log line and
+SHALL NOT delay a planning cycle or a tick. The BFF SHALL keep the latest plan per VEN and
 serve it, and the VTN UI Fleet page SHALL show a VEN's planned net power and per-asset
 allocations when its row is expanded.
 

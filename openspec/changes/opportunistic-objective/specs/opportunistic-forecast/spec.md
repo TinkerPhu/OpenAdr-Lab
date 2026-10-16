@@ -67,7 +67,10 @@ VEN UI SHALL show that status wherever it shows a plan's solve status.
 ### Requirement: An opportunistic plan always replaces the plan in force
 A plan made under the opportunistic objective SHALL be adopted on every trigger, including
 periodic replans, since there is no cost improvement to gate it on. Switching from or to the
-opportunistic objective SHALL adopt the new plan immediately.
+opportunistic objective SHALL adopt the new plan immediately — when switching to a planning
+objective, also if its first solve fails, so the VEN never keeps dispatching opportunistically
+under a planning objective. Between two plans of planning objectives the adoption gate SHALL
+decide exactly as before.
 
 #### Scenario: Periodic replan
 - **WHEN** a periodic planning cycle runs under the opportunistic objective
@@ -75,5 +78,9 @@ opportunistic objective SHALL adopt the new plan immediately.
 
 #### Scenario: Switching back to a planning objective
 - **WHEN** the objective changes from opportunistic to `min_cost`
-- **THEN** the first `min_cost` plan that solves is adopted, and dispatch follows its allocations
-  again
+- **THEN** the first `min_cost` plan is adopted whether or not it solved, and dispatch follows
+  the planning rules again
+
+#### Scenario: Gate unchanged between planning plans
+- **WHEN** a periodic `min_cost` plan competes with a `min_cost` plan in force
+- **THEN** the gate's decision equals its decision before this change for the same pair

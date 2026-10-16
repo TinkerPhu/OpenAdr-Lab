@@ -11,6 +11,20 @@ free-memory check, then `DOCKER_HOST=Node2 bash run_all_tests.sh --rust` with th
 and the host checked out on the branch (`git log -1` verified). "BDD green" means
 `python scripts/audit_step_definitions.py` locally, then `--e2e` on Node2 the same way.
 
+## 0. Invariance net (before any production edit)
+
+- [ ] 0.1 Tick golden: a test that replays a fixed set of planned-tick scenarios through
+      `build_tick_setpoints` and records every asset setpoint and every `ArbiterOutcome` field,
+      with an `UPDATE_TICK_GOLDEN=1` writer. Scenarios: plan slot present / absent / expired; EV
+      overlay on / off; deviation correction on / off; an import limit with each switching lever;
+      a DISPATCH_SETPOINT window; comms loss; an alert window; heater `heater_setpoint_c` inject.
+      Record on unmodified code; it must pass unchanged after every later group (D0).
+- [ ] 0.2 Frozen copy of today's `rank_levers` in the test module, and a randomized test (fixed
+      seed, 10 000 candidate sets incl. equal costs and an incumbent) that the `Cost` basis
+      returns the same order.
+- [ ] 0.3 Gate golden: today's `evaluate_acceptance_gate` decisions over a table of plan pairs
+      (all triggers, solved/failed combinations, decay, switch surcharge), recorded before 4.2.
+
 ## 1. Declarations (no behaviour change)
 
 - [ ] 1.1 `PlannerObjective::Opportunistic` (wire `opportunistic`) with `dispatches_from_plan()`
@@ -39,9 +53,10 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       rank; existing ranking tests unchanged under `Cost`.
 - [ ] 2.2 Generic `LEVER_ABSORB` / `LEVER_DISCHARGE` (capacity and apply from `AssetSnapshot`
       only, D2), dispatched by data in `apply_ranked_levers`; `apply_ev_lever_opportunistic`
-      becomes the EV case of `LEVER_ABSORB` and `apply_surplus_ev_overlay` calls it.
       `OPPORTUNISTIC_POLICY` and `arbiter::opportunistic_step(tick, base) -> ArbiterOutcome` (pass
-      + limit pass), memoryless from the base setpoints. Tests (one per spec scenario of "Surplus
+      + limit pass), memoryless from the base setpoints, with its own incumbent fields; its
+      outcome carries no `displaced_kw_by_asset`. `apply_ev_lever_opportunistic` and
+      `apply_surplus_ev_overlay` are not touched (D0). Tests (one per spec scenario of "Surplus
       is absorbed…" and "Import is covered…"): scarce surplus in order, ample surplus fills all,
       full asset passes on, night base load covered, never exports, never charges from grid,
       empty battery leaves import, balanced site moves nothing, a lagging EV's excess goes to the
@@ -59,21 +74,26 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 
 ## 3. Live dispatch
 
-- [ ] 3.1 `dispatcher::build_setpoints(.., follow_allocations)`; the no-plan branch in
-      `build_tick_setpoints` calls it with `false`. Test: forecast allocations ignored when
-      `false`; existing build_setpoints tests unchanged with `true`.
-- [ ] 3.2 `build_tick_setpoints` picks `opportunistic_step` when there is no plan slot or
-      `!dispatches_from_plan()`, independent of `deviation_arbiter_enabled`; deletes the EV-only
-      early return in `reconcile`. Collect `active_requests` in `tasks/sim_tick` from
+- [ ] 3.1 `dispatcher::build_setpoints(.., follow_allocations)`; every planning call passes `true`,
+      only the opportunistic arm passes `false`; the planning no-plan base is untouched. Test:
+      forecast allocations ignored when `false`; existing tests unchanged; tick golden holds.
+- [ ] 3.2 `build_tick_setpoints` gains one arm, taken only when the adopted plan's objective has
+      `!dispatches_from_plan()`, that calls `opportunistic_step`, independent of
+      `deviation_arbiter_enabled`. `reconcile` and the no-plan path stay as they are. Inside that
+      arm only, collect `active_requests` in `tasks/sim_tick` from
       `current_ev_session`, the active heater target and active shiftable loads. Under
       opportunistic dispatch only, and only when no sim inject sets them: the EV session target goes
       to `ev_soc_target_override`, `min(target_temp_c, temp_max_c)` of a start-now heater request
       to `heater_temp_max_override` (`tasks/sim_tick/tick.rs`). Tests: start-now heater cuts out
       at the request target, not at `temp_max_c`; it stays off until `target − thermostat_delta_c`
       and then reheats (no switching every tick over 600 simulated ticks); planned objectives
-      unchanged; no-plan
-      startup covers import from the battery; opportunistic plan with a 3 kW battery allocation
-      commands 0 kW on a balanced site; toggle off → EV takes no surplus without a request.
+      unchanged; opportunistic plan with a 3 kW battery allocation commands 0 kW on a balanced
+      site; toggle off → EV takes no surplus without a request; a planning tick reads no request
+      state. Tick golden holds.
+- [ ] 3.4 Switch-back test: run the opportunistic arm for 3 600 ticks, switch to a `min_cost`
+      plan; assert the residual tracker, `arbiter_active_lever` and `limit_active_lever` hold
+      nothing the opportunistic pass wrote, and that the next tick's setpoints equal those of a
+      `min_cost` VEN that never ran opportunistic, given the same asset states and last commands.
 - [ ] 3.3 `scripts/audit_file_sizes.py` and `scripts/audit_ven_architecture.py` pass; split
       `arbiter.rs` if it crosses 500 production lines (opportunistic pieces into
       `arbiter/opportunistic.rs`).
@@ -83,9 +103,10 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 - [ ] 4.1 `tasks/planning/cycle.rs`: under `!dispatches_from_plan()` skip the solve and adopt an
       empty-slot plan with `SolveStatus::Simulated` and `OpportunisticNoForecast` (removed again
       in 7.4).
-- [ ] 4.2 `evaluate_acceptance_gate`: a non-planning objective's plan always adopts. Tests:
-      periodic replan adopts despite higher cost; switching back to `min_cost` adopts the first
-      solved plan.
+- [ ] 4.2 `evaluate_acceptance_gate`: one leading rule (D7) — adopt when `dispatches_from_plan()`
+      differs between the two plans or the new plan is opportunistic. Tests: periodic
+      opportunistic replan adopts despite higher cost; switching back adopts the first `min_cost`
+      plan even when it failed; gate golden (0.3) unchanged for every planning pair.
 
 ## 5. Objective setting and source
 
@@ -100,17 +121,22 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 ## 6. Fleet channel — VEN side
 
 - [ ] 6.1 Publish the `objective` leaf (retained, QoS 1) on connect and on every change, body =
-      `GET /plan/objective`. Unit test on the topic and body.
+      `GET /plan/objective`, with `try_publish` from a spawned task (D10). Unit tests: topic and
+      body; with a full request queue the caller returns at once and logs the drop.
 - [ ] 6.2 Subscribe to `<topic_root>/command/objective` after every ConnAck; forward payloads over
       an mpsc channel to a `tasks/` consumer calling `set_objective(.., Fleet, ..)`. The consumer
       ignores a command whose `requested_at` it already applied (reconnect redelivery); an empty
       payload reverts to the profile objective only while the source is `Fleet`; malformed → warn
       and keep. Unit tests on the consumer's decision function: apply, redelivery ignored, clear
       while fleet-sourced, clear after a local change ignored, malformed.
-- [ ] 6.3 Publish the adopted plan on the `plan` leaf (retained, QoS 1) on every adoption.
+- [ ] 6.3 Publish the adopted plan on the `plan` leaf (retained, QoS 1) on every adoption, same
+      non-blocking path as 6.1; serialization happens in the spawned task, not in the cycle.
 - [ ] 6.4 `report_timing`: `frequency: 0` = VEN's choice. Forecast obligations are re-armed as due
-      on every adoption; measurement obligations use `DEFAULT_REPORT_CADENCE_S`, logged. Tests in
-      `openadr_interface.rs` and `services/obligation.rs`.
+      on the first adoption after an objective change, otherwise at most once per 15 minutes,
+      from a spawned task after the plan is in force; measurement obligations use
+      `DEFAULT_REPORT_CADENCE_S`, logged. Tests in `openadr_interface.rs` and
+      `services/obligation.rs`, including: other `frequency` values unchanged; throttle; immediate
+      after an objective change.
 - [ ] 6.5 Move `energy_kwh` and a new `mean_power_kw` to a new `lab_core::units`;
       `VEN/src/entities/units.rs` re-exports; architecture audit still green. Unit tests in
       lab-core (round trip).
@@ -142,9 +168,10 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 - [ ] 8.2 Publish handle on the BFF MQTT client; `PUT /api/fleet/vens/:ven/objective` and `PUT
       /api/fleet/objective` (`{"objective": name | null}`; the published body adds
       `requested_at`), validated against each VEN's
-      `available_objectives`, published retained QoS 1. Route tests: 400 on unknown value names
-      VEN and value; null publishes an empty retained message; fleet-wide publishes one per known
-      VEN.
+      `available_objectives`, published retained QoS 1. A fleet-wide switch publishes one VEN at a
+      time with a configurable spacing (default 10 s) so solves do not pile up. Route tests: 400
+      on unknown value names VEN and value; null publishes an empty retained message; fleet-wide
+      publishes one per known VEN, spaced.
 - [ ] 8.3 `GET /api/fleet/vens/:ven/plan` from the ingested `plan` leaf.
 - [ ] 8.4 `scripts/seed_vtn.py`: `USAGE_FORECAST` descriptor on the fleet-monitoring event and
       `PAYLOAD_CONTRACT["USAGE_FORECAST"] = {"units": "KWH"}`; `docs/reference/WIRE_PROFILE.md`
@@ -162,8 +189,9 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 
 - [ ] 9.1 BDD `tests/features/ven_opportunistic_objective.feature`: switch objective via `PUT
       /plan/objective`; surplus absorbed in order; battery covers import, never exports; BY_DEADLINE
-      EV starts now; OPPORTUNISTIC EV idle without surplus; import limit bounds start-now; no-plan
-      startup. Prefer `{x:g}` numeric steps; run `audit_step_definitions.py`.
+      EV starts now; OPPORTUNISTIC EV idle without surplus; import limit bounds start-now; switch
+      back to `min_cost` and the plan's allocations drive the assets again; a `min_cost` VEN's
+      no-plan startup is unchanged (battery idle). Prefer `{x:g}` numeric steps; run `audit_step_definitions.py`.
 - [ ] 9.2 BDD `tests/features/fleet_objective_control.feature` (test stack has `mosquitto`,
       `FLEET_MQTT_HOST`, `test-bff`): switch one VEN and the fleet through the BFF; VEN reports
       source `fleet`; restart restores it; clearing returns to `profile`; forecast report arrives
@@ -179,7 +207,11 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 - [ ] 9.4 `docs/reference/TECHNICAL_DEBTS.md` (Severity/Kind/Cost/Why-open each): lab-mqtt per-VEN
       ACL now also guards objective commands (extend the existing row or file one); per-kind
       `battery_lever`/`ev_lever` are instances of the generic lever shape (D2), first step: move
-      the battery's capacity calculation onto `LEVER_DISCHARGE`/`LEVER_ABSORB`.
+      the battery's capacity calculation onto `LEVER_DISCHARGE`/`LEVER_ABSORB`;
+      `apply_ev_lever_opportunistic` and `LEVER_ABSORB` answer "how much surplus does the EV take"
+      under different rules, first step: an equivalence test that shows where they differ; the
+      existing fleet telemetry publish awaits rumqttc's bounded queue and may stall the tick while
+      the broker is down, needs-evidence (a test with an unreachable broker).
 - [ ] 9.5 Remove this change's pointer from `docs/plans/strategic_roadmap.md`, delete this change
       directory once everything above is waved into the docs. Journal entry in
       `docs/history/project_journal.md`; key learnings if any.
