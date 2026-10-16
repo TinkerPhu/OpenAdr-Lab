@@ -145,7 +145,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 
 ## 7. Opportunistic forecast
 
-- [ ] 7.1 Extract the per-slot skeleton (tariffs, caps, baseline, PV) shared by `fallback_plan`
+- [x] 7.1 Extract the per-slot skeleton (tariffs, caps, baseline, PV) shared by `fallback_plan`
       and `translate_to_plan` into one function; both call it. `plans_golden.rs` holds.
 - [ ] 7.2 `simulator/opportunistic_forecast.rs` (D6): per slot build snapshot, tick, base
       setpoints, call `opportunistic_step`, then `SimState::tick` with slot-mean PV and base load
