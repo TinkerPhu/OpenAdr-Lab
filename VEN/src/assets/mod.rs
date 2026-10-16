@@ -219,16 +219,6 @@ mod phase2a_battery_tests {
     }
 
     #[test]
-    fn surplus_charge_kw_always_none() {
-        let (boxed, state) = boxed_and_state(0.5);
-        let result = boxed
-            .as_request_resolvable()
-            .expect("Battery must implement RequestResolvable")
-            .surplus_charge_kw(&state, 2.0);
-        assert_eq!(result, None, "Battery never absorbs surplus");
-    }
-
-    #[test]
     fn build_milp_context_builds_the_battery_from_its_live_soc() {
         let (boxed, state) = boxed_and_state(0.5);
         let now = Utc::now();
@@ -362,19 +352,6 @@ mod phase2a_ev_tests {
             .unwrap()
             .available_storage_kwh(&unplugged);
         assert_eq!(result, None, "unplugged EV must report no storage");
-    }
-
-    #[test]
-    fn surplus_charge_kw_positive_when_plugged_and_below_target() {
-        let (boxed, state) = boxed_and_state();
-        let result = boxed
-            .as_request_resolvable()
-            .expect("EvCharger must implement RequestResolvable")
-            .surplus_charge_kw(&state, 3.0);
-        assert!(
-            result.is_some(),
-            "EV below soc_target and plugged must absorb surplus"
-        );
     }
 
     #[test]

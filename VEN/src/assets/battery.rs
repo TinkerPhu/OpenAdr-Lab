@@ -334,13 +334,6 @@ impl RequestResolvable for Battery {
             (1.0 - s.soc_frac).max(0.0) * self.capacity_kwh,
         ))
     }
-
-    /// Battery cannot opportunistically absorb surplus — matches
-    /// `AssetConfig::surplus_charge_kw`'s existing `_ => None` fallback for
-    /// every non-EV asset kind today.
-    fn surplus_charge_kw(&self, _state: &AssetState, _surplus_kw: f64) -> Option<f64> {
-        None
-    }
 }
 
 #[cfg(test)]

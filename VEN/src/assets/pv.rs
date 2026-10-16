@@ -412,7 +412,7 @@ impl Asset for PvInverter {
     // PV implements none of D4's three capability traits; the trait's own
     // None defaults apply, matching AssetConfig's existing `_ => None`
     // fallback for PV in build_milp_context/resolve_request_target/
-    // available_storage_kwh/surplus_charge_kw/thermostat_setpoint_kw/
+    // available_storage_kwh/thermostat_setpoint_kw/
     // plan_trajectory.
 
     fn as_tick_overridable(&mut self) -> Option<&mut dyn TickOverridable> {

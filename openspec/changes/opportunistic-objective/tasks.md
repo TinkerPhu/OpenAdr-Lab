@@ -47,7 +47,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       or at target; heater at `temp_max_c` and while latched; shiftable load finished or past its
       window; EV below its minimum rate takes nothing. Fix the asset, not the lever, where one
       does not.
-- [ ] 1.5 Delete `RequestResolvable::surplus_charge_kw` and its tests (test-only; D2 makes the
+- [x] 1.5 Delete `RequestResolvable::surplus_charge_kw` and its tests (test-only; D2 makes the
       snapshot fields the one answer).
 
 ## 2. The opportunistic pass (controller, unit level)
@@ -96,7 +96,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       plan; assert the residual tracker, `arbiter_active_lever` and `limit_active_lever` hold
       nothing the opportunistic pass wrote, and that the next tick's setpoints equal those of a
       `min_cost` VEN that never ran opportunistic, given the same asset states and last commands.
-- [ ] 3.3 `scripts/audit_file_sizes.py` and `scripts/audit_ven_architecture.py` pass; split
+- [x] 3.3 `scripts/audit_file_sizes.py` and `scripts/audit_ven_architecture.py` pass; split
       `arbiter.rs` if it crosses 500 production lines (opportunistic pieces into
       `arbiter/opportunistic.rs`).
 
