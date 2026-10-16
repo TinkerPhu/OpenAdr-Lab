@@ -151,6 +151,47 @@ write_result() { # $1 = ticket
     } > "$TICKET_DIR/result.md.tmp" && mv "$TICKET_DIR/result.md.tmp" "$TICKET_DIR/result.md"
 }
 
+# deploy_ticket — KIND=deploy: ship what origin/main holds (it was tested when it merged); the
+# ticket's own SHA only names what the session believed it was deploying.
+deploy_ticket() { # [--rollback] <target> <stack> <service>...
+    cd "$CI_REPO" || return 1
+    git reset -q --hard && git clean -fdq && git fetch -q origin --prune || return 1
+    git checkout -q --detach origin/main && git submodule update -q --init --recursive || return 1
+    TESTED_SHA="$(git rev-parse HEAD)"
+    run_step "deploy ${*}" bash scripts/ci/deploy.sh "$@" >>"$TICKET_DIR/full.log" 2>&1
+}
+
+# test_and_merge — rebase, quick tier, full tier, merge: sets VERDICT (and NOTE).
+test_and_merge() {
+    local rc
+    checkout_rebased "$SHA"; rc=$?
+    if [ $rc -eq 3 ]; then VERDICT=conflict
+    elif [ $rc -ne 0 ]; then VERDICT=error
+    else
+        TESTED_SHA="$(git -C "$CI_REPO" rev-parse HEAD)"
+        if git -C "$CI_REPO" diff --name-only "origin/main..$TESTED_SHA" | board_docs_only; then DOCS_ONLY=yes; else DOCS_ONLY=no; fi
+        if ! quick_tier "$DOCS_ONLY"; then VERDICT=red
+        elif [ "$DOCS_ONLY" = no ] && [[ ",$TIERS," == *,full,* ]] && ! full_tier; then VERDICT=red
+        elif [ "$KIND" != merge ] || { [ "$DOCS_ONLY" = no ] && [[ ",$TIERS," != *,full,* ]]; }; then
+            VERDICT=green; NOTE="tested, not merged (kind $KIND, tiers $TIERS)"
+        else
+            push_main "$TESTED_SHA"; rc=$?
+            if [ $rc -eq 0 ]; then VERDICT=merged
+            elif [ $rc -eq 9 ]; then VERDICT=requeue; NOTE="origin/main moved while testing"
+            else VERDICT=error; NOTE="push to origin/main failed (exit $rc)"; fi
+        fi
+    fi
+}
+
+deploy_flow() { # $1 = ticket
+    local rollback=()
+    [ "$(board_get "$1" ROLLBACK)" = yes ] && rollback=(--rollback)
+    # SERVICES is a space-separated list of names; deploy.sh checks every one against its allowlist.
+    # shellcheck disable=SC2046
+    if deploy_ticket "${rollback[@]}" "$(board_get "$1" TARGET)" "$(board_get "$1" STACK)" $(board_get "$1" SERVICES)
+    then VERDICT=deployed; else VERDICT=red; fi
+}
+
 process_ticket() {
     local t="$1" attempt rc
     TICKET_DIR="$BOARD_DIR/$t"; STEPS=(); FAILED_STEP=""; VERDICT=""; NOTE=""; TESTED_SHA=""; DOCS_ONLY=""
@@ -165,23 +206,7 @@ process_ticket() {
         if ! acquire_lock "$t"; then
             VERDICT=requeue; NOTE="host lock busy"
         else
-            checkout_rebased "$SHA"; rc=$?
-            if [ $rc -eq 3 ]; then VERDICT=conflict
-            elif [ $rc -ne 0 ]; then VERDICT=error
-            else
-                TESTED_SHA="$(git -C "$CI_REPO" rev-parse HEAD)"
-                if git -C "$CI_REPO" diff --name-only "origin/main..$TESTED_SHA" | board_docs_only; then DOCS_ONLY=yes; else DOCS_ONLY=no; fi
-                if ! quick_tier "$DOCS_ONLY"; then VERDICT=red
-                elif [ "$DOCS_ONLY" = no ] && [[ ",$TIERS," == *,full,* ]] && ! full_tier; then VERDICT=red
-                elif [ "$KIND" != merge ] || { [ "$DOCS_ONLY" = no ] && [[ ",$TIERS," != *,full,* ]]; }; then
-                    VERDICT=green; NOTE="tested, not merged (kind $KIND, tiers $TIERS)"
-                else
-                    push_main "$TESTED_SHA"; rc=$?
-                    if [ $rc -eq 0 ]; then VERDICT=merged
-                    elif [ $rc -eq 9 ]; then VERDICT=requeue; NOTE="origin/main moved while testing"
-                    else VERDICT=error; NOTE="push to origin/main failed (exit $rc)"; fi
-                fi
-            fi
+            if [ "$KIND" = deploy ]; then deploy_flow "$t"; else test_and_merge; fi
             tidy_host
             release_lock
         fi

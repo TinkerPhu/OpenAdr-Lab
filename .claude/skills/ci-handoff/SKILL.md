@@ -43,6 +43,12 @@ Your first message is the runner's `result.md`.
 - **error**: read `result.md`; usually the commit was not pushed or the key was refused.
 - **green**: tested but not merged (check-only hand-off): report it.
 
+## Deploying
+
+Only when the user asks: `bash scripts/ci/ci-handoff.sh --deploy <Node1|Node2> <VEN|VTN|VEN/scale_out/node2> "<services>"`
+(`--rollback` returns to the previous images). It ships `origin/main`, so the change must have merged
+first. The result status is `deployed`; verify the service is healthy and tell the user.
+
 ## Notes
 
 - Start no build or test run that is not needed (docs/guidelines/TESTING.md, "Rules for runs"):

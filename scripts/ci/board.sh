@@ -8,7 +8,7 @@
 #
 #   <BOARD_DIR>/<utc yyyymmddTHHMMZ>_<session 8>_<branch slug>/
 #       request.env   KEY=value lines written by the session (never sourced, only read)
-#       status        queued | running | merged | green | red | conflict | stale | error
+#       status        queued | running | merged | deployed | green | red | conflict | stale | error
 #                     (green = tested but not merged: a check-only ticket)
 #       result.md     the runner's summary
 #       run.log       the runner's full log
@@ -24,7 +24,7 @@ set -uo pipefail
 export LC_ALL=C
 
 BOARD_DIR="${BOARD_DIR:-/srv/ci/board}"
-BOARD_FINISHED="merged green red conflict stale error"
+BOARD_FINISHED="merged deployed green red conflict stale error"
 
 # ── Naming ───────────────────────────────────────────────────────────────────
 

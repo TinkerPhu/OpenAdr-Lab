@@ -308,7 +308,8 @@ tested by the previous version.
 - Pause: `sudo systemctl stop ci-runner.timer` (a running ticket finishes). Is it alive:
   `systemctl is-active ci-runner.timer`; timer log: `journalctl -u ci-runner`.
 - Push access: `/srv/ci/deploy_key` is a write-enabled deploy key for this repository only.
-- Tests of the mechanism: `scripts/ci/test_board.sh`, `scripts/ci/test_handoff.sh`,
+- Tests of the mechanism: `scripts/ci/test_board.sh`, `scripts/ci/test_handoff.sh`, `scripts/ci/test_deploy.sh`,
+  `tests/test_retry_failed.sh`,
   `scripts/test_lease_lock.sh`.
 
 Flaky versus red: `tests/entrypoint.sh` re-runs each failed scenario once on its own
@@ -316,8 +317,22 @@ Flaky versus red: `tests/entrypoint.sh` re-runs each failed scenario once on its
 retry does not fail the pass; it is named in a `FLAKY_SCENARIO:` log line and the runner lists it
 under "Flaky" in `result.md`, and the ticket still merges. One that fails again is red.
 
-Not built yet: deploying a tested build to Node1/Node2 from the runner
-(`docs/plans/ci-node3-handoff.md`).
+### Deploying from the runner
+
+Only after the user said so, a session hands off a deploy instead of a branch:
+
+```bash
+bash scripts/ci/ci-handoff.sh --deploy Node1 VEN "ven-2 ven-3"     # add --rollback to go back
+```
+
+The runner builds release images of `origin/main` (what E2E tested was the `ci` profile) on Node3,
+ships them to the target (same CPU architecture on all three hosts), takes the target's lock, keeps
+the running image as `:previous`, and switches the services over with `up -d --no-build`
+(`scripts/ci/deploy.sh`; allowlisted targets Node1/Node2 and stacks VEN, VTN,
+VEN/scale_out/node2; pinned by `scripts/ci/test_deploy.sh`). Status `deployed` or `red`. Needs an SSH key
+of the runner user on Node3 (`~/.ssh`) that Node1 and Node2 accept. This
+replaces the scp-based `deploy-node1` skill for tested builds; that skill stays for trying
+uncommitted edits.
 
 ---
 

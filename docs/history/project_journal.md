@@ -15912,7 +15912,7 @@ then `run_all_tests.sh --rust --e2e --resilience`, and fast-forwards `main` when
 green. `ci-next.sh` lists finished tickets and resumes the session that wrote one with the result
 as its first message. Docs-only changes take an audits-only path. The mechanism is documented in
 `docs/guidelines/TESTING.md` ("CI on Node3"), the skill `ci-handoff` and a CLAUDE.md rule; the
-remaining parts (deploy, flaky retry) are in `docs/plans/ci-node3-handoff.md`.
+remaining parts (deploy, flaky retry) are built in the entry below.
 
 **Prerequisites done with it.** `run_all_tests.sh` runs on the docker host itself (the `DOCKER_HOST`
 clash, the lock, `LOCK_HELD_BY_CALLER`); `docker_host_lock.sh` takes the lock without ssh for
@@ -15935,3 +15935,23 @@ for the step audit (now a venv), the BFF audit failed on the accepted `rsa` advi
 `VTN/bff/.cargo/audit.toml`, the config `cargo audit` reads), and a red result's excerpt came out
 empty (`tail` over a missing file). The first cargo run on the harness's new cache volumes was cold
 (28 min clippy, 35 min test); a later ticket compiles only what changed.
+
+### Node3 CI: flaky retry and deploy from the runner (2026-10-16)
+
+**What.** `tests/entrypoint.sh` records each pass's failed scenarios with behave's `rerun`
+formatter and re-runs every one once on its own (`tests/retry_failed.sh`). A pass whose failures all
+pass on the retry is not failed; each is printed as `FLAKY_SCENARIO:` and the runner lists them under
+"Flaky" in `result.md`. A ticket with `KIND=deploy` (`ci-handoff.sh --deploy <Node1|Node2> <stack>
+"<services>" [--rollback]`) makes the runner build release images of `origin/main` on Node3, ship them
+(`docker save | ssh docker load`), keep the old image as `:previous` and switch the services over
+(`scripts/ci/deploy.sh`). Status `deployed`.
+
+**Why.** A single flaky scenario cost a full 54-minute red run; building on Node1/Node2 slowed the
+live stack, and Node1/Node2/Node3 are the same architecture, so one build serves all.
+
+**Decisions with the user.** Phone push (ntfy) is not wanted and was removed: the CI serves laptop
+sessions. A flaky scenario does not block the merge, it is reported. Order: cheapest first.
+
+**Issues.** deploy.sh takes only allowlisted target, stack and service names (`test_deploy.sh`
+pins it); it needs an SSH key from Node3 to Node1/Node2, which is the user's to place.
+
