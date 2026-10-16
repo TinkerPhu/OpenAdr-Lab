@@ -21,7 +21,8 @@ If it is not, say so and merge the old way (manual gate, own docker host run).
 2. Everything committed, **including the project journal and KEY_LEARNINGS entries** and any
    `Debt-deferred:` line the debt gate needs: they are tested and merged together with the code.
 3. `git push -f origin HEAD:<branch>`.
-4. `bash scripts/ci/ci-handoff.sh` (`--kind check` to test without merging).
+4. `bash scripts/ci/ci-handoff.sh` (`--kind check` only when the user wants Node3's verdict without a merge: experiments and A/B runs
+   belong on Node2 by hand, because Node3 is one lane and a full run holds it for an hour).
 5. Tell the user the ticket name. Do not wait, poll or start the suite yourself. The user
    resumes you with `scripts/ci/ci-next.sh` when the result is there (a full run takes about an hour,
    queued tickets longer).

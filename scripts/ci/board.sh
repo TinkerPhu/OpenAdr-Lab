@@ -124,15 +124,17 @@ board_create() {
 
 # ── Classifying a change ─────────────────────────────────────────────────────
 
-# board_docs_only — reads changed paths on stdin; succeeds when none is code. Docs,
-# wiki and openspec directories and top-level markdown files are not code; a .md file
-# inside a code directory still is (it may be embedded or read by a build).
+# board_docs_only — reads changed paths on stdin; succeeds when none can change what the Rust or
+# E2E suites see. Docs, wiki and openspec directories, top-level markdown files, the agent config
+# (.claude/) and the CI mechanism (scripts/ci/, pinned by its own test_*.sh, which the audits-only
+# path runs) are not code; a .md file inside a code directory still is (it may be embedded or
+# read by a build).
 board_docs_only() {
     local p
     while IFS= read -r p; do
         [ -z "$p" ] && continue
         case "$p" in
-            docs/*|wiki/*|openspec/*) ;;
+            docs/*|wiki/*|openspec/*|.claude/*|scripts/ci/*) ;;
             */*) return 1 ;;
             *.md) ;;
             *) return 1 ;;

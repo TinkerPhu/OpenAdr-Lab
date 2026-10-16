@@ -286,8 +286,11 @@ Every build and test run costs minutes to hours on shared hardware, so start non
 - Look for warm caches and volumes before any build that would start cold. A new compose project
   or a renamed volume starts empty: the first runner ticket compiled every dependency twice for
   that reason.
-- A change the suites cannot see (docs, wiki, openspec, scripts no test runs) needs no Rust or E2E
-  run; the runner's docs-only path takes it in minutes.
+- A change the suites cannot see (docs, wiki, openspec, `.claude/`, `scripts/ci/`) needs no Rust or
+  E2E run; the runner takes it in minutes (audits plus the CI mechanism tests,
+  `board_docs_only` in `scripts/ci/board.sh`).
+- The board is one lane: a run that will not merge (A/B, experiment) goes to Node2 by hand, not
+  onto the board (`test-host-preference`).
 - While working run the narrowest test that proves the change; the full gate belongs to the runner.
 - A run lost to the environment (killed shell, restarted WSL, a lock held elsewhere) is understood
   before it is started again.
