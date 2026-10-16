@@ -8,9 +8,11 @@
 //!
 //! `probe!` marks the points where a model is complete. Outside tests it expands to nothing; inside
 //! tests it appends a short canonical record to a thread-local sink, and
-//! `tests/model_fingerprint.rs` compares those records with a committed golden. Each expression is
-//! recorded twice: *sorted* (what it means) and *as sent* (the iteration order the solver sees), so
-//! a difference that is only an ordering difference is named as one.
+//! `tests/model_fingerprint.rs` compares those records with a committed golden. An expression is
+//! recorded *sorted* by variable (what it means). The order `good_lp` hands the terms to HiGHS is
+//! not recorded: it depends on the CPU architecture (hashbrown probes in SIMD groups, so a map
+//! iterates in another order on aarch64 than on x86), and a golden that depends on it cannot be
+//! checked on both. Solver outputs are recorded rounded (`quantise_f64`) for the same reason.
 
 #[cfg(test)]
 macro_rules! probe {
@@ -70,28 +72,39 @@ pub(crate) mod recorder {
             .expect("a good_lp Variable's Debug output carries its index")
     }
 
-    /// `(sorted digest, as-sent digest)` of `(variable, bits)` pairs plus a constant.
-    fn digests(terms: Vec<(usize, u64)>, constant_bits: u64) -> (String, String) {
-        let text = |t: &[(usize, u64)]| {
-            let mut s = format!("c{constant_bits:x}");
-            for (i, bits) in t {
-                let _ = write!(s, ";{i}:{bits:x}");
-            }
-            s
-        };
-        let mut sorted = terms.clone();
-        sorted.sort_unstable();
-        (digest(&text(&sorted)), digest(&text(&terms)))
+    /// Floats a solver returns agree across CPU architectures to about 1e-12 relative, not bit
+    /// for bit; anything below this magnitude counts as zero.
+    pub(crate) const FLOAT_NOISE: f64 = 1e-9;
+
+    /// A solver output rounded to 6 significant digits, for a digest that must be the same on
+    /// every architecture.
+    pub(crate) fn quantise_f64(v: f64) -> String {
+        if v.abs() < FLOAT_NOISE {
+            "0".to_string()
+        } else {
+            format!("{v:.5e}")
+        }
     }
 
-    fn expression_digests(e: &Expression) -> (usize, String, String) {
-        let terms: Vec<(usize, u64)> = e
+    /// Digest of `(variable, value text)` pairs plus a constant, ordered by variable.
+    fn sorted_digest(constant: &str, mut terms: Vec<(usize, String)>) -> String {
+        terms.sort_unstable();
+        let mut s = format!("c{constant}");
+        for (i, value) in &terms {
+            let _ = write!(s, ";{i}:{value}");
+        }
+        digest(&s)
+    }
+
+    /// Model coefficients are computed, not solved for, so they are compared bit for bit.
+    fn expression_digests(e: &Expression) -> (usize, String) {
+        let terms: Vec<(usize, String)> = e
             .linear_coefficients()
-            .map(|(v, c)| (index_of(v), c.to_bits()))
+            .map(|(v, c)| (index_of(v), format!("{:x}", c.to_bits())))
             .collect();
         let n = terms.len();
-        let (sorted, sent) = digests(terms, IntoAffineExpression::constant(e).to_bits());
-        (n, sorted, sent)
+        let constant = format!("{:x}", IntoAffineExpression::constant(e).to_bits());
+        (n, sorted_digest(&constant, terms))
     }
 
     /// Mark the start of one solve.
@@ -109,28 +122,25 @@ pub(crate) mod recorder {
     }
 
     pub(crate) fn expr(label: &str, e: &Expression) {
-        let (n, sorted, sent) = expression_digests(e);
-        push(format!(
-            "expr {label} terms={n} sorted={sorted} sent={sent}"
-        ));
+        let (n, sorted) = expression_digests(e);
+        push(format!("expr {label} terms={n} sorted={sorted}"));
     }
 
     pub(crate) fn constraint(c: &Constraint) {
-        let (n, sorted, sent) = expression_digests(c.expression());
+        let (n, sorted) = expression_digests(c.expression());
         push(format!(
-            "con eq={} terms={n} sorted={sorted} sent={sent}",
+            "con eq={} terms={n} sorted={sorted}",
             c.is_equality()
         ));
     }
 
     /// The initial MIP incumbent handed to HiGHS.
     pub(crate) fn warm_start(ws: &[(Variable, f64)]) {
-        let terms: Vec<(usize, u64)> = ws
+        let terms: Vec<(usize, String)> = ws
             .iter()
-            .map(|(v, x)| (index_of(*v), x.to_bits()))
+            .map(|(v, x)| (index_of(*v), quantise_f64(*x)))
             .collect();
         let n = terms.len();
-        let (sorted, sent) = digests(terms, 0);
-        push(format!("warm terms={n} sorted={sorted} sent={sent}"));
+        push(format!("warm terms={n} sorted={}", sorted_digest("0", terms)));
     }
 }

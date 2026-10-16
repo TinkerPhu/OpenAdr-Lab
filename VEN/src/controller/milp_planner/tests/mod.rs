@@ -1003,6 +1003,7 @@ mod base_load;
 mod basic;
 mod capacity_schedule;
 mod cost_sign;
+mod float_noise;
 mod gb41_soft_deadline_core;
 mod heater;
 mod inputs_golden;
