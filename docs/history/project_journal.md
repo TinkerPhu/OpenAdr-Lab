@@ -16144,3 +16144,24 @@ forecast, VTN UI, BDD, docs) are still open.
 bare `ActiveObjective` value; `services::objective::set_objective` is the one setter, `GET
 /plan/objective` serves the setting, and the Planner page and Dashboard say who set the objective.
 Releasing fleet control was left for group 6, which brings its only caller.
+
+**Group 6 (the fleet channel, VEN side).** The VEN keeps two more retained leaves current on
+`lab-mqtt`, `objective` (the `GET /plan/objective` body, at start-up and on every change, from
+`set_objective`) and `plan` (each adopted plan), and reads `command/objective`. Every new publish
+is `try_publish` from a spawned task, so a route or the planning cycle never waits on the broker,
+and the newest body of each leaf is re-sent on every ConnAck. A command goes through one pure
+decision (`services::objective::decide_fleet_command`): a new `requested_at` applies with source
+`fleet`, the broker's redelivery of an applied one is ignored (a local change made since
+survives), an empty payload reverts to the profile objective only while the fleet's objective is
+still in force. `frequency: 0` is now the ad hoc report the spec defines: a forecast every 15
+minutes and at once when an adopted plan runs under a new objective, a measurement at the profile
+default (WIRE_PROFILE v3; the Reports page shows each obligation's cadence).
+
+**Issues.** The VEN and the BFF each spelled the fleet topic shape, the leaf names and the broker
+settings; they moved into `lab_core::fleet_channel` with the command body both sides use, and the
+power/energy conversions the BFF will need into `lab_core::units`. Threading the port into the
+planning cycle grew two functions already over the 100-line ratchet; the announced solve and the
+GB-55 hold became their own functions instead. A cargo run started while files were mid-edit
+reported errors that were not the change's; and `wsl bash -lc "...; echo $?"` from Git Bash
+printed `EXIT=0` for a failed cargo (the quoting swallowed the status) and lost its `/tmp` log, so
+builds ran through a script file with logs on the Windows side.
