@@ -33,7 +33,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       regenerate TS; add `OBJECTIVE_LABELS.opportunistic` and the Planner page option.
       `build_phase1_weights` returns `MinCost` weights for it with a comment: the cycle guard
       (4.1) never sends this objective to the MILP.
-- [ ] 1.2 `SolveStatus::Simulated` (`solved()` true) and `WarningKind::OpportunisticNoForecast`;
+- [x] 1.2 `SolveStatus::Simulated` (`solved()` true) and `WarningKind::OpportunisticNoForecast`;
       regenerate TS; VEN UI shows both (Plan history status, warnings list).
 - [ ] 1.3 `UserRequestMode::non_planning_dispatch()` → `NonPlanningDispatch::{StartNow,
       SurplusOnly}` with the mapping of D4, and a test over every variant.

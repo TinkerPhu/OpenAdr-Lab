@@ -204,6 +204,10 @@ pub use crate::entities::site_headroom::{
 /// hardcoded. See that profile field's doc comment for what's still not
 /// exposed (the achieved gap as a number, as opposed to this coarser
 /// within-target/not classification).
+///
+/// `Simulated` is not a solve at all: the plan forecasts what the opportunistic objective's
+/// dispatch would do, stepped through the simulator (openspec `opportunistic-objective` D6). It
+/// has slots to show and is never compared on cost with a solved plan.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SolveStatus {
@@ -211,6 +215,7 @@ pub enum SolveStatus {
     TimeLimit,
     GapLimit,
     Infeasible,
+    Simulated,
 }
 
 /// Severity of a plan warning.
@@ -256,6 +261,9 @@ pub enum WarningKind {
     /// A heater target the plan cannot reach by its ready-by time: a thermostat latch
     /// holds the heater off for part of the window, or power and time are too short.
     HeaterTargetUnmet,
+    /// The opportunistic objective is active but its forecast is not built yet: the plan has
+    /// no slots, and dispatch runs without look-ahead all the same.
+    OpportunisticNoForecast,
     /// Reserved for future warning sites not yet classified above.
     Other,
 }
@@ -615,5 +623,16 @@ mod solve_status_tests {
             serde_json::from_str::<SolveStatus>("\"INFEASIBLE\"").unwrap(),
             SolveStatus::Infeasible
         );
+        assert_eq!(
+            serde_json::to_string(&SolveStatus::Simulated).unwrap(),
+            "\"SIMULATED\""
+        );
+    }
+
+    /// A simulated plan has something to show and dispatch reads; only a failed solve has not.
+    #[test]
+    fn a_simulated_plan_counts_as_solved() {
+        assert!(SolveStatus::Simulated.solved());
+        assert!(!SolveStatus::Infeasible.solved());
     }
 }

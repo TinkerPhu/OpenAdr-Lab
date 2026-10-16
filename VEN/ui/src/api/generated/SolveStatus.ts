@@ -18,5 +18,9 @@
  * hardcoded. See that profile field's doc comment for what's still not
  * exposed (the achieved gap as a number, as opposed to this coarser
  * within-target/not classification).
+ *
+ * `Simulated` is not a solve at all: the plan forecasts what the opportunistic objective's
+ * dispatch would do, stepped through the simulator (openspec `opportunistic-objective` D6). It
+ * has slots to show and is never compared on cost with a solved plan.
  */
-export type SolveStatus = "OPTIMAL" | "TIME_LIMIT" | "GAP_LIMIT" | "INFEASIBLE";
+export type SolveStatus = "OPTIMAL" | "TIME_LIMIT" | "GAP_LIMIT" | "INFEASIBLE" | "SIMULATED";

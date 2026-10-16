@@ -9,47 +9,28 @@ use rusqlite::{params, Connection};
 
 use super::{from_unix, to_unix};
 use crate::entities::history::PlanHistorySample;
-use crate::entities::plan::{SolveStatus, WarningKind};
+use crate::entities::plan::WarningKind;
 use crate::entities::DomainError;
 
-/// `WarningKind` values as stored in the comma-joined `warning_kinds` TEXT column —
-/// SCREAMING_SNAKE_CASE, matching the enum's `#[serde(rename_all = ...)]` so the stored
-/// text is consistent with anything serialized to JSON elsewhere.
-fn warning_kind_str(kind: WarningKind) -> &'static str {
-    match kind {
-        WarningKind::SolverInfeasible => "SOLVER_INFEASIBLE",
-        WarningKind::StaleRateEstimate => "STALE_RATE_ESTIMATE",
-        WarningKind::BudgetShortfall => "BUDGET_SHORTFALL",
-        WarningKind::CapacityViolation => "CAPACITY_VIOLATION",
-        WarningKind::PeakPenaltyExceeded => "PEAK_PENALTY_EXCEEDED",
-        WarningKind::EvCoreEnergyUnmet => "EV_CORE_ENERGY_UNMET",
-        WarningKind::TargetAboveLimit => "TARGET_ABOVE_LIMIT",
-        WarningKind::HeaterTargetUnmet => "HEATER_TARGET_UNMET",
-        WarningKind::Other => "OTHER",
+/// A stored enum value: the type's own serde spelling (SCREAMING_SNAKE_CASE for
+/// `WarningKind` and `SolveStatus`), so the column holds exactly what JSON carries everywhere
+/// else and a new variant needs no second spelling here.
+fn stored<T: serde::Serialize>(value: T) -> String {
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::String(s)) => s,
+        other => unreachable!("a unit enum serializes to a string, got {other:?}"),
     }
 }
 
-fn parse_warning_kind(s: &str) -> Result<WarningKind, DomainError> {
-    match s {
-        "SOLVER_INFEASIBLE" => Ok(WarningKind::SolverInfeasible),
-        "STALE_RATE_ESTIMATE" => Ok(WarningKind::StaleRateEstimate),
-        "BUDGET_SHORTFALL" => Ok(WarningKind::BudgetShortfall),
-        "CAPACITY_VIOLATION" => Ok(WarningKind::CapacityViolation),
-        "PEAK_PENALTY_EXCEEDED" => Ok(WarningKind::PeakPenaltyExceeded),
-        "EV_CORE_ENERGY_UNMET" => Ok(WarningKind::EvCoreEnergyUnmet),
-        "TARGET_ABOVE_LIMIT" => Ok(WarningKind::TargetAboveLimit),
-        "HEATER_TARGET_UNMET" => Ok(WarningKind::HeaterTargetUnmet),
-        "OTHER" => Ok(WarningKind::Other),
-        other => Err(DomainError::StorageError(format!(
-            "invalid stored warning_kind: {other}"
-        ))),
-    }
+fn parse_stored<T: serde::de::DeserializeOwned>(s: &str, column: &str) -> Result<T, DomainError> {
+    serde_json::from_value(serde_json::Value::String(s.to_string()))
+        .map_err(|_| DomainError::StorageError(format!("invalid stored {column}: {s}")))
 }
 
 fn join_kinds(kinds: &[WarningKind]) -> String {
     kinds
         .iter()
-        .map(|k| warning_kind_str(*k))
+        .map(|k| stored(*k))
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -58,28 +39,7 @@ fn split_kinds(s: &str) -> Result<Vec<WarningKind>, DomainError> {
     if s.is_empty() {
         return Ok(Vec::new());
     }
-    s.split(',').map(parse_warning_kind).collect()
-}
-
-fn solve_status_str(status: SolveStatus) -> &'static str {
-    match status {
-        SolveStatus::Optimal => "OPTIMAL",
-        SolveStatus::TimeLimit => "TIME_LIMIT",
-        SolveStatus::GapLimit => "GAP_LIMIT",
-        SolveStatus::Infeasible => "INFEASIBLE",
-    }
-}
-
-fn parse_solve_status(s: &str) -> Result<SolveStatus, DomainError> {
-    match s {
-        "OPTIMAL" => Ok(SolveStatus::Optimal),
-        "TIME_LIMIT" => Ok(SolveStatus::TimeLimit),
-        "GAP_LIMIT" => Ok(SolveStatus::GapLimit),
-        "INFEASIBLE" => Ok(SolveStatus::Infeasible),
-        other => Err(DomainError::StorageError(format!(
-            "invalid stored solve_status: {other}"
-        ))),
-    }
+    s.split(',').map(|k| parse_stored(k, "warning_kind")).collect()
 }
 
 pub(super) fn append(conn: &mut Connection, rows: &[PlanHistorySample]) -> Result<(), DomainError> {
@@ -102,7 +62,7 @@ pub(super) fn append(conn: &mut Connection, rows: &[PlanHistorySample]) -> Resul
                 to_unix(row.created_at),
                 row.trigger,
                 row.solver_ms,
-                solve_status_str(row.solve_status),
+                stored(row.solve_status),
                 row.objective_eur,
                 row.friction_eur,
                 row.mip_gap_target,
@@ -206,7 +166,7 @@ pub(super) fn query(
                     created_at: from_unix(created_at)?,
                     trigger,
                     solver_ms: solver_ms.map(|v| v as u64),
-                    solve_status: parse_solve_status(&solve_status)?,
+                    solve_status: parse_stored(&solve_status, "solve_status")?,
                     objective_eur,
                     friction_eur,
                     mip_gap_target,
@@ -221,4 +181,43 @@ pub(super) fn query(
             },
         )
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_stored, stored};
+    use crate::entities::plan::{SolveStatus, WarningKind};
+
+    /// The column keeps the spelling it had when each value was written by hand, so rows
+    /// already on disk still read back.
+    #[test]
+    fn stored_spellings_are_the_ones_already_on_disk() {
+        let statuses = [
+            (SolveStatus::Optimal, "OPTIMAL"),
+            (SolveStatus::TimeLimit, "TIME_LIMIT"),
+            (SolveStatus::GapLimit, "GAP_LIMIT"),
+            (SolveStatus::Infeasible, "INFEASIBLE"),
+            (SolveStatus::Simulated, "SIMULATED"),
+        ];
+        for (status, text) in statuses {
+            assert_eq!(stored(status), text);
+            assert_eq!(parse_stored::<SolveStatus>(text, "solve_status").unwrap(), status);
+        }
+        let kinds = [
+            (WarningKind::SolverInfeasible, "SOLVER_INFEASIBLE"),
+            (WarningKind::StaleRateEstimate, "STALE_RATE_ESTIMATE"),
+            (WarningKind::BudgetShortfall, "BUDGET_SHORTFALL"),
+            (WarningKind::CapacityViolation, "CAPACITY_VIOLATION"),
+            (WarningKind::PeakPenaltyExceeded, "PEAK_PENALTY_EXCEEDED"),
+            (WarningKind::EvCoreEnergyUnmet, "EV_CORE_ENERGY_UNMET"),
+            (WarningKind::TargetAboveLimit, "TARGET_ABOVE_LIMIT"),
+            (WarningKind::OpportunisticNoForecast, "OPPORTUNISTIC_NO_FORECAST"),
+            (WarningKind::Other, "OTHER"),
+        ];
+        for (kind, text) in kinds {
+            assert_eq!(stored(kind), text);
+            assert_eq!(parse_stored::<WarningKind>(text, "warning_kind").unwrap(), kind);
+        }
+        assert!(parse_stored::<SolveStatus>("NOPE", "solve_status").is_err());
+    }
 }
