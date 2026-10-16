@@ -2,7 +2,7 @@
 title: VEN UI
 type: component
 created: 2026-07-04
-updated: 2026-10-15
+updated: 2026-10-16
 synced_commit: 6a5a678
 sources: [VEN/ui/src, docs/history/project_journal.md, docs/architecture/chart_diagrams.md, VEN/src/routes/timeline.rs, VEN/src/controller/timeline.rs, VEN/ui/src/pages/History.tsx, VEN/ui/src/pages/Planner.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/pages/Weather.tsx, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx]
 tags: [ui, react, timeline]
@@ -69,6 +69,10 @@ its own asset. The Controller builds one cell per asset from a per-type table, a
 comfort-curve and tariff paths cover every roster asset. Since W7 a profile may hold two EVs or
 two arrays (`VEN/profiles/multi_asset_test.yaml`), which [[asset-layer]] and [[deviation-arbiter]]
 handle per asset as well.
+
+An asset's kind arrives as the generated union `AssetKind` (`asset_type`), declared by the asset and
+never read from its id; `components/controller/assetDisplay.ts` is the one place deciding colour,
+label and planning role from it ("PV · pv-west" when a VEN has two arrays).
 
 ## Chart kit
 
