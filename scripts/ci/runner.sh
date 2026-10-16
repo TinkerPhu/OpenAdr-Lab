@@ -89,7 +89,7 @@ quick_tier() { # $1 = docs-only (yes|no)
     run_step "cargo clippy" $UNIT_TEST run --rm ven-unit-test cargo clippy --locked --all-targets --all-features -- -D warnings >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     run_step "cargo test" $UNIT_TEST run --rm ven-unit-test cargo test --locked --jobs 2 >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     run_step "cargo audit (VEN)" $UNIT_TEST run --rm ven-unit-test cargo audit >>"$TICKET_DIR/quick.log" 2>&1 || return 1
-    run_step "cargo audit (BFF)" $UNIT_TEST run --rm -v "$CI_REPO/VTN/bff/Cargo.lock:/bff/Cargo.lock:ro" ven-unit-test cargo audit -f /bff/Cargo.lock >>"$TICKET_DIR/quick.log" 2>&1 || return 1
+    run_step "cargo audit (BFF)" $UNIT_TEST run --rm -v "$CI_REPO/VTN/bff:/bff:ro" -w /bff ven-unit-test cargo audit >>"$TICKET_DIR/quick.log" 2>&1 || return 1
 }
 
 full_tier() {
@@ -137,7 +137,11 @@ write_result() { # $1 = ticket
             if [ -s "$TICKET_DIR/full.log" ] && grep -q "Failing scenarios" "$TICKET_DIR/full.log" 2>/dev/null; then
                 echo '```'; grep -A40 "Failing scenarios" "$TICKET_DIR/full.log" | head -50; echo '```'
             else
-                echo '```'; tail -40 "$TICKET_DIR/quick.log" "$TICKET_DIR/full.log" 2>/dev/null | cut -c1-240; echo '```'
+                echo '```'
+                for f in quick.log full.log; do
+                    [ -s "$TICKET_DIR/$f" ] && { echo "--- $f (last lines)"; tail -n 40 "$TICKET_DIR/$f" | cut -c1-240; }
+                done
+                echo '```'
             fi
         fi
         echo; echo "Logs: $TICKET_DIR/{run,quick,full}.log on Node3"
