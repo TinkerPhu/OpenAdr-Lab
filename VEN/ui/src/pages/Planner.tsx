@@ -79,6 +79,17 @@ const OBJECTIVE_OPTIONS: {
       { label: "CO₂ / grid", value: "0 (ignored)" },
     ],
   },
+  {
+    value: "opportunistic",
+    label: OBJECTIVE_LABELS.opportunistic,
+    tooltip: "No planning: use PV surplus as it comes",
+    detail: "Behaves like a common HEMS without look-ahead: PV surplus is absorbed as soon as it is there (EV, heater, shiftable loads, then the battery), the battery covers import and never charges from the grid. Requests in ASAP or BY_DEADLINE mode start at once; the free-energy modes take surplus only. The plan shown is a forecast of that behaviour, not an optimisation.",
+    weights: [
+      { label: "Look-ahead", value: "none" },
+      { label: "Surplus order", value: "EV, heater, shiftable, battery" },
+      { label: "Battery", value: "covers import, no grid charging" },
+    ],
+  },
 ];
 
 // ─── Objective legend ─────────────────────────────────────────────────────────

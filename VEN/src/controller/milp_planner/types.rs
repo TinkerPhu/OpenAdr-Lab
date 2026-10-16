@@ -242,6 +242,10 @@ pub(crate) fn build_phase1_weights(
             c_bat_ev_coexist_eur_kwh: p.c_bat_ev_coexist_eur_kwh,
             c_ctrl_imp_malus_eur_kwh: p.c_ctrl_imp_malus_eur_kwh,
         },
+        // Never solved: the planning cycle forecasts this objective instead of solving it
+        // (`PlannerObjective::dispatches_from_plan`, openspec `opportunistic-objective` D6).
+        // `MinCost` weights keep the function total.
+        PlannerObjective::Opportunistic => build_phase1_weights(p, PlannerObjective::MinCost),
     }
 }
 

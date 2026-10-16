@@ -28,7 +28,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 
 ## 1. Declarations (no behaviour change)
 
-- [ ] 1.1 `PlannerObjective::Opportunistic` (wire `opportunistic`) with `dispatches_from_plan()`
+- [x] 1.1 `PlannerObjective::Opportunistic` (wire `opportunistic`) with `dispatches_from_plan()`
       declared beside the variants; extend `planner_objective_ts_spelling_is_the_wire_spelling`;
       regenerate TS; add `OBJECTIVE_LABELS.opportunistic` and the Planner page option.
       `build_phase1_weights` returns `MinCost` weights for it with a comment: the cycle guard

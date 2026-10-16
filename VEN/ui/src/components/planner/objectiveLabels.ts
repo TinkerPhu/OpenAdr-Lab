@@ -9,4 +9,5 @@ export const OBJECTIVE_LABELS: Record<PlannerObjective, string> = {
   min_import: "Autarky",
   max_revenue: "Revenue",
   custom: "Custom",
+  opportunistic: "Opportunistic",
 };

@@ -13,6 +13,9 @@ pub enum PlannerObjective {
     MinImport,
     MaxRevenue,
     Custom,
+    /// No look-ahead: the common non-planning HEMS. Dispatch absorbs PV surplus in each
+    /// asset's declared order and covers import from storage; the plan is a forecast of that.
+    Opportunistic,
 }
 
 /// A peak-demand penalty rule (WP6.3, BL-09): the planner keeps each fixed
@@ -163,7 +166,19 @@ impl Default for SimulatorParams {
 }
 
 impl PlannerObjective {
-    fn as_str(self) -> &'static str {
+    /// Every objective, in the order the UI lists them. The one list the wire spelling is read
+    /// back from and the VEN reports as the objectives it accepts.
+    pub const ALL: [PlannerObjective; 7] = [
+        Self::MinCost,
+        Self::MinGhg,
+        Self::MinGrid,
+        Self::MinImport,
+        Self::MaxRevenue,
+        Self::Custom,
+        Self::Opportunistic,
+    ];
+
+    const fn as_str(self) -> &'static str {
         match self {
             Self::MinCost => "min_cost",
             Self::MinGhg => "min_ghg",
@@ -171,6 +186,22 @@ impl PlannerObjective {
             Self::MinImport => "min_import",
             Self::MaxRevenue => "max_revenue",
             Self::Custom => "custom",
+            Self::Opportunistic => "opportunistic",
+        }
+    }
+
+    /// Whether the tick dispatches from the plan's allocations. Every objective the MILP solves
+    /// does; the opportunistic objective dispatches without look-ahead, and its plan is only a
+    /// forecast of that (openspec `opportunistic-objective` D1).
+    pub fn dispatches_from_plan(self) -> bool {
+        match self {
+            Self::MinCost
+            | Self::MinGhg
+            | Self::MinGrid
+            | Self::MinImport
+            | Self::MaxRevenue
+            | Self::Custom => true,
+            Self::Opportunistic => false,
         }
     }
 }
@@ -189,26 +220,20 @@ impl<'de> Deserialize<'de> for PlannerObjective {
     where
         D: Deserializer<'de>,
     {
+        const WIRE: [&str; PlannerObjective::ALL.len()] = {
+            let mut wire = [""; PlannerObjective::ALL.len()];
+            let mut i = 0;
+            while i < wire.len() {
+                wire[i] = PlannerObjective::ALL[i].as_str();
+                i += 1;
+            }
+            wire
+        };
         let value = String::deserialize(deserializer)?;
-        match value.as_str() {
-            "min_cost" => Ok(Self::MinCost),
-            "min_ghg" => Ok(Self::MinGhg),
-            "min_grid" => Ok(Self::MinGrid),
-            "min_import" => Ok(Self::MinImport),
-            "max_revenue" => Ok(Self::MaxRevenue),
-            "custom" => Ok(Self::Custom),
-            other => Err(serde::de::Error::unknown_variant(
-                other,
-                &[
-                    "min_cost",
-                    "min_ghg",
-                    "min_grid",
-                    "min_import",
-                    "max_revenue",
-                    "custom",
-                ],
-            )),
-        }
+        Self::ALL
+            .into_iter()
+            .find(|o| o.as_str() == value)
+            .ok_or_else(|| serde::de::Error::unknown_variant(&value, &WIRE))
     }
 }
 
@@ -219,9 +244,48 @@ mod tests {
     fn planner_objective_ts_spelling_is_the_wire_spelling() {
         use super::PlannerObjective::{self, *};
         let ts = <PlannerObjective as ts_rs::TS>::inline(&ts_rs::Config::default());
-        for objective in [MinCost, MinGhg, MinGrid, MinImport, MaxRevenue, Custom] {
+        for objective in PlannerObjective::ALL {
             let wire = serde_json::to_string(&objective).unwrap();
             assert!(ts.contains(&wire), "{wire} missing from the TS union {ts}");
+        }
+        assert_eq!(
+            ts.matches('|').count() + 1,
+            PlannerObjective::ALL.len(),
+            "ALL must list every variant: {ts}"
+        );
+        let _ = (MinCost, MinGhg, MinGrid, MinImport, MaxRevenue, Custom, Opportunistic);
+    }
+
+    /// Every objective reads back from its own wire spelling, and the deserializer's list of
+    /// expected values (its error message) is that same spelling.
+    #[test]
+    fn planner_objective_round_trips_through_its_wire_spelling() {
+        use super::PlannerObjective;
+        for objective in PlannerObjective::ALL {
+            let wire = serde_json::to_string(&objective).unwrap();
+            let back: PlannerObjective = serde_json::from_str(&wire).unwrap();
+            assert_eq!(back, objective, "{wire}");
+        }
+        let err = serde_json::from_str::<PlannerObjective>("\"nope\"").unwrap_err();
+        for objective in PlannerObjective::ALL {
+            assert!(err.to_string().contains(objective.as_str()), "{err}");
+        }
+        assert_eq!(
+            serde_json::from_str::<PlannerObjective>("\"opportunistic\"").unwrap(),
+            PlannerObjective::Opportunistic
+        );
+    }
+
+    /// Only the opportunistic objective dispatches without the plan's allocations.
+    #[test]
+    fn only_the_opportunistic_objective_dispatches_without_the_plan() {
+        use super::PlannerObjective;
+        for objective in PlannerObjective::ALL {
+            assert_eq!(
+                objective.dispatches_from_plan(),
+                objective != PlannerObjective::Opportunistic,
+                "{objective:?}"
+            );
         }
     }
 
