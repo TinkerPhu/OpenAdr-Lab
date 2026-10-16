@@ -326,6 +326,7 @@ pub fn extract_report_obligations(
                 fulfilled: false,
                 created_at: now,
                 historical: descriptor.historical,
+                aggregate: descriptor.aggregate,
             });
         }
     }
@@ -1117,6 +1118,20 @@ mod tests {
         );
     }
 
+    /// R-143: the VTN's `aggregate` reaches the obligation (spec default false: one result per
+    /// resource).
+    #[test]
+    fn report_obligation_carries_the_requested_aggregation() {
+        let now = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let aggregated = minutely_event(json!({
+            "payloadType": "STORAGE_CHARGE_LEVEL",
+            "aggregate": true
+        }));
+        let per_resource = minutely_event(json!({"payloadType": "STORAGE_CHARGE_LEVEL"}));
+        assert!(extract_report_obligations(&aggregated, now, &[])[0].aggregate);
+        assert!(!extract_report_obligations(&per_resource, now, &[])[0].aggregate);
+    }
+
     #[test]
     fn extract_report_obligations_parses_historical_false() {
         // R-15: `historical: false` marks the obligation as a forecast request.
@@ -1735,6 +1750,7 @@ mod tests {
             fulfilled: false,
             created_at: now,
             historical: true,
+            aggregate: false,
         }];
         let obligations = extract_report_obligations(
             &lab_core::test_fixtures::events_from_json(events),

@@ -15860,3 +15860,23 @@ production code found three:
 - The site snow state was read from the first array, while only the measured array, which may be any one of them, can conclude snow.
 
 All three are fixed, each with a test. `SimState::asset(id)` lost its last production caller and is now test-only. The SoC report still looks its samples up by the ids `ev`/`battery`; that is filed as R-143, because it needs a decision on the wire (one resource per storage asset, or one combined SoC). Five doc passages still described the one-per-kind limit; they are corrected.
+
+## Typed asset kind and the aggregated SoC report (refactor/asset-kind, R-143)
+
+**What.** An asset's type is one closed enum, `AssetKind` (`pv`, `battery`, `ev`, `heater`,
+`base_load`, `shiftable_load`), declared by every asset (`Asset::kind`, required), carried on `/sim`
+and generated into the UI as a union type. It replaces two vocabularies: a free string
+(`asset_type_str`) and a catalog enum (`AssetType`) that matched no real asset. The UI decides colour,
+label and planning role by kind in one module (`assetDisplay.ts`), where seven components used
+id-keyed maps. The `STORAGE_CHARGE_LEVEL` report now follows the descriptor's `aggregate`: one
+resource per storage asset (`<ven>-<asset_id>`) by default, or one energy-weighted site value.
+
+**Why.** R-143: the SoC report looked its samples up by the ids `ev`/`battery`, so an EV called
+`car-a` reported nothing. The user's question behind it: the type must be a reliable identifier with
+no room for interpretation, not a string read from an id. The spec already lets the VTN choose
+per-resource or aggregated results (`reportDescriptor.aggregate`); the VEN read neither.
+
+**Issues.** `Grid` implemented `Asset` without being one (nothing used it through the trait), which a
+required `kind()` exposed; it is the site meter now, and its tests of the unused trait surface went
+with it. The first sweep missed that the site meter is held in `SimState.grid_asset`: deleting the
+file broke the build, which showed it was in use.

@@ -3459,3 +3459,9 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
   `find_map(|cfg| cfg.as_any().downcast_ref` and for per-kind singular fields, not only for ids.
 - A test-fixture `as` cast to a library result type hides drift in the data it carries; a typed
   helper (`fn result(data: WireType)`) keeps the fixture checked against the generated type.
+
+- **A required trait method finds the implementors that are not what the trait says** (asset-kind,
+  2026-10-16). Making `Asset::kind()` required, with no default, exposed `Grid`: it implemented
+  `Asset` only by inheriting panicking defaults, and no code used it through the trait. Prefer a
+  required method over an `unimplemented!()` default: the compiler lists every type that has to
+  answer, and a type with no answer is a type that should not implement the trait.

@@ -133,6 +133,7 @@ mod tests {
             fulfilled: false,
             created_at: Utc::now(),
             historical: true,
+            aggregate: false,
         }
     }
 

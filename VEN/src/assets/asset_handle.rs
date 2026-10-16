@@ -54,6 +54,10 @@ impl<'a> Asset for AssetHandle<'a> {
         self.config.kind()
     }
 
+    fn storage_capacity_kwh(&self) -> Option<f64> {
+        self.config.storage_capacity_kwh()
+    }
+
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
         self.config.flexibility_floor(state)
     }

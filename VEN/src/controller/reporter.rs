@@ -9,7 +9,7 @@ use tracing::debug;
 
 use crate::controller::report_intervals::{
     build_baseline_report_intervals, build_capacity_forecast_intervals, build_forecast_intervals,
-    build_net_site_power_ts, build_soc_intervals,
+    build_net_site_power_ts, build_soc_resources,
 };
 use crate::controller::vtn_port::{
     OadrIntervalPeriod, OadrReportBody, OadrReportInterval, OadrReportPayload, OadrReportResource,
@@ -19,7 +19,7 @@ use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::plan::Plan;
 use crate::entities::reservation_request::ReservationRequest;
-use lab_core::time_series::Aggregation;
+use lab_core::time_series::{Aggregation, TimeSeries};
 
 // ---------------------------------------------------------------------------
 // Domain-side sample type — extracted at the infra boundary by callers.
@@ -27,11 +27,17 @@ use lab_core::time_series::Aggregation;
 // ---------------------------------------------------------------------------
 
 /// One per-asset history point, pre-extracted at the infra boundary.
+#[derive(Debug, Clone, Default)]
 pub struct AssetReportSample {
     pub ts: DateTime<Utc>,
     pub power_kw: f64,
     /// State of charge as fraction 0.0–1.0. None for non-storage assets.
     pub soc_frac: Option<f64>,
+    /// What the asset stores when full [kWh] (`Asset::storage_capacity_kwh`); None if it
+    /// stores nothing.
+    pub storage_capacity_kwh: Option<f64>,
+    /// Whether it is connected (an EV's `plugged`); None for an asset that is always connected.
+    pub plugged: Option<bool>,
 }
 
 // ---------------------------------------------------------------------------
@@ -106,7 +112,8 @@ fn reservation_interval(
 /// Payload type routing:
 ///   - USAGE / PRICE / IMPORT_CAPACITY_LIMIT → net site import power (time-weighted mean)
 ///   - EXPORT_CAPACITY_LIMIT → net site export power (time-weighted mean, absolute)
-///   - STORAGE_CHARGE_STATE / STORAGE_CHARGE_LEVEL → EV SoC point-in-time at interval end
+///   - STORAGE_CHARGE_STATE / STORAGE_CHARGE_LEVEL → each storage asset's SoC at interval end,
+///     one resource per asset, or one energy-weighted resource when `aggregate` (R-143)
 ///   - USAGE_FORECAST (WP3.6, §8.8) → planned net site power per future plan
 ///     slot, straight from the active plan (None if no plan adopted yet)
 ///   - STORAGE_MAX_CHARGE_POWER / STORAGE_MAX_DISCHARGE_POWER → the
@@ -148,148 +155,104 @@ pub fn build_measurement_report_for_obligation(
 
     let payload_type = &obligation.payload_type;
 
-    let intervals: Vec<OadrReportInterval> = match payload_type.as_str() {
-        "STORAGE_CHARGE_STATE" | "STORAGE_CHARGE_LEVEL" => {
-            build_soc_intervals(asset_samples, interval_width, &duration_iso, op_state)
-        }
-        // WP3.6 (§8.8): planned net site power per future plan slot, at the
-        // plan's own native slot boundaries (not the obligation's interval
-        // width — a forecast has no meaning resampled onto history buckets).
-        // No adopted plan yet → empty → caller re-arms and retries next cycle.
-        "USAGE_FORECAST" => build_forecast_intervals(active_plan, "USAGE_FORECAST"),
-        // GB-21: the report-payload-type wire name is `IMPORT_RESERVATION_CAPACITY`
-        // (openleadr-wire's `ReportType` enum) — NOT `IMPORT_CAPACITY_RESERVATION`,
-        // which is a distinct *event* payload type (OpenADR 3.1 §Payload Type
-        // Enumerations: capacity "granted by the VTN" on an event, vs. capacity
-        // "requested" on a report). `openadr_interface.rs::parse_capacity_state`
-        // correctly keeps the other string for that reason — verified during
-        // GB-21 implementation, not conflated here.
-        // R-76: both arms are a straight read of one named, already-correct
-        // field. The direction crossing, the absolute-vs-additional error and
-        // the sign-masking `.abs()` all lived in arithmetic that used to sit
-        // here; it now lives in `entities::reservation_request`, which has the
-        // spec quotation and the tests. A report mapper should map.
-        "IMPORT_RESERVATION_CAPACITY" => reservation_interval(
-            "IMPORT_RESERVATION_CAPACITY",
-            reservation.map(|r| r.import_kw),
-            op_state,
-        ),
-        "EXPORT_RESERVATION_CAPACITY" => reservation_interval(
-            "EXPORT_RESERVATION_CAPACITY",
-            reservation.map(|r| r.export_kw),
-            op_state,
-        ),
-        // WP5.4: event-blind heuristic counterfactual, submitted alongside USAGE
-        // during/after an event so `kpi.py` can quantify the event's impact.
-        "BASELINE" => build_baseline_report_intervals(
+    // Device payloads (state of charge) follow the request's `aggregate` (R-143); every other
+    // payload is a quantity of the site meter, its one resource.
+    let resources: Vec<OadrReportResource> = if matches!(
+        payload_type.as_str(),
+        "STORAGE_CHARGE_STATE" | "STORAGE_CHARGE_LEVEL"
+    ) {
+        build_soc_resources(
             asset_samples,
-            heuristics,
             interval_width,
             &duration_iso,
-        ),
-        "STORAGE_MAX_CHARGE_POWER" => capacity_curves
-            .map(|(import_curve, _)| {
-                build_capacity_forecast_intervals(import_curve, "STORAGE_MAX_CHARGE_POWER")
-            })
-            .unwrap_or_default(),
-        "STORAGE_MAX_DISCHARGE_POWER" => capacity_curves
-            .map(|(_, export_curve)| {
-                build_capacity_forecast_intervals(export_curve, "STORAGE_MAX_DISCHARGE_POWER")
-            })
-            .unwrap_or_default(),
-        // R-15: `reportDescriptor.historical: false` asks for a forecast of the
-        // requested payload — serve plan slots instead of measured history.
-        _ if !obligation.historical => build_forecast_intervals(active_plan, payload_type),
-        _ => {
-            let resampled = net_power_ts.resample_uniform(interval_width, Aggregation::Mean);
-            resampled
-                .samples
-                .iter()
-                // F-5: drop the bucket still being measured. `resample_uniform`
-                // grids up to `floor_to_grid(last_sample)`, so the newest
-                // bucket is emitted as soon as one sample lands in it and is
-                // reported as if it covered the whole interval -- then
-                // silently replaced by the real value on the next submission.
-                // A report interval has to describe a window that has ended.
-                .filter(|(start, _)| *start + interval_width <= now)
-                .enumerate()
-                .map(|(i, &(ts, value_kw))| {
-                    // Which direction of flow the requesting payload type asks
-                    // about. An *_CAPACITY_LIMIT report answers "how much did
-                    // you draw against this limit", so it is one-directional
-                    // and clamped; anything else reports net site power, where
-                    // the sign is the information (F-3).
-                    //
-                    // Clamping everything with `.max(0.0)` was how an
-                    // exporting site reported zero: a fleet sum built from
-                    // those reports was wrong by exactly the export, and
-                    // nothing said so. The spec calls a `USAGE` value "a
-                    // float"; WIRE_PROFILE.md fixes import as positive.
-                    let directed_kw = match payload_type.as_str() {
-                        "EXPORT_CAPACITY_LIMIT" => (-value_kw).max(0.0),
-                        "IMPORT_CAPACITY_LIMIT" => value_kw.max(0.0),
-                        _ => value_kw,
-                    };
-                    // `USAGE` is energy *over the interval*, so the resampled
-                    // mean power is multiplied by the interval it covers. This
-                    // used to be sent as instantaneous watts, which is what
-                    // `kpi.py` compensated for with its own `x duration`.
-                    // Answer the payload type that was asked for, in the
-                    // quantity the contract says it carries. This arm used to
-                    // hardcode `USAGE` for everything but `SIMPLE`, so a VTN
-                    // requesting `DEMAND` -- real power -- was answered with
-                    // energy under a name it never asked about.
-                    //
-                    // A type the report contract has no opinion on is an
-                    // *event* signal type (IMPORT_CAPACITY_LIMIT and friends)
-                    // used as a report request: "how much did you draw against
-                    // this". That is usage, and stays `USAGE`.
-                    use crate::controller::report_payload::Quantity;
-                    let value = match crate::controller::report_payload::quantity_of(payload_type) {
-                        Some(Quantity::PowerKw) => {
-                            OadrReportPayload::power_kw(payload_type, directed_kw)
-                        }
-                        Some(Quantity::Dimensionless) => {
-                            OadrReportPayload::level(payload_type, directed_kw)
-                        }
-                        Some(Quantity::EnergyKwh) => OadrReportPayload::energy_from_power_kw(
-                            payload_type,
-                            directed_kw,
-                            obligation.interval_width_s,
-                        ),
-                        _ => OadrReportPayload::energy_from_power_kw(
-                            "USAGE",
-                            directed_kw,
-                            obligation.interval_width_s,
-                        ),
-                    };
-                    OadrReportInterval {
-                        id: i,
-                        intervalPeriod: Some(OadrIntervalPeriod::window(ts, duration_iso.clone())),
-                        payloads: vec![
-                            value,
-                            OadrReportPayload::state("OPERATING_STATE", op_state),
-                        ],
-                    }
+            op_state,
+            obligation.aggregate,
+            ven_name,
+        )
+    } else {
+        let intervals: Vec<OadrReportInterval> = match payload_type.as_str() {
+            // WP3.6 (§8.8): planned net site power per future plan slot, at the
+            // plan's own native slot boundaries (not the obligation's interval
+            // width — a forecast has no meaning resampled onto history buckets).
+            // No adopted plan yet → empty → caller re-arms and retries next cycle.
+            "USAGE_FORECAST" => build_forecast_intervals(active_plan, "USAGE_FORECAST"),
+            // GB-21: the report-payload-type wire name is `IMPORT_RESERVATION_CAPACITY`
+            // (openleadr-wire's `ReportType` enum) — NOT `IMPORT_CAPACITY_RESERVATION`,
+            // which is a distinct *event* payload type (OpenADR 3.1 §Payload Type
+            // Enumerations: capacity "granted by the VTN" on an event, vs. capacity
+            // "requested" on a report). `openadr_interface.rs::parse_capacity_state`
+            // correctly keeps the other string for that reason — verified during
+            // GB-21 implementation, not conflated here.
+            // R-76: both arms are a straight read of one named, already-correct
+            // field. The direction crossing, the absolute-vs-additional error and
+            // the sign-masking `.abs()` all lived in arithmetic that used to sit
+            // here; it now lives in `entities::reservation_request`, which has the
+            // spec quotation and the tests. A report mapper should map.
+            "IMPORT_RESERVATION_CAPACITY" => reservation_interval(
+                "IMPORT_RESERVATION_CAPACITY",
+                reservation.map(|r| r.import_kw),
+                op_state,
+            ),
+            "EXPORT_RESERVATION_CAPACITY" => reservation_interval(
+                "EXPORT_RESERVATION_CAPACITY",
+                reservation.map(|r| r.export_kw),
+                op_state,
+            ),
+            // WP5.4: event-blind heuristic counterfactual, submitted alongside USAGE
+            // during/after an event so `kpi.py` can quantify the event's impact.
+            "BASELINE" => build_baseline_report_intervals(
+                asset_samples,
+                heuristics,
+                interval_width,
+                &duration_iso,
+            ),
+            "STORAGE_MAX_CHARGE_POWER" => capacity_curves
+                .map(|(import_curve, _)| {
+                    build_capacity_forecast_intervals(import_curve, "STORAGE_MAX_CHARGE_POWER")
                 })
-                .collect()
+                .unwrap_or_default(),
+            "STORAGE_MAX_DISCHARGE_POWER" => capacity_curves
+                .map(|(_, export_curve)| {
+                    build_capacity_forecast_intervals(export_curve, "STORAGE_MAX_DISCHARGE_POWER")
+                })
+                .unwrap_or_default(),
+            // R-15: `reportDescriptor.historical: false` asks for a forecast of the
+            // requested payload — serve plan slots instead of measured history.
+            _ if !obligation.historical => build_forecast_intervals(active_plan, payload_type),
+            _ => measured_intervals(
+                &net_power_ts,
+                obligation,
+                interval_width,
+                &duration_iso,
+                op_state,
+                now,
+            ),
+        };
+        if intervals.is_empty() {
+            Vec::new()
+        } else {
+            vec![OadrReportResource {
+                resourceName: resource_name,
+                intervals,
+            }]
         }
     };
 
-    if intervals.is_empty() {
+    if resources.is_empty() {
         return None;
     }
 
-    let interval_count = intervals.len();
+    let all_intervals: Vec<OadrReportInterval> = resources
+        .iter()
+        .flat_map(|r| r.intervals.iter().cloned())
+        .collect();
+    let interval_count = all_intervals.len();
     let report = OadrReportBody {
         eventID: Some(event_id.clone()),
         clientName: ven_name.to_string(),
         reportName: Some(report_name),
-        payloadDescriptors: crate::controller::report_payload::descriptors_for(&intervals),
-        resources: vec![OadrReportResource {
-            resourceName: resource_name,
-            intervals,
-        }],
+        payloadDescriptors: crate::controller::report_payload::descriptors_for(&all_intervals),
+        resources,
     };
 
     debug!(
@@ -317,6 +280,86 @@ pub(crate) fn format_iso8601_duration(secs: u64) -> String {
     result
 }
 
+/// Measured site power over each ended interval, in the quantity `obligation`'s payload type
+/// carries — the site meter's answer to a historical report request.
+fn measured_intervals(
+    net_power_ts: &TimeSeries,
+    obligation: &OadrReportObligation,
+    interval_width: Duration,
+    duration_iso: &str,
+    op_state: &'static str,
+    now: DateTime<Utc>,
+) -> Vec<OadrReportInterval> {
+    let payload_type = &obligation.payload_type;
+    let resampled = net_power_ts.resample_uniform(interval_width, Aggregation::Mean);
+    resampled
+        .samples
+        .iter()
+        // F-5: drop the bucket still being measured. `resample_uniform`
+        // grids up to `floor_to_grid(last_sample)`, so the newest
+        // bucket is emitted as soon as one sample lands in it and is
+        // reported as if it covered the whole interval -- then
+        // silently replaced by the real value on the next submission.
+        // A report interval has to describe a window that has ended.
+        .filter(|(start, _)| *start + interval_width <= now)
+        .enumerate()
+        .map(|(i, &(ts, value_kw))| {
+            // Which direction of flow the requesting payload type asks
+            // about. An *_CAPACITY_LIMIT report answers "how much did
+            // you draw against this limit", so it is one-directional
+            // and clamped; anything else reports net site power, where
+            // the sign is the information (F-3).
+            //
+            // Clamping everything with `.max(0.0)` was how an
+            // exporting site reported zero: a fleet sum built from
+            // those reports was wrong by exactly the export, and
+            // nothing said so. The spec calls a `USAGE` value "a
+            // float"; WIRE_PROFILE.md fixes import as positive.
+            let directed_kw = match payload_type.as_str() {
+                "EXPORT_CAPACITY_LIMIT" => (-value_kw).max(0.0),
+                "IMPORT_CAPACITY_LIMIT" => value_kw.max(0.0),
+                _ => value_kw,
+            };
+            // `USAGE` is energy *over the interval*, so the resampled
+            // mean power is multiplied by the interval it covers. This
+            // used to be sent as instantaneous watts, which is what
+            // `kpi.py` compensated for with its own `x duration`.
+            // Answer the payload type that was asked for, in the
+            // quantity the contract says it carries. This arm used to
+            // hardcode `USAGE` for everything but `SIMPLE`, so a VTN
+            // requesting `DEMAND` -- real power -- was answered with
+            // energy under a name it never asked about.
+            //
+            // A type the report contract has no opinion on is an
+            // *event* signal type (IMPORT_CAPACITY_LIMIT and friends)
+            // used as a report request: "how much did you draw against
+            // this". That is usage, and stays `USAGE`.
+            use crate::controller::report_payload::Quantity;
+            let value = match crate::controller::report_payload::quantity_of(payload_type) {
+                Some(Quantity::PowerKw) => OadrReportPayload::power_kw(payload_type, directed_kw),
+                Some(Quantity::Dimensionless) => {
+                    OadrReportPayload::level(payload_type, directed_kw)
+                }
+                Some(Quantity::EnergyKwh) => OadrReportPayload::energy_from_power_kw(
+                    payload_type,
+                    directed_kw,
+                    obligation.interval_width_s,
+                ),
+                _ => OadrReportPayload::energy_from_power_kw(
+                    "USAGE",
+                    directed_kw,
+                    obligation.interval_width_s,
+                ),
+            };
+            OadrReportInterval {
+                id: i,
+                intervalPeriod: Some(OadrIntervalPeriod::window(ts, duration_iso)),
+                payloads: vec![value, OadrReportPayload::state("OPERATING_STATE", op_state)],
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,6 +379,7 @@ mod tests {
                 ts: ts(offset_s),
                 power_kw,
                 soc_frac: None,
+                ..Default::default()
             })
             .collect();
         (id.to_string(), samples)
@@ -349,6 +393,7 @@ mod tests {
                 ts: ts(offset_s),
                 power_kw,
                 soc_frac: Some(soc_frac),
+                ..Default::default()
             })
             .collect();
         (id.to_string(), samples)
@@ -373,6 +418,7 @@ mod tests {
             fulfilled: false,
             created_at: Utc::now(),
             historical: true,
+            aggregate: false,
         }
     }
 
@@ -460,6 +506,7 @@ mod tests {
             fulfilled: false,
             created_at: Utc::now(),
             historical: true,
+            aggregate: false,
         };
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
         assert!(build_measurement_report_for_obligation(
@@ -718,6 +765,124 @@ mod tests {
             assert!(
                 (20.0..=80.0).contains(&soc_pct),
                 "SoC {soc_pct} out of range"
+            );
+        }
+    }
+
+    /// SoC samples of one storage asset: `capacity_kwh`, plugged (`None`: not pluggable), and
+    /// `(offset_s, soc_frac)` rows.
+    fn storage_samples(
+        id: &str,
+        capacity_kwh: f64,
+        plugged: Option<bool>,
+        rows: &[(i64, f64)],
+    ) -> (String, Vec<AssetReportSample>) {
+        let samples = rows
+            .iter()
+            .map(|&(offset_s, soc_frac)| AssetReportSample {
+                ts: ts(offset_s),
+                soc_frac: Some(soc_frac),
+                storage_capacity_kwh: Some(capacity_kwh),
+                plugged,
+                ..Default::default()
+            })
+            .collect();
+        (id.to_string(), samples)
+    }
+
+    /// Two EVs (one away) and a battery, by any id.
+    fn two_evs_and_a_battery() -> HashMap<String, Vec<AssetReportSample>> {
+        [
+            storage_samples(
+                "car-a",
+                60.0,
+                Some(true),
+                &[(0, 0.5), (900, 0.5), (1800, 0.5)],
+            ),
+            storage_samples(
+                "car-b",
+                80.0,
+                Some(false),
+                &[(0, 0.9), (900, 0.9), (1800, 0.9)],
+            ),
+            storage_samples("battery", 10.0, None, &[(0, 0.2), (900, 0.2), (1800, 0.2)]),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    fn soc_pct_of(interval: &OadrReportInterval) -> f64 {
+        let p = interval
+            .payloads
+            .iter()
+            .find(|p| p.r#type == "STORAGE_CHARGE_LEVEL")
+            .unwrap();
+        p.values[0].as_str().unwrap().parse().unwrap()
+    }
+
+    /// R-143: not aggregated (the spec default), every asset that has a state of charge is its
+    /// own resource, whatever its id — an EV called `car-a` reports.
+    #[test]
+    fn soc_report_names_one_resource_per_storage_asset_when_not_aggregated() {
+        let ob = make_obligation("e1", "p1", "STORAGE_CHARGE_LEVEL", 900);
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &two_evs_and_a_battery(),
+            "ven-1",
+            None,
+            None,
+            &HashMap::new(),
+            None,
+            ts(1800),
+        )
+        .unwrap();
+        let names: Vec<&str> = report
+            .resources
+            .iter()
+            .map(|r| r.resourceName.as_str())
+            .collect();
+        assert_eq!(names, ["ven-1-battery", "ven-1-car-a", "ven-1-car-b"]);
+        let pct = |name: &str| {
+            soc_pct_of(
+                &report
+                    .resources
+                    .iter()
+                    .find(|r| r.resourceName == name)
+                    .unwrap()
+                    .intervals[0],
+            )
+        };
+        assert!((pct("ven-1-car-a") - 50.0).abs() < 1e-9);
+        // An EV away still has a known SoC: it reports it.
+        assert!((pct("ven-1-car-b") - 90.0).abs() < 1e-9);
+        assert!((pct("ven-1-battery") - 20.0).abs() < 1e-9);
+    }
+
+    /// R-143: aggregated, one resource carries the stored energy of the connected storage over
+    /// its capacity — the EV away is not the site's storage: (0.5·60 + 0.2·10) / 70.
+    #[test]
+    fn soc_report_weights_connected_storage_by_capacity_when_aggregated() {
+        let mut ob = make_obligation("e1", "p1", "STORAGE_CHARGE_LEVEL", 900);
+        ob.aggregate = true;
+        let report = build_measurement_report_for_obligation(
+            &ob,
+            &two_evs_and_a_battery(),
+            "ven-1",
+            None,
+            None,
+            &HashMap::new(),
+            None,
+            ts(1800),
+        )
+        .unwrap();
+        assert_eq!(report.resources.len(), 1);
+        assert_eq!(report.resources[0].resourceName, "ven-1-meter");
+        let expected_pct = (0.5 * 60.0 + 0.2 * 10.0) / 70.0 * 100.0;
+        for iv in &report.resources[0].intervals {
+            assert!(
+                (soc_pct_of(iv) - expected_pct).abs() < 0.05,
+                "{}",
+                soc_pct_of(iv)
             );
         }
     }
@@ -1031,6 +1196,7 @@ mod tests {
                 ts: ts(1750),
                 power_kw: 1.0,
                 soc_frac: None,
+                ..Default::default()
             }],
         );
         assert_eq!(operating_state(&samples, now), "ACTIVE");
@@ -1046,6 +1212,7 @@ mod tests {
                 ts: ts(0),
                 power_kw: 1.0,
                 soc_frac: None,
+                ..Default::default()
             }],
         );
         assert_eq!(operating_state(&samples, now), "UNRESPONSIVE");

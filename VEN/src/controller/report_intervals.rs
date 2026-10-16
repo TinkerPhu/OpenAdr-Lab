@@ -4,7 +4,9 @@
 use chrono::{DateTime, Duration, Utc};
 
 use crate::controller::reporter::{format_iso8601_duration, AssetReportSample};
-use crate::controller::vtn_port::{OadrIntervalPeriod, OadrReportInterval, OadrReportPayload};
+use crate::controller::vtn_port::{
+    OadrIntervalPeriod, OadrReportInterval, OadrReportPayload, OadrReportResource,
+};
 use crate::entities::capacity_curve::{CapacityCurve, CommitmentDirection};
 use crate::entities::design_vocabulary::AssetHeuristics;
 use crate::entities::plan::Plan;
@@ -208,37 +210,94 @@ pub(crate) fn build_baseline_report_intervals(
         .collect()
 }
 
-/// Build SoC intervals using point-in-time sampling at interval ends.
-pub(crate) fn build_soc_intervals(
+/// The `STORAGE_CHARGE_LEVEL` report's resources (R-143), covering every asset that reports a
+/// state of charge — selected by what its samples carry, never by id or kind.
+///
+/// `aggregate` is the VTN's request (`reportDescriptor.aggregate`): false gives one resource per
+/// storage asset (`<ven>-<asset_id>`), each with its own SoC, plugged or not; true gives one
+/// resource (`<ven>-meter`) with the stored energy of the connected storage over its capacity.
+pub(crate) fn build_soc_resources(
     asset_samples: &std::collections::HashMap<String, Vec<AssetReportSample>>,
     interval_width: Duration,
     duration_iso: &str,
     op_state: &'static str,
-) -> Vec<OadrReportInterval> {
-    // Build SoC TimeSeries from the "ev" or "battery" sample vec.
-    let make_soc_ts = |key: &str| -> Option<TimeSeries> {
-        let samples = asset_samples.get(key)?;
-        let pts: Vec<(DateTime<Utc>, f64)> = samples
-            .iter()
-            .filter_map(|s| s.soc_frac.map(|soc_frac| (s.ts, soc_frac)))
-            .collect();
-        if pts.is_empty() {
-            return None;
-        }
-        Some(TimeSeries {
-            samples: pts,
-            interpolation: Interpolation::Step,
+    aggregate: bool,
+    ven_name: &str,
+) -> Vec<OadrReportResource> {
+    let mut storage: Vec<(&String, &Vec<AssetReportSample>)> = asset_samples
+        .iter()
+        .filter(|(_, samples)| samples.iter().any(|s| s.soc_frac.is_some()))
+        .collect();
+    storage.sort_by(|a, b| a.0.cmp(b.0));
+    let resource = |name: String, ts: TimeSeries| {
+        let intervals = soc_intervals(&ts, interval_width, duration_iso, op_state);
+        (!intervals.is_empty()).then_some(OadrReportResource {
+            resourceName: name,
+            intervals,
         })
     };
+    if aggregate {
+        let series: Vec<&Vec<AssetReportSample>> = storage.iter().map(|(_, s)| *s).collect();
+        return combined_soc_series(&series)
+            .and_then(|ts| resource(format!("{ven_name}-meter"), ts))
+            .into_iter()
+            .collect();
+    }
+    storage
+        .into_iter()
+        .filter_map(|(asset_id, samples)| {
+            soc_series(samples).and_then(|ts| resource(format!("{ven_name}-{asset_id}"), ts))
+        })
+        .collect()
+}
 
-    // Look for EV or battery SoC timeseries
-    let soc_ts = make_soc_ts("ev").or_else(|| make_soc_ts("battery"));
+/// One asset's SoC as a step series; None when no sample carries one.
+fn soc_series(samples: &[AssetReportSample]) -> Option<TimeSeries> {
+    let pts: Vec<(DateTime<Utc>, f64)> = samples
+        .iter()
+        .filter_map(|s| s.soc_frac.map(|soc_frac| (s.ts, soc_frac)))
+        .collect();
+    (!pts.is_empty()).then_some(TimeSeries {
+        samples: pts,
+        interpolation: Interpolation::Step,
+    })
+}
 
-    let soc_ts = match soc_ts {
-        Some(ts) => ts,
-        None => return Vec::new(),
-    };
+/// The site's SoC at every sample time of any storage asset: Σ soc·capacity / Σ capacity over
+/// the assets connected then, each at its latest sample. A time with no connected storage
+/// carries no value.
+fn combined_soc_series(series: &[&Vec<AssetReportSample>]) -> Option<TimeSeries> {
+    let mut times: Vec<DateTime<Utc>> =
+        series.iter().flat_map(|s| s.iter().map(|p| p.ts)).collect();
+    times.sort();
+    times.dedup();
+    let pts: Vec<(DateTime<Utc>, f64)> = times
+        .into_iter()
+        .filter_map(|t| {
+            let (stored_kwh, capacity_kwh) = series
+                .iter()
+                .filter_map(|samples| samples.iter().rev().find(|p| p.ts <= t))
+                .filter(|p| p.plugged != Some(false))
+                .filter_map(|p| Some((p.soc_frac?, p.storage_capacity_kwh?)))
+                .fold((0.0, 0.0), |(e, c), (soc_frac, cap_kwh)| {
+                    (e + soc_frac * cap_kwh, c + cap_kwh)
+                });
+            (capacity_kwh > 0.0).then(|| (t, stored_kwh / capacity_kwh))
+        })
+        .collect();
+    (!pts.is_empty()).then_some(TimeSeries {
+        samples: pts,
+        interpolation: Interpolation::Step,
+    })
+}
 
+/// SoC intervals of one series, sampled point-in-time at each interval's end.
+fn soc_intervals(
+    soc_ts: &TimeSeries,
+    interval_width: Duration,
+    duration_iso: &str,
+    op_state: &'static str,
+) -> Vec<OadrReportInterval> {
     // Build interval-end timestamps using the same grid alignment as resample_uniform
     let resampled_uniform = soc_ts.resample_uniform(interval_width, Aggregation::Mean);
     let interval_end_timestamps: Vec<DateTime<Utc>> = resampled_uniform
@@ -296,6 +355,7 @@ mod tests {
                 ts: chrono::Utc.timestamp_opt(1_700_000_000 + off_s, 0).unwrap(),
                 power_kw: kw,
                 soc_frac: None,
+                ..Default::default()
             })
             .collect();
         let series = samples_to_power_ts(&samples, Interpolation::Step);
@@ -377,6 +437,7 @@ mod tests {
                 ts: ts(off_s),
                 power_kw: 0.0, // irrelevant for BASELINE — only timestamps define the grid
                 soc_frac: None,
+                ..Default::default()
             })
             .collect()
     }

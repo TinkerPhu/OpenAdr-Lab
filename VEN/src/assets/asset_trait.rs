@@ -291,6 +291,12 @@ pub trait Asset: Send + Sync {
         unimplemented!("Asset::reset() only applies to AssetConfig-backed asset kinds")
     }
 
+    /// The energy this asset stores when full [kWh], if it stores energy (battery, EV) — the
+    /// weight of its state of charge in a site-wide one.
+    fn storage_capacity_kwh(&self) -> Option<f64> {
+        None
+    }
+
     /// This asset's kind (`AssetKind`), declared by the asset — the one answer to "what type of
     /// asset is this", whatever its id. Required: every asset knows what it is.
     fn kind(&self) -> AssetKind;

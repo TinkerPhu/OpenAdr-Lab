@@ -45,3 +45,24 @@ def step_session_belongs_to_its_ev(context, owner, other):
     assert mine[0]["asset_id"] == owner, mine[0]
     assert not any(s and s.get("asset_id") == other for s in sessions), sessions
     context.add_cleanup(lambda: ven_delete(f"/user-requests/{created['id']}"))
+
+
+@then('within {seconds:d} seconds a report for the event names the resources "{a}", "{b}" and "{c}"')
+def step_report_names_resources(context, seconds, a, b, c):
+    """`/reports` echoes the VTN's reports of this VEN's client; the per-asset names are what
+    only a VEN with these assets sends (R-143)."""
+    wanted = {a, b, c}
+
+    def reports():
+        r = ven_get("/reports")
+        return r.json() if r.ok else []
+
+    def names_all(rs):
+        return any(
+            wanted <= {res.get("resourceName") for res in rep.get("resources", [])}
+            for rep in rs
+            if rep.get("eventID") == context.saved_event_id
+        )
+
+    poll_until(reports, names_all, timeout=seconds, interval=5,
+               description=f"a report for the event naming {sorted(wanted)}")

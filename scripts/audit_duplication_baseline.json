@@ -53,7 +53,7 @@
   "VEN/src/assets/heater_milp.rs::from_state": 125,
   "VEN/src/controller/milp_planner/results.rs::translate_to_plan": 250,
   "VEN/src/controller/milp_planner/solver_phase2.rs::solve_milp_two_phase": 105,
-  "VEN/src/controller/reporter.rs::build_measurement_report_for_obligation": 175,
+  "VEN/src/controller/reporter.rs::build_measurement_report_for_obligation": 131,
   "VEN/src/profile/validate.rs::validate": 355,
   "VEN/src/routes/mod.rs::build_router": 121,
   "VEN/src/services/obligation.rs::check_and_report": 106,

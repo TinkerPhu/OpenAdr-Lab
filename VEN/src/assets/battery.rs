@@ -268,6 +268,10 @@ impl Asset for Battery {
         Some(self)
     }
 
+    fn storage_capacity_kwh(&self) -> Option<f64> {
+        Some(self.capacity_kwh)
+    }
+
     fn kind(&self) -> crate::entities::asset::AssetKind {
         crate::entities::asset::AssetKind::Battery
     }
