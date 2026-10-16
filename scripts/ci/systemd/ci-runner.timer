@@ -1,0 +1,11 @@
+[Unit]
+Description=Look for queued CI tickets every minute
+
+[Timer]
+OnBootSec=2min
+# Counted from the end of the previous run, so a long run never overlaps the next one.
+OnUnitInactiveSec=1min
+Unit=ci-runner.service
+
+[Install]
+WantedBy=timers.target

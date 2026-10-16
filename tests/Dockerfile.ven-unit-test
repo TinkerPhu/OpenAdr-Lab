@@ -30,6 +30,10 @@ RUN apt-get update \
 
 RUN rustup component add rustfmt clippy
 
+# `cargo audit` is part of the pre-merge gate (the CI runner runs it in this image). Its own
+# layer: compiling it takes a while on ARM and no source change should redo that.
+RUN cargo install cargo-audit --locked
+
 WORKDIR /app
 
 # Context is the repo root (for `lab-core`, the crate the VEN shares with the

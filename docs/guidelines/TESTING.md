@@ -203,23 +203,102 @@ docker compose -f tests/docker-compose.test.yml down -v
 
 ---
 
-## CI/CD
+## CI on Node3
 
-**No CI pipeline is configured yet.** `.github/workflows/` is empty.
+Node3 tests what sessions hand it and is the only thing that merges to `main`. There is no
+GitHub Actions runner: the repository is public, and a runner on the home network that executes
+fork pull requests would be an open door. (`.github/workflows/` stays empty; the openleadr-rs
+submodule has its own upstream CI.)
 
-Run linting and all test suites manually before merging any branch:
-
-```bash
-# Rust lint (WSL)
-wsl cargo fmt --check -p ven
-wsl cargo clippy -p ven -- -D warnings
-
-# All suites
-bash run_all_tests.sh
+```
+session / laptop                              Node3
+push the branch
+ci-handoff.sh  ───── ticket on the board ──►  /srv/ci/board/<ticket>/
+close the session                             runner, started by a systemd timer every minute:
+                                                rebases the commit onto origin/main
+                                                quick tier, then full tier
+                                                all green and kind=merge: origin/main fast-forwarded
+ci-next.sh  ◄──── status + result.md ───────  verdict written into the ticket
+resumes the session with the result
 ```
 
-The openleadr-rs submodule has its own CI (`.github/workflows/checks.yml`) that runs on
-upstream PRs — build, test, clippy, format, audit.
+### Handing a branch over
+
+Commit everything first, **including the journal and key-learnings entries** (they are tested and
+merged with the code), push, then hand off and stop:
+
+```bash
+git push -f origin HEAD:<branch>
+bash scripts/ci/ci-handoff.sh                    # test everything, merge if green
+bash scripts/ci/ci-handoff.sh --kind check       # test only, never merge (A/B runs, experiments)
+bash scripts/ci/ci-handoff.sh --tiers quick      # audits, fmt, clippy, cargo test only; never merges code
+```
+
+The ticket records the session id and the directory the session was started in. The session can
+be closed: nothing waits for it, and the result stays on the board. Keeping a session open does
+not keep its prompt cache warm (the cache is server-side and expires on its own), and costs RAM.
+
+### Picking the result up
+
+```bash
+bash scripts/ci/ci-next.sh            # finished tickets; resumes the session of the one you choose
+bash scripts/ci/ci-next.sh --list     # only list         --all    every ticket and its status
+bash scripts/ci/ci-next.sh --new      # a fresh session in the ticket's worktree (cheaper than
+                                      # waking a long session just to say "merged")
+```
+
+The resumed (or new) session gets the runner's `result.md` as its first message. A ticket is
+handed over once. **Merged:** delete the branch (local and origin), remove the worktree, return
+any docker host checkout to main. **Anything else:** fix, push, hand off again.
+
+| Status | Meaning |
+|---|---|
+| `queued` / `running` | waiting for the runner / being tested |
+| `merged` | tested after the rebase, `origin/main` fast-forwarded to that commit |
+| `green` | tested, not merged (`--kind check`, or `--tiers quick` on code) |
+| `red` | a step failed; `result.md` names it and shows the failing scenarios or the log tail |
+| `conflict` | the rebase onto `origin/main` conflicts: rebase locally, resolve, push, hand off again |
+| `stale` | `origin/main` kept moving under the run (someone merged by hand) three times |
+| `error` | the runner could not run the ticket (commit not on origin, push refused, ...) |
+
+### What the runner does
+
+1. Takes the Node3 lock (`LOCK_OWNER=ci-runner`), fetches, checks out the commit and rebases it
+   onto `origin/main`. What is tested is exactly what would land; nobody else moves `main`.
+2. **Docs-only change** (only `docs/`, `wiki/`, `openspec/`, top-level `*.md`): the five audits,
+   then merge. **Code:** the audits, then in `tests/docker-compose.ven-unit-test.yml`
+   `cargo fmt --check`, `clippy -D warnings`, `cargo test`, `cargo audit` (VEN and BFF).
+3. Full tier unless `--tiers quick`: `run_all_tests.sh --rust --e2e --resilience` on the host.
+4. Everything green and `--kind merge`: `git push origin <tested sha>:main`, fast-forward only.
+   If `origin/main` moved while testing (a manual merge), the ticket is re-queued; three times is `stale`.
+
+A full run is 55-65 minutes warm, so the runner merges at most about 15-20 branches a day; tickets
+queue, oldest first. One ticket never costs an extra run because `main` moved.
+
+### On the host, by hand
+
+`run_all_tests.sh` runs on the docker host itself with `OPENADR_LAB_HOST=localhost` (or
+`DOCKER_HOST=""`): docker commands run directly, `DOCKER_HOST` is unset for them (it is also the
+docker CLI's daemon address), and the host lock is taken. It tests what is checked out there and
+never pulls. `LOCK_HELD_BY_CALLER=1` skips the lock for a caller that holds it already.
+
+### Operating it
+
+`bash scripts/ci/install.sh` on Node3 (from a checkout of `main`) installs the runner into
+`/srv/ci/bin`, the `ci-runner.timer`, and warms the unit-test image. The runner is a snapshot:
+changes to `scripts/ci/` take effect after the next install, and a ticket that changes them is
+tested by the previous version.
+
+- Board and logs: `/srv/ci/board/<ticket>/{request.env,status,result.md,run.log,quick.log,full.log}`.
+- Pause: `sudo systemctl stop ci-runner.timer` (a running ticket finishes). Is it alive:
+  `systemctl is-active ci-runner.timer`; timer log: `journalctl -u ci-runner`.
+- Push access: `/srv/ci/deploy_key` is a write-enabled deploy key for this repository only.
+- Phone push: put `NTFY_TOPIC=<topic>` into `/srv/ci/env` (ntfy.sh).
+- Tests of the mechanism: `scripts/ci/test_board.sh`, `scripts/ci/test_handoff.sh`,
+  `scripts/test_lease_lock.sh`.
+
+Not built yet: deploying a tested build to Node1/Node2 from the runner, and re-running a failed
+E2E scenario once to tell a flaky one from a red one (`docs/plans/ci-node3-handoff.md`).
 
 ---
 

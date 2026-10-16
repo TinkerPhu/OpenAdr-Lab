@@ -3422,6 +3422,10 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
 
 ## Byte-identical after a model refactor means keeping the order, not just the meaning (2026-10-14)
 
+*(Since 2026-10-16 the planner goldens no longer pin term order or the last digits, because they
+must hold on aarch64 as well: see "A golden that must hold on two CPUs..." below. The advice stays
+right for keeping an x86 plan identical to the last bit; it is no longer needed to pass the tests.)*
+
 - good_lp keeps expression terms in a hash map, and HiGHS's answer depends on column and row order:
   moving one variable family (PV's used generation) from the grid block to the asset list changed
   `objective_eur` in the 13th digit. Declaring it where it was, adding its rows beside the same
@@ -3465,3 +3469,31 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
   `Asset` only by inheriting panicking defaults, and no code used it through the trait. Prefer a
   required method over an `unimplemented!()` default: the compiler lists every type that has to
   answer, and a type with no answer is a type that should not implement the trait.
+
+## A golden that must hold on two CPUs cannot pin float bits or hash order (2026-10-16)
+
+- The planner goldens passed on x86 and failed on Node3's aarch64, on `main` too. Three things
+  depended on the CPU: the order `good_lp` hands terms to HiGHS (hashbrown iterates in another order
+  with another SIMD width), the last digits of solved floats (relative 1.7e-12 on the same vertex),
+  and any digest of those floats. Model coefficients are computed identically and stay bit-exact.
+- Fix by kind, not by loosening: drop what only describes the CPU (the order digest), hash a
+  solver's outputs rounded to 6 significant digits, compare printed floats to 1e-9 relative
+  (`tests/golden_compare.rs`). Measure first: diff the goldens a second architecture regenerates and
+  classify every difference before choosing a tolerance.
+- Rounding before hashing flips when a value sits next to a rounding boundary: about 1e-5 per value
+  at 6 digits with 1e-12 noise. Verify the regenerated golden on both architectures, once.
+
+## Detached in WSL is not detached from Windows (2026-10-16)
+
+- `setsid nohup` inside WSL does not outlive the VM: with no `wsl.exe` client attached WSL shuts
+  its VM down and `/tmp` (logs, the WSL lock file) goes with it. Three cargo runs were lost to this
+  on 2026-10-15 before a hidden `Start-Process wsl.exe` (outside Claude Code's process tree, which a
+  low-memory reaper kills) kept them alive. Put the cargo target on WSL's ext4 (`/mnt/c` fails with
+  `failed to remove temporary directory: Permission denied` as Windows briefly holds fresh files) and
+  logs on the Windows side.
+
+## One merge queue beats re-testing after every move of main (2026-10-16)
+
+- One branch needed five full suite runs in 10 hours; only one failure was real. The other four
+  were `main` moving under a tested branch. A runner that rebases first, tests that commit and is
+  the only thing moving `main` makes the number of runs per branch one, at the price of queueing.

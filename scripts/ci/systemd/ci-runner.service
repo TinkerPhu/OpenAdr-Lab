@@ -1,0 +1,11 @@
+[Unit]
+Description=OpenADR Lab CI runner (works through the handoff board)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+ExecStart=/srv/ci/bin/ci/runner.sh
+# A full suite takes about an hour; leave room for a cold toolchain build and a retry.
+TimeoutStartSec=5h
