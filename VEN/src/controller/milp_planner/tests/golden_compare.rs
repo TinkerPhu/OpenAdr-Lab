@@ -1,4 +1,4 @@
-//! Comparing recorded text across CPU architectures.
+//! Comparing a recorded run with its golden, across CPU architectures.
 //!
 //! The planner goldens (`plans_golden`, `model_fingerprint`) were recorded on x86. On aarch64
 //! the same code, same inputs and same HiGHS answer differ in the last digits of some floats
@@ -10,8 +10,9 @@
 //! - `quantise_floats`: where a line is a digest and cannot be compared numerically, floats are
 //!   rounded to 6 significant digits before hashing, so the digest is the same on both.
 //!
-//! A float is a number with a decimal point or an exponent; integers, hex digests and words are
-//! compared exactly.
+//! `assert_matches_golden` is the one place a golden is compared, line by line, naming the scenario
+//! and the line that differs. A float is a number with a decimal point or an exponent; integers,
+//! hex digests and words are compared exactly.
 
 use crate::controller::milp_planner::model_probe::recorder::{quantise_f64, FLOAT_NOISE};
 
@@ -111,6 +112,33 @@ pub(super) fn quantise_floats(text: &str) -> String {
         .collect()
 }
 
+/// Assert that a recorded run equals its golden. Lines headed `## ` open a scenario, named in the
+/// failure; `what` says what was recorded ("model", "plan").
+pub(super) fn assert_matches_golden(actual: &[String], golden: &str, what: &str) {
+    let expected: Vec<&str> = golden.lines().collect();
+    let mut scenario = "(before the first scenario)";
+    for (i, got) in actual.iter().enumerate() {
+        if let Some(name) = got.strip_prefix("## ") {
+            scenario = name;
+        }
+        let want = expected
+            .get(i)
+            .copied()
+            .unwrap_or("(the golden ends before this line)");
+        assert!(
+            same_within_float_noise(got, want),
+            "{what} differs at line {i} of scenario `{scenario}`\n  got:  {got}\n  want: {want}"
+        );
+    }
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "the golden holds {} lines but this run produced {}",
+        expected.len(),
+        actual.len()
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,7 +173,10 @@ mod tests {
     #[test]
     fn same_within_float_noise_treats_signed_zero_and_dust_as_zero() {
         assert!(same_within_float_noise("peak -0.0", "peak 0.0"));
-        assert!(same_within_float_noise("violation 1.2e-15", "violation 0.0"));
+        assert!(same_within_float_noise(
+            "violation 1.2e-15",
+            "violation 0.0"
+        ));
     }
 
     #[test]
@@ -160,6 +191,33 @@ mod tests {
         assert_eq!(a, quantise_floats("[2.7550990207796886, 0.0, 3]"));
         assert_ne!(a, quantise_floats("[2.76, 0.0, 3]"));
         assert_ne!(a, quantise_floats("[2.7550990207796175, 0.0, 4]"));
+    }
+
+    #[test]
+    fn assert_matches_golden_accepts_noise_and_names_the_scenario_of_a_difference() {
+        let golden = "## one\nx 1.0\n## two\ny 2.0\n";
+        let noisy: Vec<String> = ["## one", "x 1.0000000000001", "## two", "y 2.0"]
+            .map(String::from)
+            .to_vec();
+        assert_matches_golden(&noisy, golden, "plan");
+
+        let changed: Vec<String> = ["## one", "x 1.0", "## two", "y 2.5"]
+            .map(String::from)
+            .to_vec();
+        let message = std::panic::catch_unwind(|| assert_matches_golden(&changed, golden, "plan"))
+            .expect_err("a changed value must fail");
+        let message = message
+            .downcast_ref::<String>()
+            .cloned()
+            .unwrap_or_default();
+        assert!(message.contains("scenario `two`"), "{message}");
+    }
+
+    #[test]
+    #[should_panic(expected = "the golden holds 2 lines but this run produced 3")]
+    fn assert_matches_golden_rejects_a_run_longer_than_the_golden() {
+        let actual: Vec<String> = ["## one", "x 1.0", "z"].map(String::from).to_vec();
+        assert_matches_golden(&actual, "## one\nx 1.0\n", "plan");
     }
 
     #[test]
