@@ -1,5 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
-use tracing::debug;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::controller::vtn_port::{EventTypeName, OadrEvent, OadrPayload, PayloadValues};
@@ -151,6 +151,11 @@ pub fn parse_unapplied_payloads(events: &[OadrEvent]) -> Vec<UnappliedPayload> {
 /// When no interval of the event gives us a span to count in.
 const DEFAULT_REPORT_CADENCE_S: u64 = 3600;
 
+/// How often an ad hoc forecast (`frequency: 0`) is submitted when the plan's
+/// objective has not changed: four forecasts per VEN per hour on the VTN
+/// (`docs/reference/WIRE_PROFILE.md`).
+pub const AD_HOC_FORECAST_EVERY_S: u64 = 900;
+
 /// The report interval width this VEN chooses when the VTN leaves it open.
 ///
 /// `reportIntervals: OPEN_INTERVALS` means "the VEN is expected to generate
@@ -195,6 +200,10 @@ fn report_timing(event: &OadrEvent, d: &WireReportDescriptor) -> (u64, u64) {
         return (DEFAULT_REPORT_CADENCE_S, DEFAULT_REPORT_CADENCE_S);
     };
 
+    if d.frequency == 0 {
+        return (width_s, ad_hoc_cadence_s(event, d));
+    }
+
     // Both fields are plain `i32` on the wire type with spec defaults of -1,
     // so "absent" and "-1" are the same branch rather than two.
     let n_intervals = if d.frequency > 0 {
@@ -209,6 +218,24 @@ fn report_timing(event: &OadrEvent, d: &WireReportDescriptor) -> (u64, u64) {
     };
 
     (width_s, width_s.saturating_mul(n_intervals))
+}
+
+/// `frequency: 0` leaves the cadence to the VEN. A forecast is re-sent when the
+/// plan in force changes objective and otherwise every
+/// [`AD_HOC_FORECAST_EVERY_S`]; a measurement has no such moment and keeps the
+/// profile default, which is logged because it is an assumption about a field
+/// the VTN left open (`wire-contracts`).
+fn ad_hoc_cadence_s(event: &OadrEvent, d: &WireReportDescriptor) -> u64 {
+    if !d.historical {
+        return AD_HOC_FORECAST_EVERY_S;
+    }
+    info!(
+        event_id = %event.id,
+        payload_type = %d.payload_type.wire_name(),
+        cadence_s = DEFAULT_REPORT_CADENCE_S,
+        "ad hoc measurement report (frequency 0): applying the profile default cadence"
+    );
+    DEFAULT_REPORT_CADENCE_S
 }
 
 /// Extract report obligations from event reportDescriptors.
@@ -268,6 +295,7 @@ pub fn extract_report_obligations(
                 created_at: now,
                 historical: descriptor.historical,
                 aggregate: descriptor.aggregate,
+                ad_hoc: descriptor.frequency == 0,
             });
         }
     }
@@ -1803,6 +1831,7 @@ mod tests {
             created_at: now,
             historical: true,
             aggregate: false,
+            ad_hoc: false,
         }];
         let obligations = extract_report_obligations(
             &lab_core::test_fixtures::events_from_json(events),
@@ -1927,6 +1956,47 @@ mod tests {
         let events = quarter_hourly_event(json!({"payloadType": "USAGE"}));
         let obligations = extract_report_obligations(&events, Utc::now(), &[]);
         assert_eq!(obligations[0].submit_every_s, 3600, "4 x PT15M");
+    }
+
+    /// `frequency: 0` is an ad hoc report: "the VEN is expected to generate a
+    /// report at any time it chooses" (User Guide 733). A forecast goes out when
+    /// the plan in force changes objective (`services::obligation` re-arms it)
+    /// and otherwise every 15 minutes, which keeps the VTN's report table at
+    /// four forecasts per VEN per hour.
+    #[test]
+    fn frequency_zero_is_an_ad_hoc_forecast_every_fifteen_minutes() {
+        let events = quarter_hourly_event(json!({
+            "payloadType": "USAGE_FORECAST", "readingType": "FORECAST",
+            "historical": false, "frequency": 0
+        }));
+        let ob = &extract_report_obligations(&events, Utc::now(), &[])[0];
+        assert!(ob.ad_hoc);
+        assert_eq!(ob.interval_width_s, 900, "the event's own grid");
+        assert_eq!(ob.submit_every_s, AD_HOC_FORECAST_EVERY_S);
+        assert_eq!(AD_HOC_FORECAST_EVERY_S, 900);
+    }
+
+    /// A measurement has no "the plan changed" moment to report on, so an ad
+    /// hoc one keeps the profile default cadence (logged as applied).
+    #[test]
+    fn frequency_zero_for_a_measurement_uses_the_profile_cadence() {
+        let events = quarter_hourly_event(json!({"payloadType": "USAGE", "frequency": 0}));
+        let ob = &extract_report_obligations(&events, Utc::now(), &[])[0];
+        assert!(ob.ad_hoc);
+        assert_eq!(ob.submit_every_s, DEFAULT_REPORT_CADENCE_S);
+    }
+
+    /// Every other `frequency` keeps its meaning: intervals between reports.
+    #[test]
+    fn only_frequency_zero_is_ad_hoc() {
+        for (frequency, every_s) in [(-1, 3600), (1, 900), (2, 1800)] {
+            let events = quarter_hourly_event(json!({
+                "payloadType": "USAGE_FORECAST", "historical": false, "frequency": frequency
+            }));
+            let ob = &extract_report_obligations(&events, Utc::now(), &[])[0];
+            assert!(!ob.ad_hoc, "frequency {frequency}");
+            assert_eq!(ob.submit_every_s, every_s, "frequency {frequency}");
+        }
     }
 
     /// An event with no bounded interval gives nothing to count, so the

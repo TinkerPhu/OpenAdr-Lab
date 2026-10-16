@@ -36,4 +36,10 @@ historical: boolean,
  * VEN's resources; false = one result per resource (R-143). Honoured by the device
  * payloads (state of charge); site-meter payloads have one resource either way.
  */
-aggregate: boolean, };
+aggregate: boolean, 
+/**
+ * `reportDescriptor.frequency: 0`, an ad hoc report: the VEN chooses when
+ * to submit (User Guide 733). An ad hoc forecast is also due at once when
+ * the plan in force changes objective (`services::obligation`).
+ */
+ad_hoc: boolean, };

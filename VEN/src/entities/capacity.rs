@@ -313,6 +313,11 @@ pub struct OadrReportObligation {
     /// payloads (state of charge); site-meter payloads have one resource either way.
     #[serde(default)]
     pub aggregate: bool,
+    /// `reportDescriptor.frequency: 0`, an ad hoc report: the VEN chooses when
+    /// to submit (User Guide 733). An ad hoc forecast is also due at once when
+    /// the plan in force changes objective (`services::obligation`).
+    #[serde(default)]
+    pub ad_hoc: bool,
 }
 
 impl OadrReportObligation {

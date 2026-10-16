@@ -7,6 +7,8 @@ use tracing::{debug, error, info};
 use crate::controller::history_port::record_report_sent;
 use crate::controller::reporter::AssetReportSample;
 use crate::controller::{HistoryPort, VtnPort};
+use crate::entities::capacity::OadrReportObligation;
+use crate::entities::planner_params::PlannerObjective;
 use crate::entities::reservation_request::ReservationRequest;
 use crate::entities::DomainError;
 use crate::state::AppState;
@@ -20,6 +22,46 @@ fn vtn_says_source_is_gone(e: &anyhow::Error) -> bool {
 }
 
 pub struct ObligationService;
+
+/// The ad hoc forecast obligations to submit at once because the plan just adopted runs under a
+/// different objective than the one it replaced (`previous_objective` `None`: nothing was in
+/// force). The same objective re-armed nothing: those forecasts keep their own cadence.
+pub fn ad_hoc_forecasts_due_on_adoption(
+    obligations: &[OadrReportObligation],
+    previous_objective: Option<PlannerObjective>,
+    adopted_objective: PlannerObjective,
+) -> Vec<uuid::Uuid> {
+    if previous_objective == Some(adopted_objective) {
+        return Vec::new();
+    }
+    obligations
+        .iter()
+        .filter(|o| o.ad_hoc && !o.historical && !o.fulfilled)
+        .map(|o| o.id)
+        .collect()
+}
+
+/// Make the forecasts [`ad_hoc_forecasts_due_on_adoption`] names due at `now`, from a task of
+/// its own: the caller is the planning cycle, which has already put the plan in force and must
+/// not wait on the obligation store.
+pub fn rearm_ad_hoc_forecasts_on_adoption(
+    state: AppState,
+    previous_objective: Option<PlannerObjective>,
+    adopted_objective: PlannerObjective,
+    now: DateTime<Utc>,
+) {
+    tokio::spawn(async move {
+        let obligations = state.report_obligations().await;
+        let due =
+            ad_hoc_forecasts_due_on_adoption(&obligations, previous_objective, adopted_objective);
+        for id in &due {
+            state.rearm_obligation(*id, now).await;
+        }
+        if !due.is_empty() {
+            info!(count = due.len(), objective = ?adopted_objective, "ad hoc forecasts due: the plan in force changed objective");
+        }
+    });
+}
 
 impl ObligationService {
     /// Check for due obligations and submit a measurement report for each one.
@@ -254,7 +296,83 @@ mod tests {
             created_at: due_at,
             historical: true,
             aggregate: false,
+            ad_hoc: false,
         }
+    }
+
+    fn ad_hoc_forecast(due_at: DateTime<Utc>) -> crate::entities::capacity::OadrReportObligation {
+        crate::entities::capacity::OadrReportObligation {
+            payload_type: "USAGE_FORECAST".to_string(),
+            reading_type: "FORECAST".to_string(),
+            historical: false,
+            ad_hoc: true,
+            ..make_due_obligation(due_at)
+        }
+    }
+
+    /// 6.4: the first plan under a new objective makes every ad hoc forecast due at once, and
+    /// only those: an ad hoc measurement, a forecast on a fixed cadence and a fulfilled one wait.
+    #[test]
+    fn an_objective_change_makes_ad_hoc_forecasts_due_at_once() {
+        let forecast = ad_hoc_forecast(ts(900));
+        let measurement = crate::entities::capacity::OadrReportObligation {
+            ad_hoc: true,
+            ..make_due_obligation(ts(900))
+        };
+        let fixed_cadence = crate::entities::capacity::OadrReportObligation {
+            ad_hoc: false,
+            ..ad_hoc_forecast(ts(900))
+        };
+        let fulfilled = crate::entities::capacity::OadrReportObligation {
+            fulfilled: true,
+            ..ad_hoc_forecast(ts(900))
+        };
+        let all = [forecast.clone(), measurement, fixed_cadence, fulfilled];
+        assert_eq!(
+            ad_hoc_forecasts_due_on_adoption(
+                &all,
+                Some(PlannerObjective::MinCost),
+                PlannerObjective::Opportunistic
+            ),
+            vec![forecast.id]
+        );
+        assert_eq!(
+            ad_hoc_forecasts_due_on_adoption(&all, None, PlannerObjective::MinCost),
+            vec![forecast.id],
+            "the first plan after start-up counts as a change"
+        );
+    }
+
+    /// The throttle: re-adopting under the same objective leaves the 15-minute cadence alone.
+    #[test]
+    fn an_adoption_under_the_same_objective_rearms_nothing() {
+        let all = [ad_hoc_forecast(ts(900))];
+        assert!(ad_hoc_forecasts_due_on_adoption(
+            &all,
+            Some(PlannerObjective::MinCost),
+            PlannerObjective::MinCost
+        )
+        .is_empty());
+    }
+
+    #[tokio::test]
+    async fn rearming_on_adoption_makes_the_forecast_due_now() {
+        let state = AppState::new();
+        let ob = ad_hoc_forecast(ts(900));
+        state.add_obligations(vec![ob.clone()]).await;
+        rearm_ad_hoc_forecasts_on_adoption(
+            state.clone(),
+            Some(PlannerObjective::MinCost),
+            PlannerObjective::Opportunistic,
+            ts(10),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while state.due_obligations(ts(10)).await.is_empty() && std::time::Instant::now() < deadline
+        {
+            tokio::task::yield_now().await;
+        }
+        let due = state.due_obligations(ts(10)).await;
+        assert_eq!(due.iter().map(|o| o.id).collect::<Vec<_>>(), vec![ob.id]);
     }
 
     /// Two full 900s intervals of history (0, 900, 1800) — enough for

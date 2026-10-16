@@ -113,9 +113,13 @@ pub(super) async fn run_plan_cycle(
     )
     .await;
     if cycle.adopted {
-        // The fleet's view of the plan in force (openspec `opportunistic-objective` 6.3);
-        // serialised and sent from a task of its own, so the cycle never waits on the broker.
-        telemetry.publish_plan(Arc::new(cycle.plan.clone()));
+        announce_adoption(
+            state,
+            telemetry,
+            current_plan.as_ref(),
+            &cycle.plan,
+            wall_now,
+        );
     }
 
     // Post-cycle outputs: WP4.3 notifications + WP3.6 forecasts.
@@ -139,6 +143,26 @@ pub(super) async fn run_plan_cycle(
         slot_count = cycle.plan.slots.len(),
         adopted = cycle.adopted,
         "plan cycle complete"
+    );
+}
+
+/// What follows an adoption, once the plan is in force (openspec `opportunistic-objective` 6.3,
+/// 6.4): the plan goes out on the fleet channel's `plan` leaf, and the VTN's ad hoc forecasts
+/// are due at once when the objective changed. Both run in tasks of their own, so the cycle
+/// never waits on the broker or on the obligation store.
+fn announce_adoption(
+    state: &AppState,
+    telemetry: &dyn crate::controller::telemetry_port::TelemetryPort,
+    replaced: Option<&crate::entities::plan::Plan>,
+    adopted: &crate::entities::plan::Plan,
+    now: DateTime<Utc>,
+) {
+    telemetry.publish_plan(Arc::new(adopted.clone()));
+    crate::services::obligation::rearm_ad_hoc_forecasts_on_adoption(
+        state.clone(),
+        replaced.map(|p| p.objective),
+        adopted.objective,
+        now,
     );
 }
 

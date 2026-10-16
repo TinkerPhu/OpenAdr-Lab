@@ -133,7 +133,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       while fleet-sourced, clear after a local change ignored, malformed.
 - [x] 6.3 Publish the adopted plan on the `plan` leaf (retained, QoS 1) on every adoption, same
       non-blocking path as 6.1; serialization happens in the spawned task, not in the cycle.
-- [ ] 6.4 `report_timing`: `frequency: 0` = VEN's choice. Forecast obligations are re-armed as due
+- [x] 6.4 `report_timing`: `frequency: 0` = VEN's choice. Forecast obligations are re-armed as due
       on the first adoption after an objective change, otherwise at most once per 15 minutes,
       from a spawned task after the plan is in force; measurement obligations use
       `DEFAULT_REPORT_CADENCE_S`, logged. Tests in `openadr_interface.rs` and
