@@ -19,6 +19,11 @@ use crate::entities::plan::{PlanWarning, WarningKind, WarningSeverity};
 /// Below this the shortfall is solver tolerance, not a missed target [kWh].
 const SHORTFALL_TOLERANCE_KWH: f64 = 1e-3;
 
+/// Where this kind stands in claiming PV surplus, lower first: in the plan's allocation
+/// order (`AssetMilpContext::surplus_claim_rank`) and in live opportunistic dispatch
+/// (`Asset::surplus_claim_rank`), one declaration for both. The heater claims PV surplus after the EV.
+pub(crate) const SURPLUS_CLAIM_RANK: u8 = 1;
+
 /// One heater's variables in one solve.
 struct DeclaredHeater<'a> {
     ctx: &'a HeaterMilpContext,
@@ -152,7 +157,7 @@ impl AssetMilpContext for HeaterMilpContext {
 
     /// The heater claims PV surplus after the EV.
     fn surplus_claim_rank(&self) -> u8 {
-        1
+        SURPLUS_CLAIM_RANK
     }
 
     #[cfg(test)]

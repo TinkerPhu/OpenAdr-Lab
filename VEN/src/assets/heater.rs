@@ -328,6 +328,10 @@ impl Heater {
 }
 
 impl Asset for Heater {
+    fn surplus_claim_rank(&self) -> Option<u8> {
+        Some(super::heater_declared::SURPLUS_CLAIM_RANK)
+    }
+
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
         let s: &HeaterState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);

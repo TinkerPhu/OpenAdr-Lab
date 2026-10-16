@@ -17,6 +17,11 @@ use crate::controller::milp_planner::{
 };
 use crate::entities::plan::{PlanWarning, WarningKind, WarningSeverity};
 
+/// Where this kind stands in claiming PV surplus, lower first: in the plan's allocation
+/// order (`AssetMilpContext::surplus_claim_rank`) and in live opportunistic dispatch
+/// (`Asset::surplus_claim_rank`), one declaration for both. The EV claims PV surplus first.
+pub(crate) const SURPLUS_CLAIM_RANK: u8 = 0;
+
 /// One EV's variables in one solve.
 struct DeclaredEv<'a> {
     ctx: &'a EvMilpContext,
@@ -207,7 +212,7 @@ impl AssetMilpContext for EvMilpContext {
 
     /// The EV claims PV surplus first.
     fn surplus_claim_rank(&self) -> u8 {
-        0
+        SURPLUS_CLAIM_RANK
     }
 
     #[cfg(test)]

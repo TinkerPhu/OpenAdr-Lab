@@ -14,6 +14,11 @@ use crate::controller::milp_planner::{
     DeclaredAsset, DischargeLeg, ObjectivePart, StorageLegs,
 };
 
+/// Where this kind stands in claiming PV surplus, lower first: in the plan's allocation
+/// order (`AssetMilpContext::surplus_claim_rank`) and in live opportunistic dispatch
+/// (`Asset::surplus_claim_rank`), one declaration for both. Storage takes the surplus the loads leave: it claims last.
+pub(crate) const SURPLUS_CLAIM_RANK: u8 = 3;
+
 /// One battery's variables in one solve.
 struct DeclaredBattery<'a> {
     ctx: &'a BatteryMilpContext,
@@ -180,7 +185,7 @@ impl AssetMilpContext for BatteryMilpContext {
 
     /// Storage takes the surplus the loads leave: it claims last.
     fn surplus_claim_rank(&self) -> u8 {
-        3
+        SURPLUS_CLAIM_RANK
     }
 
     #[cfg(test)]

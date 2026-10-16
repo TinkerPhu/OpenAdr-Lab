@@ -13,6 +13,11 @@ use crate::controller::milp_planner::{
     DeclaredAsset, FlexibilityWindow, ObjectivePart, ShiftableLoadMilpContext,
 };
 
+/// Where this kind stands in claiming PV surplus, lower first: in the plan's allocation
+/// order (`AssetMilpContext::surplus_claim_rank`) and in live opportunistic dispatch
+/// (`Asset::surplus_claim_rank`), one declaration for both. A shiftable load claims PV surplus after the EV and the heater.
+pub(crate) const SURPLUS_CLAIM_RANK: u8 = 2;
+
 /// Deterministic earliest-start tie-break for a shiftable load [€ per start-slot index].
 ///
 /// Window offsets are measured from the ALIGNED grid start (now truncated to the
@@ -147,7 +152,7 @@ impl AssetMilpContext for ShiftableLoadMilpContext {
 
     /// A shiftable load claims PV surplus after the EV and the heater.
     fn surplus_claim_rank(&self) -> u8 {
-        2
+        SURPLUS_CLAIM_RANK
     }
 
     #[cfg(test)]

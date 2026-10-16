@@ -151,6 +151,10 @@ impl Battery {
 }
 
 impl Asset for Battery {
+    fn surplus_claim_rank(&self) -> Option<u8> {
+        Some(super::battery_declared::SURPLUS_CLAIM_RANK)
+    }
+
     fn arbiter_lever(&self) -> Option<crate::entities::asset::ArbiterLever> {
         Some(crate::entities::asset::ArbiterLever {
             kind: crate::entities::asset::ArbiterLeverKind::Storage,

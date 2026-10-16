@@ -239,6 +239,10 @@ impl EvCharger {
 }
 
 impl Asset for EvCharger {
+    fn surplus_claim_rank(&self) -> Option<u8> {
+        Some(super::ev_declared::SURPLUS_CLAIM_RANK)
+    }
+
     fn key_features(&self, _state: &AssetState) -> Vec<KeyFeature> {
         vec![KeyFeature::energy_kwh("capacity", self.battery_kwh)]
     }
