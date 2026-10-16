@@ -62,6 +62,16 @@ node3: Node3 (192.168.1.106) is a third docker host, same hardware class as Node
 running nothing else, under evaluation as a dedicated CI host. Same sparse checkout,
 submodule and lock mechanism (LOCK_HOST=Node3, `DOCKER_HOST=Node3 bash run_all_tests.sh ...`).
 
+ci-handoff: Node3 also runs the CI runner, which tests branches and is the only thing that merges
+to main. When your work is done and the quick local checks are green (cargo check, the tests you
+touched, the python audits): commit the journal and KEY_LEARNINGS entries WITH the code, push
+(`git push -f origin HEAD:<branch>`), run `bash scripts/ci/ci-handoff.sh`, and stop. Do not run
+the full suite yourself, do not merge to main, do not wait for the result. The user brings you the
+result with `scripts/ci/ci-next.sh`: merged means delete the branch and worktree and finish the
+task; red, conflict or stale means fix and hand off again. Use `--kind check` for a run that must
+not merge. Full description: docs/guidelines/TESTING.md "CI on Node3", skill ci-handoff. If the
+runner is not running (`ssh Node3 systemctl is-active ci-runner.timer`), merge the old way.
+
 one-checkout-per-host: each docker host has a SINGLE working tree at
 /srv/docker/openadr_lab, and `run_all_tests.sh` does NOT switch it to your branch: it
 only `git pull`s whatever branch the host already has checked out, then builds and tests
@@ -187,7 +197,8 @@ branching: feature branches use the pattern NNN-whatever-case-description where 
 openspec feature ID (e.g. 030-my-feature). Refactor branches: refactor/<slug>.
 Fix branches: fix/<slug>. All those branches target main. Never force-push to main. The goal is to rebase and fast forward merge.
 Commits are signed off (-s); do not add co-author footers (see rule above).
-Merge only after all of these pass (run manually): cargo fmt, cargo clippy --all-targets --all-features -- -D warnings, cargo audit,
+Merge only after all of these pass (the Node3 runner runs them when you hand off a branch; by
+hand otherwise): cargo fmt, cargo clippy --all-targets --all-features -- -D warnings, cargo audit,
 file-size audit (scripts/audit_file_sizes.py — tasks/ ≤ 200, VEN/src/ ≤ 500 production
 lines), duplication ratchet (`python scripts/audit_duplication.py` — fails when a branch adds or
 grows a duplicated cluster or a Rust function over 100 lines; `--update` only after reducing debt),
@@ -239,8 +250,8 @@ build:
     Deploy one VEN   : same directory, `docker compose up -d --build ven-2`
   Redeploying one VEN restarts only that container; the rest of the fleet keeps running.
   Always use wsl (via bash -lc) for Rust compilation — native Windows cargo lacks cmake/HiGHS.
-  There is no CI: .github/workflows/ was removed (it never worked). Every check is a
-  manual pre-merge command; run them yourself.
+  There is no GitHub CI (.github/workflows/ was removed, it never worked). The merge gate runs on
+  Node3 (ci-handoff above); when it is unavailable every check is a manual pre-merge command.
 
 determinism: any code path that depends on the current date/time must accept an injectable
 clock (e.g. a Fn() -> DateTime<Utc> parameter or typed wrapper). Applied in the MILP

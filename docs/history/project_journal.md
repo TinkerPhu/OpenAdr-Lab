@@ -15901,3 +15901,33 @@ the hour slot holding the predicted return. The planner counts that slot as char
 (GB-54, `assets/ev_trip_series.rs`), while the BDD step judged every slot by its start; the step
 now applies the planner's rule. Whether a slot the car is away for most of should carry full
 charge power is a separate question the rule already answers by design.
+
+## Node3 CI runner: board, merge queue, hand-off (refactor/ci-runner)
+
+**What.** A runner on Node3 (`scripts/ci/`) that tests branches and is the only thing that merges
+to `main`. A session pushes, runs `ci-handoff.sh` (a ticket on `/srv/ci/board/`) and stops; a
+systemd timer starts `runner.sh`, which takes the host lock, rebases the commit onto `origin/main`,
+runs the audits and (for code) fmt/clippy/cargo test/cargo audit in the repo's unit-test harness,
+then `run_all_tests.sh --rust --e2e --resilience`, and fast-forwards `main` when all of it is
+green. `ci-next.sh` lists finished tickets and resumes the session that wrote one with the result
+as its first message. Docs-only changes take an audits-only path. The mechanism is documented in
+`docs/guidelines/TESTING.md` ("CI on Node3"), the skill `ci-handoff` and a CLAUDE.md rule; the
+remaining parts (deploy, flaky retry) are in `docs/plans/ci-node3-handoff.md`.
+
+**Prerequisites done with it.** `run_all_tests.sh` runs on the docker host itself (the `DOCKER_HOST`
+clash, the lock, `LOCK_HELD_BY_CALLER`); `docker_host_lock.sh` takes the lock without ssh for
+`LOCK_HOST=localhost`; the journal merges by union (`.gitattributes`), which ended the same conflict
+on every rebase; the two planner goldens hold on aarch64 (`tests/golden_compare.rs`, no `sent=`
+digest, outputs rounded before hashing). `cargo-audit` joined the unit-test image.
+
+**Why.** Merging a branch had become a manual hour-long round trip repeated whenever `main` moved
+(five runs for one fix on 2026-10-14/15), run from a laptop whose RAM killed builds three times.
+
+**Decisions with the user.** Platform-independent goldens (not an ARM skip); a write-enabled deploy
+key for this repository on Node3 so the runner pushes `main` itself; the runner as a merge queue
+(rebase, test that commit, fast-forward) over merging after the fact or re-testing after every move.
+
+**Issues.** The first draft carried its own toolchain Dockerfile; the repo already had the
+unit-test harness with the cargo caches as volumes, so the runner uses that (one concept, one
+implementation). R-66 (calibrating the pre-flight memory floor) stays open: it needs a real degraded
+run, not this change.
