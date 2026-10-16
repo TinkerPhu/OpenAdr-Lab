@@ -30,4 +30,10 @@ submit_every_s: number, fulfilled: boolean, created_at: string,
  * From `reportDescriptor.historical` (spec default true): true = report
  * past data; false = the VTN asked for a forecast (R-15).
  */
-historical: boolean, };
+historical: boolean, 
+/**
+ * From `reportDescriptor.aggregate` (spec default false): true = one result for all the
+ * VEN's resources; false = one result per resource (R-143). Honoured by the device
+ * payloads (state of charge); site-meter payloads have one resource either way.
+ */
+aggregate: boolean, };

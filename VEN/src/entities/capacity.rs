@@ -283,6 +283,11 @@ pub struct OadrReportObligation {
     /// From `reportDescriptor.historical` (spec default true): true = report
     /// past data; false = the VTN asked for a forecast (R-15).
     pub historical: bool,
+    /// From `reportDescriptor.aggregate` (spec default false): true = one result for all the
+    /// VEN's resources; false = one result per resource (R-143). Honoured by the device
+    /// payloads (state of charge); site-meter payloads have one resource either way.
+    #[serde(default)]
+    pub aggregate: bool,
 }
 
 impl OadrReportObligation {

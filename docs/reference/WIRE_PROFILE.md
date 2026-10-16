@@ -55,6 +55,15 @@ window its value covers. Until 2026-09-20 this lab sent watts under it, and
 halves are fixed; `kpi.py` now reads `units` from the report and applies the
 watt reading only to rows that declare nothing, saying so when it does.
 
+### Which resource a report value belongs to
+
+A report names its resources (`resources[].resourceName`). Site quantities — usage, demand,
+capacity, reservations, forecasts — are the site meter's, reported as one resource
+`<ven>-meter`. A device quantity, the state of charge, follows the descriptor's `aggregate`
+(spec default false): not aggregated, every storage asset is its own resource `<ven>-<asset_id>`
+with its own SoC; aggregated, one resource `<ven>-meter` carries the stored energy of the
+connected storage over its capacity (an EV away is not the site's storage).
+
 A payload type absent from the table above is not "dimensionless" — it is one
 this lab has not decided the meaning of. The VEN logs it and sends it
 undeclared rather than inventing a unit.

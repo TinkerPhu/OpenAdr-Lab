@@ -54,7 +54,7 @@ graph TB
           direction TB
           subgraph ENTITIES["entities/"]
               E_PLAN["Plan\nPlanTimeSlot\nAssetAllocation"]
-              E_ASSET["PlanTrigger\nAssetType\nPowerAdjustability"]
+              E_ASSET["PlanTrigger\nAssetKind\nPowerAdjustability"]
               E_CAP["OadrCapacityState\nOadrEventCache\nOadrReportObligation"]
               E_SESSION["EvSession\nHeaterTarget\nShiftableLoad"]
               E_TARIFF["TariffSnapshot\nTariffTimeSeries"]
@@ -275,7 +275,6 @@ graph LR
   M_simulator --> M_controller
   M_simulator --> M_controller_milp_planner
   M_simulator --> M_entities
-  M_simulator --> M_ids
   M_state --> M_controller
   M_state --> M_entities
   M_tasks --> M_assets

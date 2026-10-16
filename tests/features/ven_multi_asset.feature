@@ -26,3 +26,11 @@ Feature: Several assets of one kind (W7)
     When I GET /assets/car-b/ev-settings from the VEN
     Then the response JSON field "opportunistic_charging_enabled" is true
     When I turn opportunistic charging on for EV "car-a"
+
+  # R-143: the VTN asks for STORAGE_CHARGE_LEVEL without `aggregate` (spec default false), so
+  # every storage asset reports as its own resource, whatever its id.
+  Scenario: Each storage asset reports its own state of charge
+    Given I have a VTN token as "bl-client"
+    And I create a program named "multi-soc-test" and save its ID
+    And I create an event for the saved program with a reportDescriptor of type "STORAGE_CHARGE_LEVEL" reporting every 5 seconds
+    Then within 120 seconds a report for the event names the resources "ven-1-battery", "ven-1-car-a" and "ven-1-car-b"

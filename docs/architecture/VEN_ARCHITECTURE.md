@@ -26,6 +26,18 @@ Tests: `profile/validate.rs` (`validate_accepts_two_assets_of_one_kind_with_thei
 (`the_multi_asset_profile_plans_every_asset_under_its_own_id`), `tests/features/ven_multi_asset.feature`
 (the `test-ven-multi` E2E VEN, `VEN/profiles/multi_asset_test.yaml`).
 
+An asset's type is one closed enum, `entities::asset::AssetKind` (`pv`, `battery`, `ev`,
+`heater`, `base_load`, `shiftable_load`), declared by the asset itself (`Asset::kind`, required)
+and carried on `/sim` as `asset_type`; it is never derived from the id. It is for classification,
+routing and display: what an asset can do (a state of charge, a lever, a request kind) is still
+asked of the asset, and the planner core knows no kind. The UI receives it as the generated union
+`AssetKind`, so an unknown kind does not compile, and decides an asset's colour, label and planning
+role in one place (`VEN/ui/src/components/controller/assetDisplay.ts`; a second asset of a kind is
+labelled "PV · pv-west"). The site meter (`assets::Grid`) is not an asset and has no kind. Tests:
+`assets/mod.rs` (`every_asset_declares_its_kind_whatever_its_id`), `entities/asset.rs`
+(`asset_kind_is_spelled_lowercase_on_the_wire`), `simulator/snapshot.rs`
+(`sim_snapshot_carries_the_declared_kind_not_the_id`), `VEN/ui/src/__tests__/assetDisplay.test.ts`.
+
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                              VEN Container                                   │
@@ -195,7 +207,7 @@ one that cannot be declared on the wire.
 | Report obligation | Source | Status |
 |---|---|---|
 | `USAGE` | Time-weighted mean of net site import power over the obligation interval (`TimeSeries::resample_uniform`), converted to **kWh** across that interval | ✅ implemented |
-| `STORAGE_CHARGE_LEVEL` | Point-in-time SoC (EV/battery) sampled at each obligation interval end | ✅ implemented |
+| `STORAGE_CHARGE_LEVEL` | Point-in-time SoC sampled at each obligation interval end, for every asset that has one: one resource per asset (`<ven>-<asset_id>`), or, when the descriptor asks `aggregate: true`, one resource (`<ven>-meter`) with the connected storage's energy-weighted SoC (`report_intervals::build_soc_resources`) | ✅ implemented |
 | `OPERATING_STATE` | Derived from sample freshness (`reporter.rs::operating_state`: fresh ≤ 120 s → ACTIVE, stale → UNAVAILABLE) — site-level mirror of the `DeviceResponsiveness` vocabulary | ✅ implemented |
 | `IMPORT_RESERVATION_CAPACITY` / `EXPORT_RESERVATION_CAPACITY` | Additional capacity this VEN is **requesting** in that direction, declared `KW` — the site's max-effort capability less its contracted allowance, floored at zero (`entities::reservation_request`). Not live headroom: the spec defines these as capacity requested beyond what the VEN is contracted for, and the inbound counterpart is the `IMPORT_CAPACITY_RESERVATION`/`*_SUBSCRIPTION` **event** that binds the planner's slot caps. `0` whenever no allowance is declared, which is this lab's normal state (R-76) | ✅ implemented |
 | `DEMAND` | — | ❌ not built |

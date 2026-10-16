@@ -192,17 +192,16 @@ These entities are not part of the OpenADR spec. They exist in the VEN applicati
 
 #### 3.2.1 Enumerations
 
-**AssetType**
+**AssetKind** (closed; declared by each asset, never derived from its id)
 ```
-PV               — photovoltaic producer
-BATTERY          — bidirectional storage
-EV               — electric vehicle (consumer, storage-like)
-HEATER           — thermal consumer with storage characteristics
-HEAT_PUMP        — thermal consumer with storage characteristics
-WASHING_MACHINE  — batch consumer
-COOKING_STOVE    — heuristic/uncontrollable consumer
-GENERIC_CONSUMER / GENERIC_PRODUCER — fallbacks
+pv              — photovoltaic producer
+battery         — bidirectional storage
+ev              — electric vehicle (consumer, storage-like)
+heater          — thermal consumer with storage characteristics
+base_load       — uncontrollable household consumption
+shiftable_load  — batch consumer created by a request (washing machine, dishwasher)
 ```
+A further kind (heat pump, cooking stove) is a new variant, added when the asset is.
 
 **PowerAdjustability**
 ```
@@ -287,7 +286,7 @@ to correlate price and capacity signals without temporal alignment errors.
 **AssetProfile** — physical + behavioural description of one device
 ```
 AssetID          — unique string
-AssetType
+AssetKind
 PowerRange
 Adjustability    — PowerAdjustability
 ForecastSource   — WEATHER_MODEL | DEVICE_CLOUD | PHYSICAL_MODEL | HEURISTIC | MANUAL | NONE

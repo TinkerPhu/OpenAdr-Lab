@@ -386,6 +386,10 @@ impl Asset for EvCharger {
         })
     }
 
+    fn storage_capacity_kwh(&self) -> Option<f64> {
+        Some(self.battery_kwh)
+    }
+
     fn kind(&self) -> crate::entities::asset::AssetKind {
         crate::entities::asset::AssetKind::Ev
     }

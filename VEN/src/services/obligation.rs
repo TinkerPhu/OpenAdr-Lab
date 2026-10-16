@@ -253,6 +253,7 @@ mod tests {
             fulfilled: false,
             created_at: due_at,
             historical: true,
+            aggregate: false,
         }
     }
 
@@ -267,16 +268,19 @@ mod tests {
                     ts: ts(0),
                     power_kw: 1.0,
                     soc_frac: None,
+                    ..Default::default()
                 },
                 AssetReportSample {
                     ts: ts(900),
                     power_kw: 1.5,
                     soc_frac: None,
+                    ..Default::default()
                 },
                 AssetReportSample {
                     ts: ts(1800),
                     power_kw: 2.0,
                     soc_frac: None,
+                    ..Default::default()
                 },
             ],
         );
@@ -348,16 +352,19 @@ mod tests {
                     ts: ts(1800),
                     power_kw: 2.0,
                     soc_frac: None,
+                    ..Default::default()
                 },
                 AssetReportSample {
                     ts: ts(2700),
                     power_kw: 3.0,
                     soc_frac: None,
+                    ..Default::default()
                 },
                 AssetReportSample {
                     ts: ts(3600),
                     power_kw: 4.0,
                     soc_frac: None,
+                    ..Default::default()
                 },
             ],
         );
@@ -414,16 +421,19 @@ mod tests {
                     ts: ts(1800),
                     power_kw: 2.0,
                     soc_frac: None,
+                    ..Default::default()
                 },
                 AssetReportSample {
                     ts: ts(2700),
                     power_kw: 3.0,
                     soc_frac: None,
+                    ..Default::default()
                 },
                 AssetReportSample {
                     ts: ts(3600),
                     power_kw: 4.0,
                     soc_frac: None,
+                    ..Default::default()
                 },
             ],
         );

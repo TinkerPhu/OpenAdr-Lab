@@ -37,16 +37,21 @@ pub(crate) fn spawn_obligation_check(
             let asset_samples: HashMap<String, Vec<AssetReportSample>> = {
                 let sim_guard = sim.lock().await;
                 sim_guard
-                    .assets
-                    .iter()
-                    .map(|entry| {
+                    .iter_assets()
+                    .map(|(entry, cfg)| {
                         let history = entry.history.slice(Duration::seconds(3600), now);
+                        let storage_capacity_kwh = cfg.storage_capacity_kwh();
                         let samples = history
                             .iter()
-                            .map(|p| AssetReportSample {
-                                ts: p.ts,
-                                power_kw: p.power_kw,
-                                soc_frac: p.state.soc_frac(),
+                            .map(|p| {
+                                let view = cfg.history_view(&p.state);
+                                AssetReportSample {
+                                    ts: p.ts,
+                                    power_kw: p.power_kw,
+                                    soc_frac: view.soc_frac,
+                                    storage_capacity_kwh,
+                                    plugged: view.plugged,
+                                }
                             })
                             .collect();
                         (entry.id.clone(), samples)
