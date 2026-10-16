@@ -76,6 +76,8 @@ import type { PlanWarning } from "./generated/PlanWarning";
 import type { PlanZone } from "./generated/PlanZone";
 import type { PlannerEvent } from "./generated/PlannerEvent";
 import type { PlannerObjective } from "./generated/PlannerObjective";
+import type { ObjectiveSetting } from "./generated/ObjectiveSetting";
+import type { ObjectiveSource } from "./generated/ObjectiveSource";
 import type { PlanningHorizon } from "./generated/PlanningHorizon";
 import type { PowerAdjustability } from "./generated/PowerAdjustability";
 import type { ReplaceRejection } from "./generated/ReplaceRejection";
@@ -198,6 +200,8 @@ export type {
   PlanZone,
   PlannerEvent,
   PlannerObjective,
+  ObjectiveSetting,
+  ObjectiveSource,
   PlanningHorizon,
   PowerAdjustability,
   ReplaceRejection,

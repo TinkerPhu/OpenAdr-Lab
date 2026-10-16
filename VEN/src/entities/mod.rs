@@ -15,6 +15,7 @@ pub mod grid_signals;
 pub mod history;
 pub mod measurement;
 pub mod notification;
+pub mod objective_setting;
 pub mod plan;
 pub mod plan_cost;
 

@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::controller::{HistoryPort, SolverPort, WeatherForecastPort};
@@ -33,7 +33,7 @@ pub(super) async fn run_plan_cycle(
     grid_max_export_kw: f64,
     asset_params: &[AssetParams],
     solver: &Arc<dyn SolverPort>,
-    active_objective: &Arc<RwLock<PlannerObjective>>,
+    active_objective: &crate::app_ctx::ActiveObjective,
     event_tx: &PlannerEventTx,
     notifier: &crate::services::notify::Notifier,
     weather: &Arc<dyn WeatherForecastPort>,

@@ -1,12 +1,12 @@
 use chrono::Utc;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::controller::{HistoryPort, SolverPort, WeatherForecastPort};
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::asset_params::AssetParams;
-use crate::entities::planner_params::{PlannerObjective, PlannerParams};
+use crate::entities::planner_params::PlannerParams;
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
 use crate::state::AppState;
@@ -25,7 +25,7 @@ pub(crate) fn spawn_planning(
     solver: Arc<dyn SolverPort>,
     mut trigger_rx: tokio::sync::watch::Receiver<PlanTriggerSignal>,
     sim: Arc<Mutex<SimState>>,
-    active_objective: Arc<RwLock<PlannerObjective>>,
+    active_objective: crate::app_ctx::ActiveObjective,
     event_tx: PlannerEventTx,
     notifier: crate::services::notify::Notifier,
     now_fn: impl Fn() -> chrono::DateTime<Utc> + Send + Sync + 'static,
@@ -194,7 +194,11 @@ mod tests {
         let event_tx = Arc::new(event_bcast_tx);
         let solver = Arc::new(MockSolverPort::returning(minimal_plan()));
         let sim = minimal_sim();
-        let active_objective = Arc::new(RwLock::new(PlannerObjective::default()));
+        let active_objective = Arc::new(RwLock::new(
+            crate::entities::objective_setting::ObjectiveSetting::from_profile(
+                PlannerObjective::default(),
+            ),
+        ));
 
         let handle = spawn_planning(
             AppState::new(),

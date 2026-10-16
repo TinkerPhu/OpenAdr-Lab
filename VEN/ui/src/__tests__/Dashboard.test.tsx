@@ -101,6 +101,15 @@ vi.mock("../api/hooks", () => ({
   useCapacity: vi.fn(() => ({ data: mockCapacity })),
   useLedger: vi.fn(() => ({ data: mockLedger })),
   useLedgerHistories: vi.fn(() => []),
+  usePlanObjective: vi.fn(() => ({
+    data: {
+      objective: "min_cost",
+      source: "profile",
+      set_at: null,
+      profile_objective: "min_cost",
+      available_objectives: ["min_cost"],
+    },
+  })),
   usePlan: vi.fn(() => ({
     data: {
       id: "plan-1",
@@ -304,7 +313,7 @@ describe("DashboardPage", () => {
   it("renders session strip with objective chip and one chip per active session (BL-36)", () => {
     renderDashboard();
     expect(screen.getByTestId("dash-session-strip")).toBeVisible();
-    expect(screen.getByTestId("dash-objective-chip")).toHaveTextContent("Objective: Cost");
+    expect(screen.getByTestId("dash-objective-chip")).toHaveTextContent("Objective: Cost (from the profile)");
     expect(screen.getByTestId("session-chip-req-ev-01")).toBeVisible();
   });
 

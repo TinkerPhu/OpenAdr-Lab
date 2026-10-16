@@ -112,12 +112,12 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 
 ## 5. Objective setting and source
 
-- [ ] 5.1 `ObjectiveSetting { objective, source, set_at }` replaces `ActiveObjective`'s value
+- [x] 5.1 `ObjectiveSetting { objective, source, set_at }` replaces `ActiveObjective`'s value
       (`boot/mod.rs`, `app_ctx.rs`, `cycle_state.rs`); `services::objective::set_objective` is
       the one setter (writes, triggers `UserRequest`). `PUT /plan/objective` calls it with
       `VenUi`. New `GET /plan/objective` returns the setting plus `available_objectives`.
       Route tests for both.
-- [ ] 5.2 VEN UI: Planner page reads `GET /plan/objective`, shows source and set time; Dashboard
+- [x] 5.2 VEN UI: Planner page reads `GET /plan/objective`, shows source and set time; Dashboard
       objective chip shows the source. UI unit tests.
 
 ## 6. Fleet channel — VEN side
