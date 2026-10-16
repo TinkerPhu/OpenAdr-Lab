@@ -52,21 +52,15 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 
 ## 2. The opportunistic pass (controller, unit level)
 
-- [ ] 2.1 `LeverPolicy` gains a ranking basis (`Cost` | `DeclaredRank`); `rank_levers` sorts by it,
-      hysteresis unchanged (`controller/arbiter/ranked.rs`). Tests: ranking by declared rank,
-      equal ranks in roster order; existing ranking tests unchanged under `Cost`.
-- [ ] 2.2 Generic `LEVER_ABSORB` / `LEVER_DISCHARGE` `LeverId` kinds (capacity and apply from
-      `AssetSnapshot` only, D2), built in `lever_candidates` only when the policy admits them,
-      two new arms in `apply_ranked_levers`; `apply_ev_lever_opportunistic`
-      `OPPORTUNISTIC_POLICY` and `arbiter::opportunistic_step(tick, base) -> ArbiterOutcome` (pass
-      + limit pass), memoryless from the base setpoints, with its own incumbent fields; its
-      outcome carries no `displaced_kw_by_asset`. `apply_ev_lever_opportunistic` and
-      `apply_surplus_ev_overlay` are not touched (D0). Tests (one per spec scenario of "Surplus
-      is absorbed…" and "Import is covered…"): scarce surplus in order, ample surplus fills all,
-      full asset passes on, night base load covered, never exports, never charges from grid,
-      empty battery leaves import, balanced site moves nothing, a lagging EV's excess goes to the
-      battery this tick and comes back next tick (no wind-up over 20 ticks). Existing EV overlay
-      and arbiter tests stay green unchanged.
+- [x] 2.1 (dropped) A ranking basis on `LeverPolicy`: not needed, the pass does not use the
+      closed-loop lever machinery (D2, rejected alternative).
+- [x] 2.2 `arbiter::opportunistic_pass(tick, base, excluded_ids)`: open-loop allocation in
+      declared rank order (D2), result in `ArbiterOutcome::opportunistic` only. Tests
+      (`controller/arbiter/tests/opportunistic_tests.rs`): scarce surplus in order, ample surplus
+      fills all and exports the rest, a full asset passes on, a stage that would import is not
+      taken, night base load covered, never beyond the import, never charges from the grid,
+      empty battery leaves the import, balanced site moves nothing, excluded asset keeps its
+      base, no deviation state written, same balance gives the same commands every tick.
 - [ ] 2.3 `ArbiterTick.active_requests`; start-now base setpoint = `cap_max_import_kw` for every
       asset kind (D4; the targets that make it fall to zero are injected in 3.2); a
       start-now asset is not also an absorb candidate; surplus-only requests make their asset an
@@ -216,9 +210,8 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       `command/objective` rows and marks `plan` as published.
 - [ ] 9.4 `docs/reference/TECHNICAL_DEBTS.md` (Severity/Kind/Cost/Why-open each): lab-mqtt per-VEN
       ACL now also guards objective commands (extend the existing row or file one); per-kind
-      `battery_lever`/`ev_lever` are instances of the generic lever shape (D2), first step: move
-      the battery's capacity calculation onto `LEVER_DISCHARGE`/`LEVER_ABSORB`;
-      `apply_ev_lever_opportunistic` and `LEVER_ABSORB` answer "how much surplus does the EV take"
+      `apply_ev_lever_opportunistic` (planning overlay) and `opportunistic_pass` answer "how
+      much surplus does the EV take"
       under different rules, first step: an equivalence test that shows where they differ; the
       existing fleet telemetry publish awaits rumqttc's bounded queue and may stall the tick while
       the broker is down, needs-evidence (a test with an unreachable broker).

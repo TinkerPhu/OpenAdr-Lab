@@ -23,6 +23,7 @@ use std::collections::{BTreeSet, HashMap};
 use super::{projected_net_kw_except, ArbiterOutcome, ArbiterTick, DEAD_BAND_KW};
 use crate::controller::sim_snapshot::AssetSnapshot;
 use crate::entities::asset::ArbiterLeverKind;
+use crate::entities::design_vocabulary::NonPlanningDispatch;
 
 /// What one opportunistic tick did (diagnostics, `GET /arbiter-diagnostics`).
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
@@ -36,6 +37,37 @@ pub struct OpportunisticOutcome {
     pub absorbing: bool,
     /// What no asset could take (kW, import positive): exported surplus or uncovered import.
     pub unresolved_kw: f64,
+}
+
+/// How the active requests shape this tick (openspec `opportunistic-objective` D4): the base
+/// commands the pass starts from, and the assets it leaves alone.
+///
+/// A start-now request runs its asset at full effort (`cap_max_import_kw`, which the asset
+/// already reports as zero once the request's target, injected into the asset, is reached) and
+/// takes no surplus on top. A surplus-only request makes its asset take surplus whatever its
+/// surplus switch says. An asset with no request takes surplus only if its own switch is on
+/// (`surplus_switch_on`: an EV's opportunistic-charging setting; true for every other kind).
+pub fn request_regime(
+    sim: &crate::controller::SimSnapshot,
+    mut base: HashMap<String, f64>,
+    requests: &HashMap<String, NonPlanningDispatch>,
+    surplus_switch_on: impl Fn(&str) -> bool,
+) -> (HashMap<String, f64>, BTreeSet<String>) {
+    let mut excluded = BTreeSet::new();
+    for (id, snap) in &sim.assets {
+        match requests.get(id) {
+            Some(NonPlanningDispatch::StartNow) => {
+                base.insert(id.clone(), snap.cap_max_import_kw);
+                excluded.insert(id.clone());
+            }
+            Some(NonPlanningDispatch::SurplusOnly) => {}
+            None if !surplus_switch_on(id) => {
+                excluded.insert(id.clone());
+            }
+            None => {}
+        }
+    }
+    (base, excluded)
 }
 
 /// One tick of dispatch without look-ahead. `base` is each asset's own command before the

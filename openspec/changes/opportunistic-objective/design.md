@@ -69,9 +69,9 @@ targets and shiftable loads carry a `mode`; only the MILP reads it today.
 
 | Concept | Lives in | Here |
 |---|---|---|
-| Lever candidate/rank/apply loop | `arbiter.rs::apply_ranked_levers`, `rank_levers` | Reused; ranking basis becomes a `LeverPolicy` field |
-| Per-pass rules as data | `LeverPolicy`, `DEVIATION_POLICY`, `LIMIT_POLICY` | Gains `OPPORTUNISTIC_POLICY` |
-| EV surplus decision | `arbiter_levers::apply_ev_lever_opportunistic` (its surplus excludes battery discharge and counts the battery's planned charge) | **Untouched** (D0). It and the generic `LEVER_ABSORB` answer the same question under different rules; consolidation filed as debt with an equivalence test as its first step |
+| Lever candidate/rank/apply loop | `arbiter/ranked.rs::apply_ranked_levers`, `rank_levers` | Untouched: closed-loop correction does not fit a pass that starts from the base every tick (D2) |
+| Per-pass rules as data | `LeverPolicy`, `DEVIATION_POLICY`, `DISPATCH_POLICY`, `LIMIT_POLICY` | Untouched |
+| EV surplus decision | `arbiter_levers::apply_ev_lever_opportunistic` (its surplus excludes battery discharge and counts the battery's planned charge) | **Untouched** (D0). It and the `opportunistic_pass` answer the same question under different rules; consolidation filed as debt with an equivalence test as its first step |
 | Pre-arbiter EV overlay | `dispatcher::apply_surplus_ev_overlay`; `reconcile`'s EV-only no-plan branch | **Untouched** (D0): both stay the planning objectives' no-plan and overlay behaviour |
 | Asset surplus capability | `RequestResolvable::surplus_charge_kw` (test-only) **and** the EV lever's `power_when_command_lands_kw` read | The capability/response/available-energy fields already on `AssetSnapshot` are the answer for every asset (D2); `surplus_charge_kw` deleted |
 | Surplus-claim order | `AssetMilpContext::surplus_claim_rank` in `assets/{ev,heater,shiftable,battery,forecast}_declared.rs`, read by `results::surplus_claim_order` | The per-kind value becomes one constant per kind, returned by both the declared context and a new `Asset::surplus_claim_rank()`, and carried on `AssetSnapshot` (D3) |
@@ -140,8 +140,7 @@ touchpoint:
 | No-plan window (startup, expired plan) | Unchanged: defaults-only base, then `reconcile`'s EV-only branch or `apply_surplus_ev_overlay` | Tick golden, no-plan cases |
 | `apply_ev_lever_opportunistic`, `apply_surplus_ev_overlay` | Untouched | Existing tests, tick golden |
 | `dispatcher::build_setpoints` | `follow_allocations = true` is today's body | Existing tests, tick golden |
-| `rank_levers` | The `Cost` basis is today's sort, kept verbatim as its own branch | Existing tests, plus a randomized test against a frozen copy of today's function |
-| `Lever`, `apply_ranked_levers` | New field `None`; two new match arms existing levers never reach | Tick golden |
+| `rank_levers`, `Lever`, `apply_ranked_levers`, `LeverPolicy` constants | Untouched: the opportunistic pass does not use them (D2) | Existing tests, tick golden, randomized test against a frozen copy of `rank_levers` |
 | `reconcile`, deviation and limit levers, `LeverPolicy` constants | Untouched | Tick golden |
 | Arbiter memory (active levers, residual tracker) | The opportunistic pass returns no `displaced_kw_by_asset` and writes its leading lever into its own diagnostic field, never into `arbiter_active_lever` or the residual tracker. The limit pass is the same pass under both regimes and keeps `limit_active_lever` across a switch exactly as it does across any plan change today (a shed stage stays shed until it fits) | Switch-back test (task 3.4) |
 | Target injections (EV SoC target, heater ceiling) | Only in the opportunistic arm; a planning tick passes the sim inject values exactly as today | Tick golden |
@@ -180,51 +179,38 @@ effect when the new plan is adopted, a few seconds after the trigger.
 the tick and the plan in force can disagree about the objective, and `MaxRevenue`'s discharge
 refusal already reads the plan's objective.
 
-### D2. One opportunistic pass on the shared lever loop, with generic levers
-`OPPORTUNISTIC_POLICY` is a `LeverPolicy` whose candidates are two **generic** lever kinds,
-built for every asset that declares a surplus-claim rank (D3), not one helper per asset kind:
+### D2. One opportunistic pass: an open-loop allocation in declared rank order
+`controller/arbiter/opportunistic.rs::opportunistic_pass(tick, base, excluded_ids)`. The site's
+balance without the ranked assets (`projected_net_kw_except`: base load, PV, start-now requests,
+unranked and excluded assets) is offered to every asset that declares a surplus-claim rank, in
+rank order (stable: roster order on ties). While the balance is a surplus, each asset is
+commanded what it can absorb toward its own target without overshooting it
+(`setpoint_for_power_at_or_below_kw`, so a stage that would import is not taken; a full asset
+reports zero import capability). Once it is an import, a storage asset (declared lever kind
+`Storage`) covers it down to its floor, and every other asset draws only its base command (a
+thermostat's forced heat). Nothing moves beyond the balance, so storage never charges from the
+grid or discharges into export. A V2G EV is not used to cover import: only `Storage` is.
 
-- `LEVER_ABSORB` (surplus direction): capacity = what the asset would draw if offered the
-  surplus — `AssetSnapshot::power_when_command_lands_kw(min(surplus, cap_max_import_kw))`, zero
-  when `available_charge_kwh` is `Some(0)`. Applied by commanding
-  `setpoint_for_power_at_or_below_kw` for the assigned amount.
-- `LEVER_DISCHARGE` (import direction): capacity = `min(import, cap_max_export_kw)`, zero when
-  `available_discharge_kwh` is `Some(0)`. Applied the same way with the export sign.
+It reads only snapshot fields every asset reports (capability, response, available energy,
+rank, lever kind) and never a kind. It is the generalisation of `apply_ev_lever_opportunistic`,
+which already allocates open-loop for EVs; that function stays untouched for the planning
+objectives' overlay (D0), and consolidating the two is filed as debt.
 
-Both read only fields `AssetSnapshot` already carries for every asset (capability, response,
-available energy). The asset answers through them: a full battery, an unplugged or finished EV,
-a heater its thermostat holds off at `temp_max_c`, a shiftable load past its window all report
-zero import capability; the response encodes stages, minimum rates and all-or-nothing starts
-(R-81/R-82). No new per-asset "surplus" method is needed, and `surplus_charge_kw` (test-only, a
-second answer to the same question) is deleted.
+*Rejected: the shared closed-loop lever machinery (`apply_ranked_levers` with an opportunistic
+`LeverPolicy` and generic `LEVER_ABSORB`/`LEVER_DISCHARGE` kinds).* Found while implementing:
+that loop counts what an asset draws **this tick**, which suits deviation correction from a
+carried command but not a pass that starts from the base every tick. A charger with a one-tick
+response lag would draw nothing "this tick", pass its share to the battery, and have its command
+reset to the base on the next balanced tick, toggling. The open-loop allocation commands each
+asset what it should draw once its command lands, so the same balance gives the same commands
+every tick. It also leaves `ranked.rs`, its policies and `rank_levers` untouched (D0).
 
-Both are new `LeverId` kinds, one lever per asset whose snapshot carries a surplus-claim rank,
-in the same shape as W5a's per-asset levers. `lever_candidates` builds them only when the policy
-admits them, so the planning passes (`ALL_LEVERS`, `DISPATCH_POLICY`) never build or see them,
-and `apply_ranked_levers` gains two match arms for them. The loop is unchanged otherwise: the achieved amount is what the asset draws
-**this tick** (`power_drawn_for_setpoint_kw`), so a lagging charger passes the excess to the
-next lever, as `LeverEffect` does today. The pass starts every tick from the base setpoints
-(storage and EVs at their default 0 kW, not their last command) and reads `projected_net_kw`
-once, so it is memoryless: no integrator, no lag bridge, nothing to wind up. The direction is the
-sign of the imbalance; each lever is capped at the remaining imbalance, so the battery never
-charges from the grid or discharges into export.
-
-`rank_levers` ranks by the policy's basis: `Cost` (today's passes; today's code kept verbatim as
-that branch) or `DeclaredRank` (opportunistic), with the incumbent hysteresis kept for both.
-
-`apply_ev_lever_opportunistic`, `apply_surplus_ev_overlay` and `reconcile`'s EV-only no-plan
-branch stay exactly as they are (D0). They compute surplus differently (battery discharge
-excluded, the battery's planned charge counted as a consumer), so routing them through
-`LEVER_ABSORB` would change planned dispatch. Consolidating the two answers is filed as debt; its
-first step is an equivalence test that shows where they differ. Heater pause, heater emergency
-and PV curtailment are not opportunistic candidates. `build_tick_setpoints` calls
-`arbiter::opportunistic_step` (pass + limit pass) only when the adopted plan's objective has
-`!dispatches_from_plan()`, independent of the deviation toggle.
-
-The per-kind `battery_lever`/`ev_lever` of the deviation and limit passes are instances of the
-same generic shape plus pass-specific rules (dead-beat seeding, `MaxRevenue` refusal, lag
-bridge). Folding them in would change planned dispatch and is out of scope (D0); filed in
-`TECHNICAL_DEBTS.md`.
+The result goes to its own `ArbiterOutcome::opportunistic` (`OpportunisticOutcome`: site
+balance, leading asset and direction, unresolved kW), never to `active_lever`, `net_kw`,
+`dev_kw`, `unresolved_kw` or `displaced_kw_by_asset`, so no deviation decision event, no
+deviation diagnostic and no residual is ever written by it. It needs no memory between ticks.
+The limit pass runs after it unchanged. `build_tick_setpoints` calls it only when the adopted
+plan's objective has `!dispatches_from_plan()`, independent of the deviation toggle.
 
 ### D3. One surplus-claim rank per asset kind, read by planner and arbiter
 The rank exists today only on the MILP side (`AssetMilpContext::surplus_claim_rank` in each

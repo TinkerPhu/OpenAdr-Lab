@@ -198,3 +198,78 @@ fn the_same_balance_commands_the_same_setpoints_every_tick() {
         assert_eq!(pass(&sim, 3.0, 0.5, &[]).setpoints, first.setpoints);
     }
 }
+
+mod request_regime {
+    use super::*;
+    use crate::controller::arbiter::request_regime;
+    use crate::entities::design_vocabulary::NonPlanningDispatch::{StartNow, SurplusOnly};
+
+    fn defaults(sim: &SimSnapshot) -> HashMap<String, f64> {
+        sim.assets
+            .iter()
+            .map(|(id, a)| (id.clone(), a.default_setpoint_kw))
+            .collect()
+    }
+
+    #[test]
+    fn a_start_now_request_runs_at_full_effort_and_takes_no_surplus_on_top() {
+        let sim = site(&[ev(), battery(0.5)]);
+        let requests = [("ev".to_string(), StartNow)].into();
+        let (base, excluded) = request_regime(&sim, defaults(&sim), &requests, |_| true);
+        assert_eq!(base["ev"], sim.assets["ev"].cap_max_import_kw);
+        assert!(base["ev"] > 0.0);
+        assert!(excluded.contains("ev"));
+        assert!(!excluded.contains("battery"));
+    }
+
+    #[test]
+    fn a_surplus_only_request_takes_surplus_even_with_the_switch_off() {
+        let sim = site(&[ev()]);
+        let requests = [("ev".to_string(), SurplusOnly)].into();
+        let (base, excluded) = request_regime(&sim, defaults(&sim), &requests, |_| false);
+        assert_eq!(base["ev"], 0.0);
+        assert!(!excluded.contains("ev"));
+    }
+
+    #[test]
+    fn without_a_request_the_assets_own_switch_decides() {
+        let sim = site(&[ev(), battery(0.5)]);
+        let off_for_ev = |id: &str| id != "ev";
+        let (_, excluded) = request_regime(&sim, defaults(&sim), &HashMap::new(), off_for_ev);
+        assert!(excluded.contains("ev"));
+        assert!(!excluded.contains("battery"));
+    }
+
+    /// A start-now EV under the opportunistic pass: full rate now, whatever the PV output.
+    #[test]
+    fn a_start_now_ev_charges_at_full_rate_without_pv() {
+        let sim = site(&[ev(), battery(0.5)]);
+        let requests = [("ev".to_string(), StartNow)].into();
+        let (base, excluded) = request_regime(&sim, defaults(&sim), &requests, |_| true);
+        let live: HashMap<String, f64> = [
+            (crate::ids::ASSET_PV.to_string(), 0.0),
+            (crate::ids::ASSET_BASE_LOAD.to_string(), 0.5),
+        ]
+        .into();
+        let overlay = EvOverlays::new();
+        let bridge = HashMap::new();
+        let tick = ArbiterTick {
+            sim: &sim,
+            plan_slot: None,
+            objective: PlannerObjective::Opportunistic,
+            ev_overlay: &overlay,
+            live_kw: &live,
+            live_released_kw: None,
+            alert_active: false,
+            limit_target_kw: None,
+            prev_bridge_kw_by_asset: &bridge,
+        };
+        let o = opportunistic_pass(&tick, &base, &excluded);
+        assert_eq!(o.setpoints["ev"], EvParams::default().max_charge_kw);
+        // A meter-following home battery covers what the meter would import, the EV's
+        // charge included, as far as its own rate allows.
+        let bat_max = BatteryParams::default().max_discharge_kw;
+        let import = 0.5 + EvParams::default().max_charge_kw;
+        assert!((o.setpoints["battery"] + import.min(bat_max)).abs() < 1e-9);
+    }
+}

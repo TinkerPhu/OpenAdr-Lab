@@ -32,7 +32,7 @@ pub use decision::decision_event;
 pub use dispatch::meet_dispatch_setpoint;
 pub use emergency::heater_emergency_modes;
 pub use live::{projected_net_kw, projected_net_kw_except, tighten_generation, LiveKwByAsset};
-pub use opportunistic::{opportunistic_pass, OpportunisticOutcome};
+pub use opportunistic::{opportunistic_pass, request_regime, OpportunisticOutcome};
 #[cfg(test)]
 use ranked::rank_levers;
 pub use ranked::SetpointBoundsKw;
@@ -322,6 +322,7 @@ pub fn reconcile(
         dev_without_correction_kw: Some(without_kw),
         limit: None,
         bridge_kw_by_asset: applied.bridge_kw_by_asset,
+        opportunistic: None,
     }
 }
 
