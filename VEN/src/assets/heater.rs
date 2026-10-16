@@ -439,12 +439,8 @@ impl Asset for Heater {
         Some(crate::entities::asset_params::RequestKind::TemperatureTarget)
     }
 
-    fn asset_type(&self) -> crate::entities::asset::AssetType {
-        crate::entities::asset::AssetType::Heater
-    }
-
-    fn asset_type_str(&self) -> &'static str {
-        "heater"
+    fn kind(&self) -> crate::entities::asset::AssetKind {
+        crate::entities::asset::AssetKind::Heater
     }
 
     /// The heater is the one asset whose near-term dispatch the planner pins

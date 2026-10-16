@@ -6,7 +6,7 @@ use super::capability_traits::{MilpParticipant, RequestResolvable, Thermostat, T
 use super::{AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, KeyFeature};
 use crate::assets::{HistoryPoint, LoadWindowStats};
 use crate::entities::asset::{
-    AssetHistoryView, AssetType, ComfortRate, CompletionPolicy, EmergencyWhatIfs,
+    AssetHistoryView, AssetKind, ComfortRate, CompletionPolicy, EmergencyWhatIfs,
 };
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use crate::entities::device_session::EvSession;
@@ -161,13 +161,8 @@ pub trait Asset: Send + Sync {
     // "Universal" per D4's audit means universal across `AssetConfig`'s 5
     // variants specifically (all dispatched via the delegate_asset! macros
     // today, no `_ =>` fallback) — NOT universal across every `Asset`
-    // implementor. `Grid` also implements `Asset` but is deliberately outside
-    // `AssetConfig` (see `grid.rs`'s own doc comment: "not part of the
-    // controllable asset dispatch loop") and has no sim-inject/MILP/forecast
-    // concept of its own. So these get panicking defaults, same contract as
-    // `id`/`current_state`/`history` above: real physics types override them
-    // for real (wired in Spec A's Phase 2a, not this phase), Grid inherits the
-    // default and is never called this way in practice.
+    // implementor. These get panicking defaults, same contract as
+    // `id`/`current_state`/`history` above: real physics types override them.
 
     /// The setpoint a dispatcher should hold this asset at absent any explicit
     /// command (e.g. battery/EV/heater hold at 0.0 — dispatcher-controlled).
@@ -296,25 +291,9 @@ pub trait Asset: Send + Sync {
         unimplemented!("Asset::reset() only applies to AssetConfig-backed asset kinds")
     }
 
-    /// Domain-level type classification, for the API/timeline snapshots.
-    /// **Not** 1:1 with the 5 `AssetConfig` variants — `BaseLoad` maps to
-    /// `AssetType::GenericConsumer`, not its own variant (see `AssetType`'s
-    /// own doc comment for the wider consumer/producer catalog this fits
-    /// into, spanning asset kinds this codebase hasn't implemented yet).
-    fn asset_type(&self) -> AssetType {
-        unimplemented!("Asset::asset_type() only applies to AssetConfig-backed asset kinds")
-    }
-
-    /// Lowercase snake_case label for the same purpose as `asset_type`, but
-    /// for contexts that want the literal `AssetConfig` variant name (e.g.
-    /// `"base_load"`, not `"generic_consumer"`) rather than the wider
-    /// domain classification. Deliberately a separate method, not derived
-    /// from `asset_type()` — the two diverge for `BaseLoad`, and inverting
-    /// `AssetType::GenericConsumer` back to a specific string wouldn't be
-    /// safe once other consumer kinds share that same variant.
-    fn asset_type_str(&self) -> &'static str {
-        unimplemented!("Asset::asset_type_str() only applies to AssetConfig-backed asset kinds")
-    }
+    /// This asset's kind (`AssetKind`), declared by the asset — the one answer to "what type of
+    /// asset is this", whatever its id. Required: every asset knows what it is.
+    fn kind(&self) -> AssetKind;
 
     /// Whether this asset's future state follows from what it is told to do.
     ///
@@ -323,7 +302,7 @@ pub trait Asset: Send + Sync {
     /// produces a number that means nothing. Such an asset's "state later" is
     /// its state now; its future comes from `max_effort_schedule` instead.
     ///
-    /// A trait question rather than `cfg.asset_type_str() == "pv"` at the one
+    /// A trait question rather than `cfg.kind() == AssetKind::Pv` at the one
     /// call site that cares: whether simulating an asset forward is
     /// meaningful is a fact about the asset, and the next exogenous asset
     /// kind should not need that call site to be edited
@@ -335,7 +314,7 @@ pub trait Asset: Send + Sync {
     /// Whether the planner may pin this asset's near-term dispatch to the
     /// current plan (`services::planning::build_heater_anchor`). Only the
     /// heater has an anchor today; the call site used to ask
-    /// `asset_type_str() == "heater"`.
+    /// whether the asset was the heater.
     fn accepts_dispatch_anchor(&self) -> bool {
         false
     }

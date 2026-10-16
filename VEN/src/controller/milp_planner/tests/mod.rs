@@ -221,7 +221,6 @@ fn refresh_from_asset(
     let fresh = crate::services::test_support::asset_snapshots::snapshot_from_asset(
         asset,
         state,
-        &entry.asset_type,
         entry.power_kw,
         entry.setpoint_kw,
     );

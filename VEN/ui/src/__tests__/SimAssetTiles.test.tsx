@@ -25,9 +25,11 @@ describe("SimAssetTiles", () => {
     expect(screen.getByText("Power: 1.5 kW")).toBeTruthy();
   });
 
-  it("falls back to power for an asset kind it has never heard of", () => {
-    render(<SimAssetTiles assets={makeAssets({ sauna: { power_kw: 2 } })} />);
-    expect(screen.getByText("SAUNA")).toBeTruthy();
+  it("shows power alone for a kind with no extra fields, labelled by its id", () => {
+    render(
+      <SimAssetTiles assets={makeAssets({ sauna: { asset_type: "shiftable_load", power_kw: 2 } })} />,
+    );
+    expect(screen.getByText("sauna")).toBeTruthy();
     expect(screen.getByText("Power: 2.0 kW")).toBeTruthy();
   });
 

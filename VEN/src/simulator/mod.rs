@@ -170,9 +170,8 @@ pub struct SimState {
     /// Mutable state + history for each asset.
     pub assets: Vec<AssetEntry>,
     pub grid: GridMeter,
-    /// Grid virtual asset — implements the full `Asset` trait (id, current_state,
-    /// history, capability). Updated each tick with net power + VTN limits.
-    /// Not part of `asset_configs` / `assets` (Grid is read-only, not dispatched).
+    /// The site meter (`assets::Grid`): net power and VTN limits, updated each tick, with its
+    /// history. Not an asset: not in `asset_configs` / `assets`, no `AssetKind`.
     #[serde(skip, default)]
     pub grid_asset: Grid,
     /// PV irradiance EMA state for Behaviour B smoothing. Ephemeral — resets on restart.

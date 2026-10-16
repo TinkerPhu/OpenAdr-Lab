@@ -8,7 +8,6 @@ use crate::controller::sim_snapshot::AssetSnapshot;
 pub fn snapshot_from_asset(
     asset: &dyn Asset,
     state: AssetState,
-    asset_type: &str,
     power_kw: f64,
     setpoint_kw: f64,
 ) -> AssetSnapshot {
@@ -22,7 +21,7 @@ pub fn snapshot_from_asset(
     };
     AssetSnapshot {
         power_kw,
-        asset_type: asset_type.into(),
+        asset_type: asset.kind(),
         cap_max_import_kw: cap.max_import_kw,
         cap_max_export_kw: cap.max_export_kw,
         available_discharge_kwh,

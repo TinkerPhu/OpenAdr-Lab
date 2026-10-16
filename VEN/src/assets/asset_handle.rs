@@ -50,6 +50,10 @@ impl<'a> Asset for AssetHandle<'a> {
         self.config.capability(state)
     }
 
+    fn kind(&self) -> crate::entities::asset::AssetKind {
+        self.config.kind()
+    }
+
     fn flexibility_floor(&self, state: &AssetState) -> AssetFlexibilityFloor {
         self.config.flexibility_floor(state)
     }

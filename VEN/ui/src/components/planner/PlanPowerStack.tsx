@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { StackedTimeSeriesChart } from "../charts/StackedTimeSeriesChart";
 import type { AssetId } from "../controller/types";
-import { ASSET_COLORS } from "../controller/types";
+import { assetLegend } from "../controller/assetDisplay";
 import { buildStackedFromAllTimelines, assetIdsWithTimelineData } from "../controller/stackedTimelines";
 import type { Plan } from "../../api/types";
 import { useAllTimelines, useSim } from "../../api/hooks";
@@ -92,7 +92,7 @@ export function PlanPowerStack({ plan }: PlanPowerStackProps) {
       <StackedTimeSeriesChart
         data={points}
         assetIds={assetIds}
-        colorMap={ASSET_COLORS}
+        {...assetLegend(sim, assetIds)}
         nowMs={nowMs}
         hoursBack={0}
         hoursForward={hoursForward}

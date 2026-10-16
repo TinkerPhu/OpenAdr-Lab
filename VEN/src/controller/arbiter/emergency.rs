@@ -48,7 +48,6 @@ mod tests {
                 crate::assets::AssetState::Heater(crate::assets::heater::Heater::initial_state(
                     &test_heater_params(),
                 )),
-                "heater",
                 0.0,
                 0.0,
             );

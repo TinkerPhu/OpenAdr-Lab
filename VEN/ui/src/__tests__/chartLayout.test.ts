@@ -3,7 +3,8 @@ import {
   CELL_CHART_HEIGHT,
   DIAGNOSTIC_CHART_HEIGHT,
 } from "@lab/ui/chartLayout";
-import { SERIES_COLORS, ASSET_COLORS } from "../components/controller/types";
+import { SERIES_COLORS } from "../components/controller/types";
+import { KIND_COLORS, SHIFTABLE_LOAD_DISPLAY } from "../components/controller/assetDisplay";
 
 describe("chart sizing contract", () => {
   it("dashboard-cell height and diagnostic height are distinct named constants", () => {
@@ -25,7 +26,10 @@ describe("shared series color registry", () => {
 
   it("does not collide with asset colors for shared concepts", () => {
     // import_tariff and export_tariff are distinct from every asset color
-    const assetHexes = new Set(Object.values(ASSET_COLORS));
+    const assetHexes = new Set([
+      ...Object.values(KIND_COLORS),
+      ...Object.values(SHIFTABLE_LOAD_DISPLAY).map((d) => d.color),
+    ]);
     expect(assetHexes.has(SERIES_COLORS.import_tariff)).toBe(false);
     expect(assetHexes.has(SERIES_COLORS.export_tariff)).toBe(false);
   });

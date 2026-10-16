@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 
+use crate::entities::asset::AssetKind;
 use crate::entities::sim_inject::SimInjectState;
 use crate::simulator::SimState;
 
@@ -22,7 +23,7 @@ use crate::simulator::SimState;
 /// four things.
 struct StateInjection {
     field: &'static str,
-    asset_type: &'static str,
+    asset_type: AssetKind,
     state_key: &'static str,
     read: fn(&SimInjectState) -> Option<f64>,
 }
@@ -30,19 +31,19 @@ struct StateInjection {
 const STATE_INJECTIONS: [StateInjection; 3] = [
     StateInjection {
         field: "battery_soc",
-        asset_type: "battery",
+        asset_type: AssetKind::Battery,
         state_key: "soc",
         read: |i| i.battery_soc,
     },
     StateInjection {
         field: "ev_soc",
-        asset_type: "ev",
+        asset_type: AssetKind::Ev,
         state_key: "soc",
         read: |i| i.ev_soc,
     },
     StateInjection {
         field: "heater_temp_c",
-        asset_type: "heater",
+        asset_type: AssetKind::Heater,
         state_key: "temp_c",
         read: |i| i.heater_temp_c,
     },
@@ -63,7 +64,7 @@ pub fn apply_state_injections(inject: &SimInjectState, sim: &mut SimState) -> Ve
             continue;
         };
         for (cfg, entry) in sim.asset_configs.iter().zip(sim.assets.iter_mut()) {
-            if cfg.asset_type_str() == asset_type {
+            if cfg.kind() == asset_type {
                 cfg.reset(
                     &mut entry.state,
                     HashMap::from([(state_key.to_string(), value)]),

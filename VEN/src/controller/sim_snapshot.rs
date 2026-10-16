@@ -78,9 +78,8 @@ pub struct GridSnapshot {
 pub struct AssetSnapshot {
     /// Actual power from last tick (kW). Positive = import, negative = export.
     pub power_kw: f64,
-    /// Asset type discriminant for type-based dispatch.
-    /// Values: `"battery"`, `"ev"`, `"heater"`, `"pv"`, `"base_load"`.
-    pub asset_type: String,
+    /// The asset's declared kind (`Asset::kind`), whatever its id.
+    pub asset_type: crate::entities::asset::AssetKind,
     /// Physical capability: maximum import rate (kW) from config + state.
     pub cap_max_import_kw: f64,
     /// Physical capability: maximum export rate (kW, magnitude) from config + state.
@@ -198,7 +197,7 @@ mod tests {
         values.insert("soc".to_string(), 0.5_f64);
         let snap = AssetSnapshot {
             power_kw: 0.0,
-            asset_type: "battery".to_string(),
+            asset_type: crate::entities::asset::AssetKind::Battery,
             cap_max_import_kw: 5.0,
             cap_max_export_kw: 5.0,
             available_discharge_kwh: Some(2.0),

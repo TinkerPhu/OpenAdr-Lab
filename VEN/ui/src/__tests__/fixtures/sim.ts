@@ -2,6 +2,7 @@
 // typed fields and its own state values (`soc`, `temp_c`, ...) side by side, the values being
 // flattened on the wire and read through `assetValue`. Typed fields a test leaves out get a
 // neutral default, so each test states only what it is about.
+import type { AssetKind } from "../../api/generated/AssetKind";
 import type { AssetSnapshot, GridSnapshot, SimInjectState, SimSnapshot } from "../../api/types";
 
 type AssetFields = Partial<AssetSnapshot> & Record<string, unknown>;
@@ -22,17 +23,25 @@ export function makeAsset(fields: AssetFields = {}): AssetSnapshot {
   } as AssetSnapshot;
 }
 
-/** The ids a default profile gives each kind: an asset with one of these ids is of that type. */
-const DEFAULT_TYPED_IDS = ["ev", "heater", "pv", "battery", "base_load"];
+/** Fixture shorthand only: the default id a profile gives each kind when it omits `id:`. A test
+ * asset that states no `asset_type` and has one of these ids is of that kind; any other id is a
+ * request-created shiftable load (the kind with no default id). Production code never maps an id
+ * to a kind. */
+const KIND_OF_DEFAULT_ID: Record<string, AssetKind> = {
+  ev: "ev",
+  heater: "heater",
+  pv: "pv",
+  battery: "battery",
+  base_load: "base_load",
+};
 
-/** Assets by id, in the order written (`roster_index`). An asset with a default id that states no
- * `asset_type` is of the type its id names, as a default profile's is. */
+/** Assets by id, in the order written (`roster_index`). */
 export function makeAssets(assets: Record<string, AssetFields>): Record<string, AssetSnapshot> {
   return Object.fromEntries(
     Object.entries(assets).map(([id, a], i) => [
       id,
       makeAsset({
-        asset_type: DEFAULT_TYPED_IDS.includes(id) ? id : "unknown",
+        asset_type: KIND_OF_DEFAULT_ID[id] ?? "shiftable_load",
         roster_index: i,
         ...a,
       }),

@@ -208,12 +208,8 @@ impl Asset for ShiftableLoadAsset {
         Self::reset(self, s, values)
     }
 
-    fn asset_type(&self) -> crate::entities::asset::AssetType {
-        crate::entities::asset::AssetType::WashingMachine
-    }
-
-    fn asset_type_str(&self) -> &'static str {
-        "shiftable_load"
+    fn kind(&self) -> crate::entities::asset::AssetKind {
+        crate::entities::asset::AssetKind::ShiftableLoad
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -58,7 +58,7 @@ impl SimState {
                 entry.id.clone(),
                 AssetSnapshot {
                     power_kw: entry.last_power_kw,
-                    asset_type: cfg.asset_type_str().to_string(),
+                    asset_type: cfg.kind(),
                     cap_max_import_kw: cap.max_import_kw,
                     cap_max_export_kw: cap.max_export_kw,
                     available_discharge_kwh,
@@ -134,7 +134,6 @@ impl SimState {
                     .recent_avg_power(chrono::Duration::seconds(60), now)
                     .unwrap_or_else(|| entry.history.latest().map(|p| p.power_kw).unwrap_or(0.0));
                 let current_state_values = cfg.state_values(&entry.state);
-                let asset_type = cfg.asset_type();
                 // Was a third inline copy of Heater's plan-trajectory math
                 // (alongside `Heater::plan_trajectory` and
                 // `Thermostat::plan_trajectory`) — now just calls through the
@@ -146,7 +145,6 @@ impl SimState {
                     entry.id.clone(),
                     TimelineAssetData {
                         asset_id: entry.id.clone(),
-                        asset_type,
                         history,
                         current_power_kw,
                         current_state_values,
@@ -205,6 +203,25 @@ mod tests {
             serde_json::to_value(SensorRaw::default()).unwrap(),
             serde_json::json!({})
         );
+    }
+
+    /// `/sim` lists an asset with its declared kind, whatever its id.
+    #[test]
+    fn sim_snapshot_carries_the_declared_kind_not_the_id() {
+        let sim = SimState::from_params(
+            &[AssetParams::Ev(crate::entities::asset_params::EvParams {
+                id: "car-a".into(),
+                ..Default::default()
+            })],
+            chrono::Utc::now(),
+        );
+        let snap = sim.to_sim_snapshot();
+        assert_eq!(
+            snap.assets["car-a"].asset_type,
+            crate::entities::asset::AssetKind::Ev
+        );
+        let wire = serde_json::to_value(&snap.assets["car-a"]).unwrap();
+        assert_eq!(wire["asset_type"], "ev");
     }
 
     /// `/sensors` reports the heater's temperature whatever the heater's id (W7).

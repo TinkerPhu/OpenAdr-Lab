@@ -13,7 +13,7 @@ import { AssetTimelineChart } from "../components/controller/charts/AssetTimelin
 import { TariffEnvelopeChart } from "../components/controller/charts/TariffEnvelopeChart";
 import { GridRatesChart } from "../components/controller/charts/GridRatesChart";
 import { SiteHeadroomChart } from "../components/controller/charts/SiteHeadroomChart";
-import { ASSET_COLORS, ASSET_LABELS } from "../components/controller/types";
+import { assetColor, assetLabel } from "../components/controller/assetDisplay";
 import { assetChartSpec } from "../components/controller/assetChartSpecs";
 import { assetTypeOf } from "../api/assets";
 import type { AssetTimelinePoint, TariffTimePoint } from "../components/controller/types";
@@ -260,10 +260,10 @@ export function HistoryPage() {
         const forecast = forecastByAsset[assetId];
         return (
           <Box key={assetId} sx={{ mt: 2 }} data-testid={`history-asset-chart-${assetId}`}>
-            <Typography variant="subtitle1">{ASSET_LABELS[assetId] ?? assetId}</Typography>
+            <Typography variant="subtitle1">{assetLabel(sim, assetId)}</Typography>
             <AssetTimelineChart
               data={points}
-              color={ASSET_COLORS[assetId] ?? "#888"}
+              color={assetColor(sim, assetId)}
               nowMs={toMs}
               hoursBack={24}
               hoursForward={0}

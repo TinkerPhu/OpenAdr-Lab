@@ -1,8 +1,8 @@
 import {
   Chip, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography,
 } from "@mui/material";
-import { useAssetCapabilities, useAssetForecasts } from "../../api/hooks";
-import { ASSET_LABELS } from "./types";
+import { useAssetCapabilities, useAssetForecasts, useSim } from "../../api/hooks";
+import { assetLabel } from "./assetDisplay";
 import type { AssetCapabilityView } from "../../api/types";
 
 // WP-T6 (docs/history/project_journal.md, search "WP-T"): wires GET /capability/:asset_id
@@ -59,6 +59,7 @@ function formatSetpointResponse(cap: AssetCapabilityView): string {
 
 export function FlexibilityForecastPanel({ assetIds }: { assetIds: string[] }) {
   const capabilityResults = useAssetCapabilities(assetIds);
+  const { data: sim } = useSim();
   const { data: forecasts = [] } = useAssetForecasts();
   const forecastByAsset = new Map(forecasts.map((f) => [f.asset_id, f]));
 
@@ -90,7 +91,7 @@ export function FlexibilityForecastPanel({ assetIds }: { assetIds: string[] }) {
             return (
               <TableRow key={assetId} data-testid={`flexibility-row-${assetId}`}>
                 <TableCell>
-                  {ASSET_LABELS[assetId] ?? assetId}
+                  {assetLabel(sim, assetId)}
                   {/* The asset declares these (label + value, unit included): no per-kind branch here. */}
                   {cap?.key_features.map((f) => (
                     <Typography

@@ -14,6 +14,8 @@ const mockForecasts = vi.fn((): AssetForecast[] => []);
 vi.mock("../api/hooks", () => ({
   useAssetCapabilities: () => mockCapabilities(),
   useAssetForecasts: () => ({ data: mockForecasts() }),
+  // No roster: each row is labelled with its id (`assetDisplay.ts::assetLabel`).
+  useSim: () => ({ data: undefined }),
 }));
 
 function renderPanel(assetIds: string[]) {

@@ -386,12 +386,8 @@ impl Asset for EvCharger {
         })
     }
 
-    fn asset_type(&self) -> crate::entities::asset::AssetType {
-        crate::entities::asset::AssetType::Ev
-    }
-
-    fn asset_type_str(&self) -> &'static str {
-        "ev"
+    fn kind(&self) -> crate::entities::asset::AssetKind {
+        crate::entities::asset::AssetKind::Ev
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

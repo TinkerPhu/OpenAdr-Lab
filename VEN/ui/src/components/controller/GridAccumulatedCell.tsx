@@ -10,7 +10,7 @@ import {
   DEFAULT_TICK_INTERVAL_MINUTES, EXTENDED_TICK_INTERVAL_MINUTES,
 } from "@lab/ui/chartLayout";
 import type { AssetId, AssetSummary, AssetTimelinePoint } from "./types";
-import { ASSET_COLORS, COLOR_ASSET_FALLBACK } from "./types";
+import { assetLegendLabel } from "./assetDisplay";
 import { assetIdsWithTimelineData, buildStackedFromAllTimelines } from "./stackedTimelines";
 import { StackedTimeSeriesChart } from "../charts/StackedTimeSeriesChart";
 import type { ZoneDef } from "../../api/types";
@@ -52,7 +52,7 @@ export function GridAccumulatedCell({
 
   // Configured roster narrowed to what actually has plotted data in this window —
   // see assetIdsWithTimelineData's doc comment for why (legend must match the graph).
-  const typeOf = (id: string) => assetSummaries.find((s) => s.assetId === id)?.assetType ?? id;
+  const typeOf = (id: string) => assetSummaries.find((s) => s.assetId === id)?.assetType;
   const assetIds = stackOrder(
     assetIdsWithTimelineData(
       assetSummaries.map((s) => s.assetId),
@@ -77,7 +77,7 @@ export function GridAccumulatedCell({
             key={s.assetId}
             variant="caption"
             data-testid={`accumulated-power-${s.assetId}`}
-            sx={{ color: ASSET_COLORS[s.assetId] ?? COLOR_ASSET_FALLBACK }}
+            sx={{ color: s.color }}
           >
             {s.label}: {formatSignedPowerValue(s.powerKw)}
           </Typography>
@@ -93,7 +93,10 @@ export function GridAccumulatedCell({
         <StackedTimeSeriesChart
           data={stackedAreaPoints}
           assetIds={assetIds as AssetId[]}
-          colorMap={ASSET_COLORS}
+          colorMap={Object.fromEntries(assetSummaries.map((s) => [s.assetId, s.color]))}
+          labelMap={Object.fromEntries(
+            assetSummaries.map((s) => [s.assetId, assetLegendLabel(s.label, s.assetType)]),
+          )}
           nowMs={nowMs}
           hoursBack={window.hoursBack}
           hoursForward={window.hoursForward}

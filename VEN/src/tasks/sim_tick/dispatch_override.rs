@@ -88,7 +88,7 @@ mod dispatch_override_tests {
     fn snap_asset(power_kw: f64, imp: f64, exp: f64) -> AssetSnapshot {
         AssetSnapshot {
             power_kw,
-            asset_type: "x".into(),
+            asset_type: crate::entities::asset::AssetKind::Battery,
             cap_max_import_kw: imp,
             cap_max_export_kw: exp,
             available_discharge_kwh: None,
@@ -123,7 +123,6 @@ mod dispatch_override_tests {
         crate::services::test_support::asset_snapshots::snapshot_from_asset(
             &pv,
             crate::assets::AssetState::Pv(state),
-            "pv",
             last_power_kw,
             f64::MAX,
         )
@@ -158,7 +157,7 @@ mod dispatch_override_tests {
             ceiling_latched: false,
         });
         crate::services::test_support::asset_snapshots::snapshot_from_asset(
-            &heater, state, "heater", 3.0, 0.0,
+            &heater, state, 3.0, 0.0,
         )
     }
 

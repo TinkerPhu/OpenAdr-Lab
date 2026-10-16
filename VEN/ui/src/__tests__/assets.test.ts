@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { assetsOfType, assetsInRosterOrder, stackOrder } from "../api/assets";
 import { makeSim } from "./fixtures/sim";
+import type { AssetKind } from "../api/generated/AssetKind";
 
 describe("assetsOfType (W6)", () => {
   it("lists the assets of one type in roster order, whatever their ids", () => {
@@ -15,7 +16,7 @@ describe("assetsOfType (W6)", () => {
   });
 
   it("stacks generation nearest the axis, by type and whatever the ids", () => {
-    const types: Record<string, string> = {
+    const types: Record<string, AssetKind> = {
       "car-a": "ev",
       "roof-west": "pv",
       house: "base_load",

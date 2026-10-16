@@ -818,85 +818,69 @@ mod phase2a_trivial_delegation_smoke_tests {
 
 #[cfg(test)]
 mod phase2b_asset_type_and_downcast_tests {
-    //! Spec A Phase 2b groundwork: `asset_type`/`asset_type_str` (needed by
-    //! `simulator/snapshot.rs`) and `as_any`/`as_any_mut` (needed by the
-    //! remaining `AssetConfig`-matching call sites) must reproduce exactly
-    //! what those call sites' own match arms currently return.
+    //! Every asset's declared kind, and `as_any`/`as_any_mut` (needed by the
+    //! call sites that need one concrete asset type).
 
     use super::*;
-    use crate::entities::asset::AssetType;
+    use crate::entities::asset::AssetKind;
+    use crate::entities::asset_params::{
+        AssetParams, BaseLoadParams, BatteryParams, EvParams, HeaterParams, PvParams,
+    };
 
+    /// Every asset declares its one kind, whatever its id: an EV called `car-a` is an EV.
     #[test]
-    fn asset_type_and_str_match_snapshot_rs_existing_mapping() {
-        // Mirrors simulator/snapshot.rs's two independent matches verbatim --
-        // including BaseLoad's deliberate divergence (GenericConsumer vs.
-        // "base_load", not a 1:1 pair).
-        let cases: Vec<(Box<dyn Asset>, AssetType, &str)> = vec![
+    fn every_asset_declares_its_kind_whatever_its_id() {
+        let cases: Vec<(AssetParams, AssetKind)> = vec![
             (
-                Box::new(Battery::from_params(
-                    &crate::entities::asset_params::BatteryParams {
-                        id: "battery".into(),
-                        capacity_kwh: 10.0,
-                        max_charge_kw: 5.0,
-                        max_discharge_kw: 5.0,
-                        initial_soc_frac: 0.5,
-                        round_trip_efficiency: 0.9,
-                        min_soc_frac: 0.1,
-                        c_terminal_eur_kwh: None,
-                    },
-                )),
-                AssetType::Battery,
-                "battery",
+                AssetParams::Battery(BatteryParams {
+                    id: "home".into(),
+                    ..Default::default()
+                }),
+                AssetKind::Battery,
             ),
             (
-                Box::new(EvCharger::from_params(
-                    &crate::entities::asset_params::EvParams {
-                        id: "ev".into(),
-                        max_charge_kw: 7.0,
-                        max_discharge_kw: 7.0,
-                        initial_soc_frac: 0.4,
-                        battery_kwh: 50.0,
-                        consumption_kwh_per_km: 0.18,
-                        soc_target_frac: 0.8,
-                        default_charge_kw: 7.0,
-                        min_charge_kw: 1.4,
-                        response_delay_s: 0.0,
-                        v2g_capable: true,
-                        usage_sim: None,
-                    },
-                )),
-                AssetType::Ev,
-                "ev",
+                AssetParams::Ev(EvParams {
+                    id: "car-a".into(),
+                    ..Default::default()
+                }),
+                AssetKind::Ev,
             ),
             (
-                Box::new(PvInverter::from_params(
-                    &crate::entities::asset_params::PvParams {
-                        id: "pv".into(),
-                        rated_kw: 10.0,
-                        inverter_max_kw: 8.5,
-                        co2_g_kwh: 40.0,
-                    },
-                )),
-                AssetType::Pv,
-                "pv",
+                AssetParams::Heater(HeaterParams {
+                    id: "boiler".into(),
+                    ..Default::default()
+                }),
+                AssetKind::Heater,
             ),
             (
-                Box::new(BaseLoad::from_params(
-                    &crate::entities::asset_params::BaseLoadParams {
-                        id: "base_load".into(),
-                        baseline_kw: 0.6,
-                        spikes: vec![],
-                    },
-                )),
-                AssetType::GenericConsumer,
-                "base_load",
+                AssetParams::Pv(PvParams {
+                    id: "pv-east".into(),
+                    ..Default::default()
+                }),
+                AssetKind::Pv,
+            ),
+            (
+                AssetParams::BaseLoad(BaseLoadParams {
+                    id: "house".into(),
+                    ..Default::default()
+                }),
+                AssetKind::BaseLoad,
             ),
         ];
-
-        for (boxed, expected_type, expected_str) in cases {
-            assert_eq!(boxed.asset_type(), expected_type);
-            assert_eq!(boxed.asset_type_str(), expected_str);
+        for (params, expected) in cases {
+            let id = params.id().to_string();
+            let sim = crate::simulator::SimState::from_params(&[params], chrono::Utc::now());
+            let (_, cfg) = sim.find_asset(&id).expect("built");
+            assert_eq!(cfg.kind(), expected, "{id}");
         }
+        let now = chrono::Utc::now();
+        let load = ShiftableLoadAsset {
+            power_kw: 2.0,
+            duration_min: 60,
+            earliest_start: now,
+            latest_end: now + chrono::Duration::hours(4),
+        };
+        assert_eq!(load.kind(), AssetKind::ShiftableLoad);
     }
 
     #[test]

@@ -1,3 +1,4 @@
+import type { AssetKind } from "../../api/generated/AssetKind";
 import { Box } from "@mui/material";
 import { CELL_CHART_HEIGHT, CELL_CHART_MIN_WIDTH } from "@lab/ui/chartLayout";
 import type { AssetId, AssetTimelinePoint } from "./types";
@@ -7,7 +8,7 @@ import type { ZoneDef } from "../../api/types";
 
 interface AssetMidSectionProps {
   /** The asset's declared type (`asset_type`), which picks its chart declaration (W6). */
-  assetType: string;
+  assetType: AssetKind | undefined;
   assetId: AssetId;
   timePoints: AssetTimelinePoint[];
   color: string;

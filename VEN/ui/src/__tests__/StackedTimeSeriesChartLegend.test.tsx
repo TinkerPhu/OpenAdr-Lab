@@ -46,6 +46,8 @@ import { StackedTimeSeriesChart } from "../components/charts/StackedTimeSeriesCh
 const now = new Date("2026-01-01T12:00:00Z").getTime();
 const assetIds: AssetId[] = ["ev", "pv"];
 const colorMap = { ev: "#2196F3", pv: "#FFC107" };
+// The chart shows the legend labels its caller hands it (`assetDisplay.ts::assetLegend`).
+const labelMap = { ev: "EV (planned)", pv: "PV (forecast)" };
 const data: StackedAreaPoint[] = [
   { ts: now, ev_pos: 3.0, ev_neg: 0, pv_pos: 0, pv_neg: -2.0, base_load_pos: 0, base_load_neg: 0, battery_pos: 0, battery_neg: 0, heater_pos: 0, heater_neg: 0, gridPowerKw: 1.0 },
 ];
@@ -57,7 +59,7 @@ describe("StackedTimeSeriesChart — legend", () => {
   });
 
   it("shows exactly one legend entry per asset, not one per pos/neg series", () => {
-    render(<StackedTimeSeriesChart data={data} assetIds={assetIds} colorMap={colorMap} nowMs={now} />);
+    render(<StackedTimeSeriesChart data={data} assetIds={assetIds} colorMap={colorMap} labelMap={labelMap} nowMs={now} />);
     // Non-interactive: no checkboxes, but labels should appear exactly once per asset.
     expect(screen.getAllByText("EV (planned)")).toHaveLength(1);
     expect(screen.getAllByText("PV (forecast)")).toHaveLength(1);
@@ -65,7 +67,7 @@ describe("StackedTimeSeriesChart — legend", () => {
   });
 
   it("applies the one-entry-per-asset grouping even without interactiveLegend", () => {
-    render(<StackedTimeSeriesChart data={data} assetIds={assetIds} colorMap={colorMap} nowMs={now} />);
+    render(<StackedTimeSeriesChart data={data} assetIds={assetIds} colorMap={colorMap} labelMap={labelMap} nowMs={now} />);
     expect(screen.queryByTestId("legend-toggle-ev")).not.toBeInTheDocument();
     expect(screen.getByText("EV (planned)")).toBeInTheDocument();
   });
@@ -75,7 +77,7 @@ describe("StackedTimeSeriesChart — legend", () => {
       <StackedTimeSeriesChart
         data={data}
         assetIds={assetIds}
-        colorMap={colorMap}
+        colorMap={colorMap} labelMap={labelMap}
         nowMs={now}
         interactiveLegend
       />
@@ -95,7 +97,7 @@ describe("StackedTimeSeriesChart — legend", () => {
       <StackedTimeSeriesChart
         data={data}
         assetIds={assetIds}
-        colorMap={colorMap}
+        colorMap={colorMap} labelMap={labelMap}
         nowMs={now}
         interactiveLegend
       />
@@ -109,7 +111,7 @@ describe("StackedTimeSeriesChart — legend", () => {
   });
 
   it("an asset's Area fill and its legend entry text share the identical color", () => {
-    render(<StackedTimeSeriesChart data={data} assetIds={assetIds} colorMap={colorMap} nowMs={now} />);
+    render(<StackedTimeSeriesChart data={data} assetIds={assetIds} colorMap={colorMap} labelMap={labelMap} nowMs={now} />);
     const evPos = [...areas].reverse().find((a) => a.name === "ev +");
     const evNeg = [...areas].reverse().find((a) => a.name === "ev -");
     expect(evPos?.fill).toBe(colorMap.ev);
@@ -120,7 +122,7 @@ describe("StackedTimeSeriesChart — legend", () => {
   // W6: the chart stacks in the order it is handed; the order itself is `stackOrder`'s rule
   // (generation nearest the axis, whatever the asset's id — pinned in assets.test.ts).
   it("renders the Areas in the stacking order it is handed", () => {
-    render(<StackedTimeSeriesChart data={data} assetIds={["pv", "ev"]} colorMap={colorMap} nowMs={now} />);
+    render(<StackedTimeSeriesChart data={data} assetIds={["pv", "ev"]} colorMap={colorMap} labelMap={labelMap} nowMs={now} />);
     const posNames = areas.filter((a) => (a.name as string).endsWith(" +")).map((a) => a.name);
     const negNames = areas.filter((a) => (a.name as string).endsWith(" -")).map((a) => a.name);
     expect(posNames.indexOf("pv +")).toBeLessThan(posNames.indexOf("ev +"));
@@ -136,7 +138,7 @@ describe("StackedTimeSeriesChart — rounded Y ticks", () => {
   });
 
   it("renders round power ticks spanning the stacked data, including 0", () => {
-    render(<StackedTimeSeriesChart data={data} assetIds={assetIds} colorMap={colorMap} nowMs={now} />);
+    render(<StackedTimeSeriesChart data={data} assetIds={assetIds} colorMap={colorMap} labelMap={labelMap} nowMs={now} />);
     const axis = yAxes.find((a) => a.yAxisId === "power")!;
     const ticks = axis.ticks as number[];
     expect(ticks).toContain(0);

@@ -101,7 +101,7 @@ mod tests {
                 asset_id.to_string(),
                 AssetSnapshot {
                     power_kw,
-                    asset_type: "ev".to_string(),
+                    asset_type: crate::entities::asset::AssetKind::Ev,
                     cap_max_import_kw: 0.0,
                     cap_max_export_kw: 0.0,
                     available_discharge_kwh: None,
