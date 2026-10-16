@@ -29,6 +29,10 @@ sudo install -m 0644 "$ROOT/scripts/ci/systemd/ci-runner.timer" /etc/systemd/sys
 sudo systemctl daemon-reload
 sudo systemctl enable --now ci-runner.timer
 
+# The step-definition audit dry-runs behave, which the host's python does not have.
+[ -x "$CI_ROOT/venv/bin/python3" ] || python3 -m venv "$CI_ROOT/venv"
+"$CI_ROOT/venv/bin/pip" install -q -r "$ROOT/tests/requirements.txt"
+
 # The runner pushes only to origin/main, with a key that has write access to this repository
 # alone. Fetching stays on the public https URL.
 if [ ! -f "$CI_ROOT/deploy_key" ]; then

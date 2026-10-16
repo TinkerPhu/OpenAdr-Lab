@@ -20,6 +20,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CI_ROOT="${CI_ROOT:-/srv/ci}"
 CI_BIN="${CI_BIN:-$(dirname "$HERE")}"                 # holds docker_host_lock.sh and lib/
 CI_REPO="${CI_REPO:-/srv/docker/openadr_lab}"
+# The audits are stdlib python, but audit_step_definitions dry-runs behave: install.sh builds a venv.
+PY="$CI_ROOT/venv/bin/python3"; [ -x "$PY" ] || PY=python3
 export BOARD_DIR="${BOARD_DIR:-$CI_ROOT/board}" BOARD_NO_MAIN=1
 # shellcheck source=board.sh
 source "$HERE/board.sh"
@@ -77,7 +79,7 @@ checkout_rebased() {
 quick_tier() { # $1 = docs-only (yes|no)
     local s
     for s in audit_file_sizes audit_duplication audit_debt_gate audit_ven_architecture audit_step_definitions; do
-        run_step "$s" python3 "scripts/$s.py" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
+        run_step "$s" "$PY" "scripts/$s.py" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     done
     [ "$1" = yes ] && return 0
     # The harness copies VEN/ and lab-core/ into its image, so the image is rebuilt from this commit;
