@@ -10,6 +10,7 @@
 # Layout:  /srv/ci/board/     tickets (board.sh)        /srv/ci/archive/   old tickets
 #          /srv/ci/bin/       ci/{runner,board}.sh, docker_host_lock.sh, lib/
 #          /srv/ci/deploy_key push key (write access to this repository only)
+#          ~/.ssh/ci_deploy_ed25519 + Host Node1/Node2 entries: the key deploy tickets ship with
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -39,6 +40,25 @@ if [ ! -f "$CI_ROOT/deploy_key" ]; then
 fi
 git -C "$CI_REPO" config remote.origin.pushurl "$GITHUB_REPO"
 git -C "$CI_REPO" config core.sshCommand "ssh -i $CI_ROOT/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+# Deploy tickets (scripts/ci/deploy.sh) ship images to the production hosts over ssh. The runner
+# user gets its own key and an ssh alias per target; the key is never in the repository.
+NODE1_ADDR="${NODE1_ADDR:-192.168.1.103}"; NODE2_ADDR="${NODE2_ADDR:-192.168.1.104}"
+DEPLOY_SSH_KEY="$HOME/.ssh/ci_deploy_ed25519"
+mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+[ -f "$DEPLOY_SSH_KEY" ] || ssh-keygen -q -t ed25519 -N "" -C "node3-ci-deploy" -f "$DEPLOY_SSH_KEY"
+for pair in "Node1 $NODE1_ADDR" "Node2 $NODE2_ADDR"; do
+    set -- $pair
+    grep -q "^Host $1\$" "$HOME/.ssh/config" 2>/dev/null || cat >> "$HOME/.ssh/config" <<EOCONF
+Host $1
+  HostName $2
+  User $ME
+  IdentityFile $DEPLOY_SSH_KEY
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+EOCONF
+done
+chmod 600 "$HOME/.ssh/config"
+
 # The unit-test image carries cargo-audit, which compiles for a while on a Pi: pay for it here
 # instead of inside the first ticket.
 (cd "$CI_REPO" && docker compose -f tests/docker-compose.ven-unit-test.yml build ven-unit-test)
@@ -47,3 +67,7 @@ echo
 echo "installed. Register this public key as a write-enabled deploy key of the repository"
 echo "(GitHub: Settings > Deploy keys > Allow write access) if it is not registered yet:"
 cat "$CI_ROOT/deploy_key.pub"
+echo
+echo "For deploy tickets, add this key to ~/.ssh/authorized_keys of $ME on Node1 and Node2"
+echo "(ssh-copy-id -i $DEPLOY_SSH_KEY.pub Node1) if it is not there yet:"
+cat "$DEPLOY_SSH_KEY.pub"
