@@ -26,6 +26,7 @@
 #     lease_lock_cli.sh), so release/refresh only act on a lock you own.
 #   - Host: LOCK_HOST overrides for this script only; OPENADR_LAB_HOST is
 #     the shared default (also used by run_all_tests.sh); falls back to "Node1".
+#     "localhost" means this machine is the host: the lock is taken without ssh.
 #     The lock file has one fixed path on the host, so every SSH alias of a
 #     machine reaches the same lock; it was once named after the alias, which
 #     made two aliases of one machine two independent locks.
@@ -48,7 +49,15 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/lease_lock_cli.sh"
 # that starts with "bash", it also escapes MSYS's rewriting of arguments that look
 # like absolute POSIX paths (Git Bash on Windows).
 lock_op() { # $1=op  $2=description
-    ssh "$LOCK_TARGET_HOST" "bash -s -- $(printf '%q ' "$1" "$LOCK_OWNER_ID" "$LEASE_MIN" "${2:-}" "$LOCK_PATH")" < "$LEASE_LOCK_CORE"
+    local remote_cmd
+    remote_cmd="bash -s -- $(printf '%q ' "$1" "$LOCK_OWNER_ID" "$LEASE_MIN" "${2:-}" "$LOCK_PATH")"
+    # On the docker host itself (`localhost`, as the CI runner on Node3 uses) the lock
+    # file is local: no ssh to oneself, which would need the host's own key authorised.
+    if [ "$LOCK_TARGET_HOST" = localhost ]; then
+        bash -c "$remote_cmd" < "$LEASE_LOCK_CORE"
+    else
+        ssh "$LOCK_TARGET_HOST" "$remote_cmd" < "$LEASE_LOCK_CORE"
+    fi
 }
 
 lease_lock_main "$@"
