@@ -4,3 +4,5 @@ VEN/tests/fixtures/*.json text eol=lf
 *.sh text eol=lf
 # Generated from the Rust types (R-133); the guard test compares them byte for byte, so a CRLF checkout must not change them.
 VEN/ui/src/api/generated/** text eol=lf
+# Two branches each append a journal entry, which conflicts on every rebase; keep both sides.
+docs/history/project_journal.md merge=union

@@ -22,6 +22,15 @@
 #     (when running remotely)
 #   - Git repo cloned at DOCKER_DIR on the docker host
 #
+# Running ON the docker host itself (the CI runner on Node3 does this):
+#   OPENADR_LAB_HOST=localhost bash run_all_tests.sh --rust --e2e --resilience
+#   (or DOCKER_HOST="" -- an empty value means local). Docker commands then run
+#   directly, DOCKER_HOST is unset for them (the docker CLI would otherwise read the
+#   host name as a daemon address), and the host lock is still taken. A local run
+#   tests what is checked out in this directory and never pulls: the caller owns the
+#   checkout. LOCK_HELD_BY_CALLER=1 skips taking and releasing the lock, for a caller
+#   that already holds it for a longer sequence.
+#
 set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -31,14 +40,18 @@ set -euo pipefail
 # hardcoded default, so the host only needs to be set in one place.
 # Set to empty string "" to run docker commands directly on this machine (no SSH).
 # Example remote value: "Node1"
-DOCKER_HOST="${DOCKER_HOST:-${OPENADR_LAB_HOST:-Node1}}"  # override with DOCKER_HOST="" for local docker
+# `-` not `:-`: an explicitly empty DOCKER_HOST means "local", as documented above.
+TEST_HOST="${DOCKER_HOST-${OPENADR_LAB_HOST:-Node1}}"  # override with DOCKER_HOST="" for local docker
 DOCKER_DIR="/srv/docker/openadr_lab"  # repo path on the docker host
 
 # Auto-detect: if DOCKER_HOST is empty, "localhost", or matches this machine's
 # hostname, docker commands run locally without SSH.
 _THIS_HOST="$(hostname -s 2>/dev/null || true)"
-if [[ -z "$DOCKER_HOST" || "$DOCKER_HOST" == "localhost" || "$_THIS_HOST" == "$DOCKER_HOST" ]]; then
+if [[ -z "$TEST_HOST" || "$TEST_HOST" == "localhost" || "$_THIS_HOST" == "$TEST_HOST" ]]; then
     _DOCKER_IS_LOCAL=true
+    # DOCKER_HOST is also the docker CLI's own daemon address: left at a host name
+    # (Node3) every local docker call would dial tcp://Node3:2375 and fail.
+    unset DOCKER_HOST
 else
     _DOCKER_IS_LOCAL=false
 fi
@@ -48,7 +61,7 @@ run_docker_cmd() {
     if $_DOCKER_IS_LOCAL; then
         bash -c "$1"
     else
-        ssh "$DOCKER_HOST" "$1"
+        ssh "$TEST_HOST" "$1"
     fi
 }
 
@@ -57,11 +70,11 @@ can_reach_docker() {
     if $_DOCKER_IS_LOCAL; then
         return 0
     else
-        ssh -o ConnectTimeout=5 "$DOCKER_HOST" true 2>/dev/null
+        ssh -o ConnectTimeout=5 "$TEST_HOST" true 2>/dev/null
     fi
 }
 
-_DOCKER_LABEL="$( $_DOCKER_IS_LOCAL && echo "local" || echo "$DOCKER_HOST" )"
+_DOCKER_LABEL="$( $_DOCKER_IS_LOCAL && echo "local" || echo "$TEST_HOST" )"
 
 # Resolve real path for Windows subst drive workaround.
 # Only applied on Windows (MINGW/CYGWIN/MSYS); Linux/macOS use SCRIPT_DIR as-is.
@@ -137,10 +150,15 @@ echo -e "${BOLD}╚════════════════════�
 # The docker host is shared between worktrees/sessions; serialize access.
 # Aborts (exit 2) if the lock stays held past the wait limit — rerun to retry.
 
-if ! $_DOCKER_IS_LOCAL && { $RUN_E2E || $RUN_RESILIENCE || $RUN_RUST || $RUN_COVERAGE; }; then
-    header "Acquiring $_DOCKER_LABEL lock"
-    LOCK_HOST="$DOCKER_HOST" bash "$SCRIPT_DIR/scripts/docker_host_lock.sh" acquire -l 180 -m "run_all_tests.sh ${*:-all}"
-    trap 'LOCK_HOST="$DOCKER_HOST" bash "$SCRIPT_DIR/scripts/docker_host_lock.sh" release' EXIT
+if { $RUN_E2E || $RUN_RESILIENCE || $RUN_RUST || $RUN_COVERAGE; }; then
+    # A local run takes the host's lock too: on the CI host nothing else would stop a
+    # session testing by hand from colliding with the runner.
+    if [[ "${LOCK_HELD_BY_CALLER:-}" != 1 ]]; then
+        _LOCK_TARGET="$TEST_HOST"; $_DOCKER_IS_LOCAL && _LOCK_TARGET=localhost
+        header "Acquiring $_DOCKER_LABEL lock"
+        LOCK_HOST="$_LOCK_TARGET" bash "$SCRIPT_DIR/scripts/docker_host_lock.sh" acquire -l 180 -m "run_all_tests.sh ${*:-all}"
+        trap 'LOCK_HOST="$_LOCK_TARGET" bash "$SCRIPT_DIR/scripts/docker_host_lock.sh" release' EXIT
+    fi
 
     # GB-24: fails fast if Node2's resident fleet experiment (VEN/scale_out/node2/,
     # node2-ven-*) is running alongside genuinely tight memory — this combination

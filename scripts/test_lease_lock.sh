@@ -45,6 +45,15 @@ check "session A releases"                         0 env CLAUDE_CODE_SESSION_ID=
 check "status is FREE afterwards"                  0 bash -c "bash '$SCRIPT_DIR/docker_host_lock.sh' status | grep -qx FREE"
 check "an expired lease is stolen"                 0 bash -c "CLAUDE_CODE_SESSION_ID=aaaaaaaa-1 bash '$SCRIPT_DIR/docker_host_lock.sh' acquire -l 0 -m old >/dev/null && CLAUDE_CODE_SESSION_ID=bbbbbbbb-2 bash '$SCRIPT_DIR/docker_host_lock.sh' acquire -m new | grep -q 'stole dead lock'"
 
+echo "docker_host_lock.sh on the host itself (LOCK_HOST=localhost, no ssh)"
+check "session B releases the stolen lock"        0 env CLAUDE_CODE_SESSION_ID=bbbbbbbb-2 bash "$SCRIPT_DIR/docker_host_lock.sh" release
+printf '#!/usr/bin/env bash
+echo "ssh must not be used for localhost" >&2; exit 99
+' > "$TMP/bin/ssh"
+check "session A acquires without ssh"             0 env CLAUDE_CODE_SESSION_ID=aaaaaaaa-1 LOCK_HOST=localhost bash "$SCRIPT_DIR/docker_host_lock.sh" acquire -m A
+check "session B is refused without ssh"           2 env CLAUDE_CODE_SESSION_ID=bbbbbbbb-2 LOCK_HOST=localhost bash "$SCRIPT_DIR/docker_host_lock.sh" acquire -m B
+check "session A releases without ssh"             0 env CLAUDE_CODE_SESSION_ID=aaaaaaaa-1 LOCK_HOST=localhost bash "$SCRIPT_DIR/docker_host_lock.sh" release
+
 echo "wsl_lock.sh"
 check "session A acquires"                         0 env CLAUDE_CODE_SESSION_ID=aaaaaaaa-1 bash "$SCRIPT_DIR/wsl_lock.sh" acquire -m A
 check "session B in the same checkout is refused"  2 env CLAUDE_CODE_SESSION_ID=bbbbbbbb-2 bash "$SCRIPT_DIR/wsl_lock.sh" acquire -m B
