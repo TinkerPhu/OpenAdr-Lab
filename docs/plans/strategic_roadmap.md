@@ -37,10 +37,12 @@ SG-1–SG-3 are the **VTN-side benefit** axis; SG-4–SG-5 the **client comfort*
 - `docs/plans/fleet-monitor/` — VTN-side fleet monitor: `vision.md` (full feature vision for
   VTN controller, energy provider and grid controller) and `phase-0-foundation.md` (programs,
   reports, MQTT side channel and BFF services needed before the first views).
-- `docs/plans/opportunistic-objective-fleet-forecast.md` — master plan for an `Opportunistic`
-  planning objective (common non-planning HEMS behaviour: PV-surplus-only, no look-ahead) and
-  fleet-level forecast diffing, so flipping the fleet's objective shows an immediate forecast
-  change instead of requiring a day-long recording comparison.
+- `openspec/changes/opportunistic-objective/` — an `opportunistic` planner objective (common
+  non-planning HEMS behaviour: PV surplus absorbed in a declared order, battery covers import, no
+  look-ahead), its forecast plan, and fleet objective control from the VTN UI with a fleet
+  forecast over OpenADR `USAGE_FORECAST`, so switching the fleet shows the forecast change at
+  once instead of requiring a day-long recording comparison. Its forecast part waits for
+  `asset-declared-planner-model`.
 - `docs/plans/mqtt_notifier_conformance.md` — planned, not scheduled: make the VTN's MQTT notifier
   binding conform to 3.1 (TLS for every broker client, bearer-token login, per-client topic
   access). Records seven verified gaps, among them that the announced login cannot work today.
