@@ -8,7 +8,7 @@
 #      in the repo's unit-test harness (tests/docker-compose.ven-unit-test.yml);
 #   3. full tier (TIERS contains "full"): run_all_tests.sh --rust --e2e --resilience here;
 #   4. KIND=merge and everything green: fast-forwards origin/main to the tested commit.
-# A docs-only change runs the audits only. The verdict goes into the ticket (status, result.md)
+# A change the suites cannot see (docs, .claude/, scripts/ci/) runs the audits and the CI mechanism tests only. The verdict goes into the ticket (status, result.md)
 # Nothing here resumes a session: the user does that with scripts/ci/ci-next.sh.
 #
 # Installed by scripts/ci/install.sh into /srv/ci/bin, so a ticket that changes these very
@@ -78,6 +78,10 @@ quick_tier() { # $1 = docs-only (yes|no)
     local s
     for s in audit_file_sizes audit_duplication audit_debt_gate audit_ven_architecture audit_step_definitions; do
         run_step "$s" "$PY" "scripts/$s.py" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
+    done
+    # The CI mechanism has no other test: a change to it skips the suites, so these always run.
+    for s in test_board test_handoff test_deploy; do
+        run_step "ci/$s" bash "scripts/ci/$s.sh" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     done
     [ "$1" = yes ] && return 0
     # The harness copies VEN/ and lab-core/ into its image, so the image is rebuilt from this commit;

@@ -15955,3 +15955,17 @@ sessions. A flaky scenario does not block the merge, it is reported. Order: chea
 **Issues.** deploy.sh takes only allowlisted target, stack and service names (`test_deploy.sh`
 pins it); it needs an SSH key from Node3 to Node1/Node2, which is the user's to place.
 
+### Node3 CI: hybrid lane use (2026-10-16)
+
+**What.** `board_docs_only` also treats `.claude/` and `scripts/ci/` as invisible to the suites, and
+the audits-only path now runs `test_board`, `test_handoff` and `test_deploy` (the CI mechanism's only
+tests). Experiments and A/B runs go to Node2 by hand, not onto the board.
+
+**Why.** One lane, ~54 min per full run: seven tickets queued today, five of them full runs, two of
+them non-merging `check` runs, and a docs and a script-only change among them. The ssh-setup ticket
+waited ~4 h. The prose rule "scripts no test runs need no run" existed but the classifier only knew
+docs, so it never applied.
+
+**Decision with the user.** Hybrid: Node3 stays the only thing that merges; non-merging runs use
+Node2 under the existing lock rules.
+
