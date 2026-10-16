@@ -24,6 +24,7 @@ mod emergency;
 mod lag_bridge;
 pub mod limit;
 mod live;
+mod opportunistic;
 mod ranked;
 mod release;
 
@@ -31,6 +32,7 @@ pub use decision::decision_event;
 pub use dispatch::meet_dispatch_setpoint;
 pub use emergency::heater_emergency_modes;
 pub use live::{projected_net_kw, projected_net_kw_except, tighten_generation, LiveKwByAsset};
+pub use opportunistic::{opportunistic_pass, OpportunisticOutcome};
 #[cfg(test)]
 use ranked::rank_levers;
 pub use ranked::SetpointBoundsKw;
@@ -150,6 +152,10 @@ pub struct ArbiterOutcome {
     /// command (kW) — next tick's `ArbiterTick::prev_bridge_kw_by_asset`, with the limit
     /// pass's.
     pub bridge_kw_by_asset: HashMap<String, f64>,
+    /// The opportunistic pass's result (`None` under every planning objective). Kept apart
+    /// from the deviation fields above so nothing the deviation pass, its decision trace or
+    /// the residual tracker reads is ever written by it (openspec `opportunistic-objective` D0).
+    pub opportunistic: Option<opportunistic::OpportunisticOutcome>,
 }
 
 impl ArbiterOutcome {

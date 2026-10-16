@@ -99,7 +99,10 @@ fn every_asset_carries_its_kinds_surplus_claim_rank() {
 #[test]
 fn snapshot_capability_says_nothing_to_absorb_or_give_when_an_asset_cannot() {
     let snap = |params: AssetParams, id: &str| {
-        SimState::from_params(&[params], Utc::now()).to_sim_snapshot().assets[id].clone()
+        SimState::from_params(&[params], Utc::now())
+            .to_sim_snapshot()
+            .assets[id]
+            .clone()
     };
     let full = snap(
         AssetParams::Battery(BatteryParams {
@@ -108,7 +111,10 @@ fn snapshot_capability_says_nothing_to_absorb_or_give_when_an_asset_cannot() {
         }),
         crate::ids::ASSET_BATTERY,
     );
-    assert_eq!(full.cap_max_import_kw, 0.0, "a full battery takes no surplus");
+    assert_eq!(
+        full.cap_max_import_kw, 0.0,
+        "a full battery takes no surplus"
+    );
     let empty_params = BatteryParams::default();
     let empty = snap(
         AssetParams::Battery(BatteryParams {
@@ -117,7 +123,10 @@ fn snapshot_capability_says_nothing_to_absorb_or_give_when_an_asset_cannot() {
         }),
         crate::ids::ASSET_BATTERY,
     );
-    assert_eq!(empty.cap_max_export_kw, 0.0, "an empty battery covers no import");
+    assert_eq!(
+        empty.cap_max_export_kw, 0.0,
+        "an empty battery covers no import"
+    );
 
     let at_target = snap(
         AssetParams::Ev(EvParams {
@@ -127,7 +136,10 @@ fn snapshot_capability_says_nothing_to_absorb_or_give_when_an_asset_cannot() {
         }),
         crate::ids::ASSET_EV,
     );
-    assert_eq!(at_target.cap_max_import_kw, 0.0, "an EV at its target takes no surplus");
+    assert_eq!(
+        at_target.cap_max_import_kw, 0.0,
+        "an EV at its target takes no surplus"
+    );
     let ev = snap(AssetParams::Ev(EvParams::default()), crate::ids::ASSET_EV);
     let min_kw = EvParams::default().min_charge_kw;
     assert_eq!(
@@ -144,7 +156,10 @@ fn snapshot_capability_says_nothing_to_absorb_or_give_when_an_asset_cannot() {
         }),
         crate::ids::ASSET_HEATER,
     );
-    assert_eq!(hot.cap_max_import_kw, 0.0, "a heater at its ceiling takes no surplus");
+    assert_eq!(
+        hot.cap_max_import_kw, 0.0,
+        "a heater at its ceiling takes no surplus"
+    );
 }
 
 /// An unplugged EV takes no surplus.
