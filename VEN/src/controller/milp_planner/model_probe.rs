@@ -141,6 +141,9 @@ pub(crate) mod recorder {
             .map(|(v, x)| (index_of(*v), quantise_f64(*x)))
             .collect();
         let n = terms.len();
-        push(format!("warm terms={n} sorted={}", sorted_digest("0", terms)));
+        push(format!(
+            "warm terms={n} sorted={}",
+            sorted_digest("0", terms)
+        ));
     }
 }

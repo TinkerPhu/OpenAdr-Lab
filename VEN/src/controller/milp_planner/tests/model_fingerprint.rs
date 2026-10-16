@@ -6,7 +6,7 @@
 //! the warm start and every constraint in the order they were added, plus a full-precision digest
 //! of what came back. The result is compared with `golden/model_fingerprints.txt`. The golden
 //! holds nothing that depends on the CPU: no term order, and solver outputs rounded (see
-//! `model_probe.rs`, `float_noise.rs`), so it is checked unchanged on x86 and on aarch64.
+//! `model_probe.rs`, `golden_compare.rs`), so it is checked unchanged on x86 and on aarch64.
 //!
 //! The golden was captured from the code *before* the solver skeleton was shared
 //! (`model_skeleton.rs`), so a difference is a change in what the solver is given or returns, never
@@ -17,7 +17,7 @@
 //! Scenarios are small enough to solve to optimality in well under their time limits, so no
 //! wall-clock budget decides an outcome and the records are reproducible.
 
-use super::float_noise::{quantise_floats, same_within_float_noise};
+use super::golden_compare::{assert_matches_golden, quantise_floats};
 use super::*;
 
 use crate::controller::milp_planner::model_probe::recorder;
@@ -357,29 +357,8 @@ fn solve_models_match_the_recorded_golden() {
         return;
     }
 
-    let expected: Vec<&str> = GOLDEN.lines().collect();
-    let mut scenario = "(before the first scenario)";
-    for (i, got) in actual.iter().enumerate() {
-        if let Some(name) = got.strip_prefix("## ") {
-            scenario = name;
-        }
-        let want = expected
-            .get(i)
-            .copied()
-            .unwrap_or("(the golden ends before this record)");
-        assert!(
-            same_within_float_noise(got, want),
-            "model differs at record {i} of scenario `{scenario}`: either the solver is given a \
-             different model or it returned a different answer.\n  got:  {got}\n  want: {want}"
-        );
-    }
-    assert_eq!(
-        actual.len(),
-        expected.len(),
-        "the golden holds {} records but this run produced {}",
-        expected.len(),
-        actual.len()
-    );
+    // A difference means the solver is given a different model or returned a different answer.
+    assert_matches_golden(&actual, GOLDEN, "model");
 }
 
 /// The golden is only worth anything if a run reproduces itself.

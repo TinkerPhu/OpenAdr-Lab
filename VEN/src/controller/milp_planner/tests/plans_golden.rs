@@ -10,11 +10,11 @@
 //! at full precision. The result is compared with `golden/plans.txt`.
 //!
 //! Only the values that cannot repeat are left out: the plan's random `id` and the wall-clock
-//! solve times. Floats are compared to 1e-9 relative (`float_noise.rs`), so the golden holds on
+//! solve times. Floats are compared to 1e-9 relative (`golden_compare.rs`), so the golden holds on
 //! x86 and on aarch64. Regenerate only for an intended plan change:
 //! `UPDATE_PLANS_GOLDEN=1 cargo test -p ven-app plans_golden`.
 
-use super::float_noise::same_within_float_noise;
+use super::golden_compare::assert_matches_golden;
 use super::model_fingerprint::{
     assemble_with, ev_session, keep, scenarios, shiftable_load, Fixture,
 };
@@ -221,28 +221,7 @@ fn plans_match_the_recorded_golden() {
         return;
     }
 
-    let expected: Vec<&str> = GOLDEN.lines().collect();
-    let mut scenario = "(before the first scenario)";
-    for (i, got) in actual.iter().enumerate() {
-        if let Some(name) = got.strip_prefix("## ") {
-            scenario = name;
-        }
-        let want = expected
-            .get(i)
-            .copied()
-            .unwrap_or("(the golden ends before this line)");
-        assert!(
-            same_within_float_noise(got, want),
-            "plan differs at line {i} of scenario `{scenario}`\n  got:  {got}\n  want: {want}"
-        );
-    }
-    assert_eq!(
-        actual.len(),
-        expected.len(),
-        "the golden holds {} lines but this run produced {}",
-        expected.len(),
-        actual.len()
-    );
+    assert_matches_golden(&actual, GOLDEN, "plan");
 }
 
 /// A plan names every asset it scheduled, in planner input order, and the fallback plan for the
