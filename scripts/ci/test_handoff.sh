@@ -29,6 +29,7 @@ echo a > a.txt; git add a.txt; git commit -qm base; git push -q origin main
 git checkout -qb fix/example; echo b > b.txt; git add b.txt; git commit -qm change
 
 FAILS=0
+board_get_field() { sed -n "s/^$2=//p" "$BOARD_DIR/$1/request.env" | head -1; }
 check() { # $1=name  $2=expected  $3=actual
     if [ "$2" = "$3" ]; then echo "  ok    $1"
     else echo "  FAIL  $1 (got '$3', want '$2')"; FAILS=$((FAILS + 1)); fi
@@ -72,5 +73,15 @@ check "claude got the session id"           1 "$(grep -c "^$CLAUDE_CODE_SESSION_
 check "the prompt carries the verdict"      1 "$(grep -c 'verdict: \*\*merged\*\*' "$TMP/claude.args")"
 check "the ticket is acknowledged"          1 "$(ls "$BOARD_DIR/$TICKET/ack" 2>/dev/null | wc -l | tr -d ' ')"
 check "and is not listed again"             "no finished CI results waiting" "$(bash "$HERE/ci-next.sh")"
+
+echo "deploy hand-offs"
+git checkout -q main
+check "--rollback alone is refused"          1 "$(bash "$HERE/ci-handoff.sh" --rollback >/dev/null 2>&1; echo $?)"
+D="$(bash "$HERE/ci-handoff.sh" --deploy Node1 VEN "ven-2 ven-3" --rollback 2>&1 | sed -n 's/^handed off: //p')"
+check "a deploy needs no branch, main is fine" 1 "$([ -n "$D" ] && echo 1 || echo 0)"
+check "the ticket is a deploy"               deploy  "$(board_get_field "$D" KIND)"
+check "target, stack and services are kept"  "Node1 VEN ven-2 ven-3" "$(board_get_field "$D" TARGET) $(board_get_field "$D" STACK) $(board_get_field "$D" SERVICES)"
+check "the rollback flag is kept"            yes     "$(board_get_field "$D" ROLLBACK)"
+check "it names origin/main's sha"           "$(git rev-parse origin/main)" "$(board_get_field "$D" SHA)"
 
 [ "$FAILS" -eq 0 ] && echo "all passed" || { echo "$FAILS failed"; exit 1; }

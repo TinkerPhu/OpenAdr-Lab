@@ -65,6 +65,7 @@ RESULT="$(printf '%s\n' "$SHOWN" | sed -n '/^--- result.md/,$p' | tail -n +2)"
 PROMPT="CI result for your hand-off $NAME: $STATUS on branch $BRANCH.
 $(case "$STATUS" in
     merged)  echo "origin/main now holds the tested commit. Finish the task: delete this branch (local and origin), remove your worktree, return any docker host checkout you used to main." ;;
+    deployed) echo "The deploy ran and the services are up on the target host. Report it to the user; if something looks wrong, hand off a rollback (ci-handoff.sh --deploy ... --rollback)." ;;
     green)   echo "Tested but not merged (check-only hand-off). Report the result to the user." ;;
     *)       echo "It did not merge. Find the cause in the result below (full logs are on the CI host), fix it, push, and run scripts/ci/ci-handoff.sh again." ;;
 esac)
