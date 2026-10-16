@@ -89,11 +89,11 @@ the same instant — no day-long recordings, no confounded comparison.
   new payload types. Lab broker: two new leaves (`command/objective`, `objective`); the `plan`
   leaf goes from designed to published. All three carry the JSON shape of an existing VEN route
   body (`dto`).
-- **Depends on:** `openspec/changes/asset-declared-planner-model` (W1) for the forecast's plan
-  assembly (`SolveOutput` with `AssetSolution`s through `translate_to_plan`). Dispatch, requests,
-  objective control and the fleet channel do not wait for it; until W1 lands, an opportunistic
-  plan has no slots and says so. The surplus-claim rank is declared here and W1 reads it.
-  `fix/r94-heater-latch-pin` merges first (heater thermostat).
+- **Builds on:** W1–W6 (asset-declared planner, per-asset plan output, PV/base load
+  participants, sessions/levers/feeds/UI per asset), all on `main`. The forecast assembles through
+  W1's `SolveOutput`/`translate_to_plan`; the surplus-claim rank W1 declared on the planner side
+  is shared with the arbiter. R-94 (heater latch pins) is independent; whichever lands second
+  re-records its goldens.
 - **Tests:** arbiter unit tests per direction and per request mode, a live-vs-forecast agreement
   test, BFF topic/command unit tests, VEN and VTN UI unit tests, and BDD scenarios in
   `tests/features/` for VEN dispatch and for the fleet switch (the test stack already runs

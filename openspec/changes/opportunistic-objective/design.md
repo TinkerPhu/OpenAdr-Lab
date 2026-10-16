@@ -14,12 +14,17 @@ default, runs with or without a plan). The tick takes its objective from the **a
 
 **No-plan window.** `reconcile` without a plan slot calls only `apply_ev_lever_opportunistic` and
 returns. With deviation correction disabled (the default) the no-plan path is
-`apply_surplus_ev_overlay`, which calls the same function. Battery and heater do nothing.
+`apply_surplus_ev_overlay`, which calls the same function. It offers surplus to every EV in
+roster order, each under its own overlay (`EvOverlays`, one per EV since W4). Batteries and
+heaters do nothing.
 
-**Shared lever machinery.** `arbiter::apply_ranked_levers` builds candidates (`battery_lever`,
-`ev_lever`, `heater_pause_lever`, `heater_emergency_lever`, `pv_curtailment_lever`), ranks them
-with `rank_levers` (marginal cost, incumbent hysteresis) and applies them greedily. What differs
-between passes is declared as a `LeverPolicy` (`DEVIATION_POLICY`, `limit::LIMIT_POLICY`).
+**Shared lever machinery** (`controller/arbiter/ranked.rs`, W5a). `lever_candidates` builds one
+lever per asset that declares an `ArbiterLeverKind` (`Storage`, `SurplusCharge`, `PausableLoad`,
+via `Asset::arbiter_lever` on `AssetSnapshot`), plus the heater emergency and PV curtailment
+levers; each `Lever` carries a `LeverId { kind, asset_id }`. `rank_levers` sorts by marginal cost
+(stable: kind precedence, then roster order) with incumbent hysteresis; `apply_ranked_levers`
+applies greedily. What differs between passes is a `LeverPolicy` (`DEVIATION_POLICY`,
+`DISPATCH_POLICY`, `limit::LIMIT_POLICY`), including the lever kinds it `admits`.
 
 **Objective switch.** `PUT /plan/objective` (`routes/hems/misc.rs`) writes `ActiveObjective`
 (`Arc<RwLock<PlannerObjective>>`, seeded from the profile in `boot/mod.rs`, not persisted) and
@@ -31,14 +36,18 @@ from `plan.objective`; there is no GET for the objective itself.
 (`tasks/planning/assemble.rs`), solves through `SolverPort` (`milp_planner::MilpSolver` →
 `run_planner`), then gates (`services::planning::evaluate_acceptance_gate`: any non-periodic
 trigger adopts) and adopts. Plan assembly is `milp_planner::results::translate_to_plan` (from a
-`SolveOutput`); `fallback_plan` builds the same slot skeleton a second time. W1
-(`openspec/changes/asset-declared-planner-model`, 0 of 29 tasks done) replaces the per-kind
-`SolveOutput` fields with `assets: Vec<AssetSolution>` and makes allocation one loop ordered by
-a declared `surplus_claim_rank` (EV 0, heater 1, shiftable 2, battery 3).
+`SolveOutput`); `fallback_plan` builds the same slot skeleton a second time. Since W1,
+`SolveOutput` carries `assets: Vec<AssetSolution>` (net power, planned state, storage legs,
+warnings, a per-kind `detail`), and `translate_to_plan(sol, inputs, asset_contexts, ...)` orders
+allocations by `AssetMilpContext::surplus_claim_rank`, declared per kind in
+`assets/*_declared.rs` (EV 0, heater 1, shiftable load 2, battery 3, PV and base load as forecast
+participants `u8::MAX`). `controller/milp_planner/tests/plans_golden.rs` pins whole plans.
 
 **Simulator.** `SimState::tick(TickInputs)` steps every asset with `Asset::step(state, setpoint,
-dt)`, honours `pv_measured_kw` / `base_load_measured_kw`, `ev_plugged_override`,
-`ev_soc_target_override`, and integrates the grid meter. `dt_s` is a parameter.
+dt)` and integrates the grid meter; `dt_s` is a parameter. Inputs come in two shapes: the sim
+inject's site-wide scalars (`heater_temp_max_override`, `ev_soc_target_override`, ...) and, since
+W4/W5b, per-asset maps (`ev_departure_by_asset`, `heater_emergency_by_asset`, and the measured
+readings and weather feeds in `AssetTickFeeds`).
 
 **Fleet channel.** `fleet_telemetry.rs` publishes `status`, `telemetry`, `trace` on `lab-mqtt`
 under `openadr-lab/fleet/<venName>/`; the BFF (`VTN/bff/src/fleet.rs`) subscribes to
@@ -65,7 +74,8 @@ targets and shiftable loads carry a `mode`; only the MILP reads it today.
 | EV surplus decision | `arbiter_levers::apply_ev_lever_opportunistic` (its surplus excludes battery discharge and counts the battery's planned charge) | **Untouched** (D0). It and the generic `LEVER_ABSORB` answer the same question under different rules; consolidation filed as debt with an equivalence test as its first step |
 | Pre-arbiter EV overlay | `dispatcher::apply_surplus_ev_overlay`; `reconcile`'s EV-only no-plan branch | **Untouched** (D0): both stay the planning objectives' no-plan and overlay behaviour |
 | Asset surplus capability | `RequestResolvable::surplus_charge_kw` (test-only) **and** the EV lever's `power_when_command_lands_kw` read | The capability/response/available-energy fields already on `AssetSnapshot` are the answer for every asset (D2); `surplus_charge_kw` deleted |
-| Surplus-claim order | W1 D7 `AssetMilpContext::surplus_claim_rank` (planned); today the fixed block order in `results.rs` | One `Asset::surplus_claim_rank()` per kind, on `AssetSnapshot`; the MILP context and the arbiter both read it (D3) |
+| Surplus-claim order | `AssetMilpContext::surplus_claim_rank` in `assets/{ev,heater,shiftable,battery,forecast}_declared.rs`, read by `results::surplus_claim_order` | The per-kind value becomes one constant per kind, returned by both the declared context and a new `Asset::surplus_claim_rank()`, and carried on `AssetSnapshot` (D3) |
+| Lever identity and kinds | `LeverId { kind, asset_id }`, `ArbiterLeverKind`, `SimSnapshot::{lever_asset_ids, assets_in_roster_order}`, `LeverPolicy::admits` | The two generic kinds are new `LeverId` kinds, admitted only by `OPPORTUNISTIC_POLICY` (D2) |
 | Asset response to a command | `AssetSnapshot::{power_when_command_lands_kw, power_drawn_for_setpoint_kw, setpoint_for_power_at_or_below_kw}` | The generic levers' capacity and apply (D2) |
 | Battery lever | `battery_lever`, `apply_battery_lever` (dead-beat seeding, `MaxRevenue` refusal, lag bridge) | Unchanged for the deviation and limit passes; the opportunistic pass moves the battery through the generic levers (D2). Consolidation filed as debt |
 | Heater above comfort | `heater_emergency_lever` Absorb (past `temp_max_c`, needs a plan slot) | Not used by the opportunistic pass; a heater surplus candidate stops at `temp_max_c` |
@@ -73,7 +83,8 @@ targets and shiftable loads carry a `mode`; only the MILP reads it today.
 | Request semantics | `UserRequestMode::{states_a_firm_deadline, charges_until_departure}` | Gains `non_planning_dispatch()` beside them |
 | Heater thermostat rule | `assets/heater_thermostat.rs` (cut-out at `temp_max_c`, latched off until `temp_max_c − thermostat_delta_c`; emergency at `temp_min_c`); per-tick `TickInputs::heater_temp_max_override` (snaps back to the profile value when `None`) | A start-now heater request regulates at its target through this rule (D4) |
 | Bare on/off thermostat | `Thermostat::thermostat_setpoint_kw` (`assets/heater_capabilities.rs`: full power below target, off at or above, no hysteresis) | **Not used** by this change: at a 1 s tick it would switch every tick around the target. R-144 (`TECHNICAL_DEBTS.md`) moves the sim's comfort-target inject onto the same ceiling override and deletes it; whichever lands second keeps one precedence: a sim inject beats a request target |
-| EV target and plugging | `TickInputs::{ev_soc_target_override, ev_departure_time}`; `EvCharger::apply_usage_sim_tick` (plugging follows the EV's own usage schedule at `now`) | Session target injected under opportunistic dispatch (D4); the forecaster's slot `now` drives plugging (D6) |
+| Per-asset tick inputs | `TickInputs::{ev_departure_by_asset, heater_emergency_by_asset}` and their `TickOverrides` twins; the scalar sim injects `ev_soc_target_override`, `heater_temp_max_override`; `EvCharger::apply_usage_sim_tick` (plugging follows the EV's own usage schedule at `now`) | Gains `ev_soc_target_by_asset` and `heater_temp_max_by_asset` in the same shape, filled only under opportunistic dispatch; a scalar sim inject, when set, still wins (D4). The forecaster's slot `now` drives plugging (D6) |
+| Requests per asset | `AppState::current_ev_session(asset_id, now)`, `heater_targets()`, `shiftable_loads()` (W4) | Read only in the opportunistic arm (D4) |
 | Base setpoints | `dispatcher::build_setpoints`; the no-plan base in `build_tick_setpoints` (defaults only, no thermostat setpoints) | `build_setpoints` gains `follow_allocations`, `true` for every planning objective; the no-plan base is untouched (D0, D5) |
 | Limit pass | `limit::enforce_import_limit`, `hard_import_limit_kw`, `limit_target_kw` | Reused unchanged, live and in the forecast |
 | Scheduled limit at t | `tightest_capacity_limit` (used in `setpoints.rs`) | Reused per forecast slot |
@@ -132,10 +143,10 @@ touchpoint:
 | `rank_levers` | The `Cost` basis is today's sort, kept verbatim as its own branch | Existing tests, plus a randomized test against a frozen copy of today's function |
 | `Lever`, `apply_ranked_levers` | New field `None`; two new match arms existing levers never reach | Tick golden |
 | `reconcile`, deviation and limit levers, `LeverPolicy` constants | Untouched | Tick golden |
-| Arbiter memory (active levers, residual tracker) | The opportunistic pass returns no `displaced_kw_by_asset` and writes its leading lever into its own diagnostic field, never into `arbiter_active_lever`, `limit_active_lever` or the residual tracker; its limit pass runs with its own incumbent field too. A switch back finds only what planning wrote | Switch-back test (task 3.4) |
+| Arbiter memory (active levers, residual tracker) | The opportunistic pass returns no `displaced_kw_by_asset` and writes its leading lever into its own diagnostic field, never into `arbiter_active_lever` or the residual tracker. The limit pass is the same pass under both regimes and keeps `limit_active_lever` across a switch exactly as it does across any plan change today (a shed stage stays shed until it fits) | Switch-back test (task 3.4) |
 | Target injections (EV SoC target, heater ceiling) | Only in the opportunistic arm; a planning tick passes the sim inject values exactly as today | Tick golden |
 | Active-request collection | Only in the opportunistic arm; a planning tick does no extra state reads | Tick golden, code review |
-| Planning cycle | Same solve call; the guard is on the objective | Plans golden (W1) |
+| Planning cycle | Same solve call; the guard is on the objective | `plans_golden.rs` |
 | Adoption gate | One new leading rule that fires only when `dispatches_from_plan()` differs between the two plans or the new plan is opportunistic | Existing gate tests plus new ones |
 | `PlannerObjective`, `SolveStatus`, `WarningKind` | New variants; no existing arm changes | Exhaustive matches, spelling tests |
 | `ObjectiveSetting` | Same value and same trigger on `PUT /plan/objective`; the profile value at boot when no fleet command is retained | Route tests |
@@ -187,12 +198,13 @@ zero import capability; the response encodes stages, minimum rates and all-or-no
 (R-81/R-82). No new per-asset "surplus" method is needed, and `surplus_charge_kw` (test-only, a
 second answer to the same question) is deleted.
 
-`Lever` gains the asset id it moves (`Option<&str>`, borrowed from the snapshot), so the shared
-`apply_ranked_levers` loop dispatches the two generic kinds by data, alongside the existing
-per-kind levers. The loop is unchanged otherwise: the achieved amount is what the asset draws
+Both are new `LeverId` kinds, one lever per asset whose snapshot carries a surplus-claim rank,
+in the same shape as W5a's per-asset levers. `lever_candidates` builds them only when the policy
+admits them, so the planning passes (`ALL_LEVERS`, `DISPATCH_POLICY`) never build or see them,
+and `apply_ranked_levers` gains two match arms for them. The loop is unchanged otherwise: the achieved amount is what the asset draws
 **this tick** (`power_drawn_for_setpoint_kw`), so a lagging charger passes the excess to the
 next lever, as `LeverEffect` does today. The pass starts every tick from the base setpoints
-(battery and EV at their default 0 kW, not their last command) and reads `projected_net_kw`
+(storage and EVs at their default 0 kW, not their last command) and reads `projected_net_kw`
 once, so it is memoryless: no integrator, no lag bridge, nothing to wind up. The direction is the
 sign of the imbalance; each lever is capped at the remaining imbalance, so the battery never
 charges from the grid or discharges into export.
@@ -214,13 +226,15 @@ same generic shape plus pass-specific rules (dead-beat seeding, `MaxRevenue` ref
 bridge). Folding them in would change planned dispatch and is out of scope (D0); filed in
 `TECHNICAL_DEBTS.md`.
 
-### D3. Assets declare their surplus-claim rank
-`Asset::surplus_claim_rank() -> Option<u8>` (EV 0, heater 1, shiftable load 2, battery 3; PV and
-base load `None`) is carried on `AssetSnapshot`. `None` means the asset is never offered surplus
-or asked to discharge. The values are W1's attribution order, so the planner's attribution and
-the live dispatch order are one declaration: if W1 has landed, its
-`AssetMilpContext::surplus_claim_rank` reads the asset's value; if not, W1's task 6.1 is updated
-to read it. Equal ranks keep roster order.
+### D3. One surplus-claim rank per asset kind, read by planner and arbiter
+The rank exists today only on the MILP side (`AssetMilpContext::surplus_claim_rank` in each
+`*_declared.rs`). Each kind's value moves to one constant beside the kind (EV 0, heater 1,
+shiftable load 2, battery 3); the declared context returns it, and a new
+`Asset::surplus_claim_rank() -> Option<u8>` returns the same constant (`None` for PV and base
+load, whose context keeps `u8::MAX`). `AssetSnapshot` carries it. `None` means the asset is never
+offered surplus or asked to discharge. The planner's attribution and the live dispatch order are
+then one declaration, and `plans_golden.rs` proves the planner side unchanged. Equal ranks keep
+roster order, so two EVs or two heaters take surplus in roster order.
 
 *Alternative rejected:* battery first (several commercial HEMS default to it). It would make the
 dispatch order differ from the planner's attribution order and need a second declaration.
@@ -231,16 +245,18 @@ takes the rest and covers the evening.
 `UserRequestMode::non_planning_dispatch() -> NonPlanningDispatch::{StartNow, SurplusOnly}`:
 `Asap`, `ByDeadline` → `StartNow`; `AsapFree`, `ByDeadlineFree`, `Opportunistic`, `MaxCost` →
 `SurplusOnly`. `MaxCost` is surplus-only because without a price forecast the only energy known
-to fit any budget is surplus. The tick collects active requests (`current_ev_session`, the
-active heater target, active shiftable loads) into `ArbiterTick.active_requests: Vec<(asset_id,
-NonPlanningDispatch)>`. The request's target reaches the asset through the path
+to fit any budget is surplus. In the opportunistic arm only, the tick collects each asset's
+active request (`current_ev_session(asset_id, now)` per EV, `heater_targets()`, active
+`shiftable_loads()`) into `ArbiterTick.active_requests: Vec<(asset_id, NonPlanningDispatch)>`. The request's target reaches the asset through the path
 each asset already has for a target, so the asset's own answer says when it is done — the
 arbiter never compares a state with a target:
 
-- EV: under opportunistic dispatch, `ev_soc_target_override` = the active session's target when
-  no sim inject sets it. Its capability then reports zero import at the target.
-- Heater: under opportunistic dispatch, `heater_temp_max_override` = `min(target_temp_c,
-  temp_max_c)` of the active start-now heater request when no sim inject sets it. The heater's
+- EV: under opportunistic dispatch, `ev_soc_target_by_asset[id]` = the active session's target;
+  the scalar `ev_soc_target_override` sim inject, when set, still wins. Its capability then
+  reports zero import at the target.
+- Heater: under opportunistic dispatch, `heater_temp_max_by_asset[id]` = `min(target_temp_c,
+  temp_max_c)` of that heater's active start-now request; the scalar `heater_temp_max_override`
+  sim inject, when set, still wins. The heater's
   own thermostat rule then cuts out at the target and stays off until it has cooled by
   `thermostat_delta_c`, so the request is held at its target with the real thermostat's deadband
   and never chatters. The bare on/off `Thermostat::thermostat_setpoint_kw` is not used: it has no
@@ -276,10 +292,13 @@ limit pass); then `SimState::tick` with `dt_s` = slot length, `pv_measured_kw` a
 schedule decides when it is plugged, as it does live), and the request targets of D4. It records per-asset power and end state per slot. One evaluation per slot, by
 decision (proposal, "coarse").
 
-`milp_planner` gains `plan_from_forecast(inputs, trace, ...)`: it builds a W1 `SolveOutput`
-(grid series from the trace, slack zero, `assets: Vec<AssetSolution>` from per-asset power and
-state) and calls `translate_to_plan` with `SolveStatus::Simulated`, `friction_eur = 0` and the
-marginal values of D8. `tasks/planning/cycle.rs` holds the single guard: `dispatches_from_plan()`
+`milp_planner` gains `plan_from_forecast(inputs, asset_contexts, trace, ...)`: it builds a
+`SolveOutput` (grid series from the trace, slack zero) whose `assets` come from each asset's own
+context: a new `AssetMilpContext::solution_from_trace(net_kw, states)` returns that kind's
+`AssetSolution` (planned state, storage legs, its `detail`), so no kind's readback is written
+outside the kind. It then calls `translate_to_plan` with the same `asset_contexts`,
+`SolveStatus::Simulated`, `friction_eur = 0` and the marginal values of D8. PV and base load
+contribute their forecast series as they do in a solve. `tasks/planning/cycle.rs` holds the single guard: `dispatches_from_plan()`
 → solve, else forecast. Gate, adoption, events and history are shared.
 
 *Alternative rejected:* a second `SolverPort` implementation. `SolveRequest` carries MILP
@@ -381,10 +400,9 @@ small chart of that VEN's plan (net and per-asset allocation).
   `"objective": "opportunistic"` or `SIMULATED` in the plan history. Clear those rows (or switch
   every VEN back and wait out the history retention) before a rollback; noted in the migration
   plan.
-- [W1 has not started; D6's plan assembly needs it] → Tasks are ordered so dispatch, requests,
-  the objective plumbing and fleet control ship first; the forecast group is gated on W1.
-  Until then an opportunistic cycle adopts a plan with no slots and a warning
-  ("opportunistic — no forecast yet"), so dispatch already works and the gap is visible.
+- [Dispatch lands before the forecast within the branch] → Group 4 adopts a plan with no slots
+  and a warning ("opportunistic, no forecast yet") so dispatch is testable on its own; group 7
+  replaces it before merge.
 - [The fleet forecast joins OpenADR reports (VTN `venName`) with MQTT objectives (topic
   `venName`)] → Both come from the VEN's one configured name; the BFF test pins the join, and a
   report from a VEN with no MQTT objective is counted with objective `unknown`, not dropped.
@@ -398,6 +416,3 @@ No data migration. `ObjectiveSetting` and `SolveStatus::Simulated` are additive 
 `mosquitto_pub -r -n` per topic), switch every VEN to a planning objective, delete stored plans
 made under `opportunistic` from each VEN's plan history, then revert.
 
-## Open Questions
-
-- The exact `AssetSolution` field names come from W1's implementation; D6 adapts to them.

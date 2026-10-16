@@ -1,10 +1,9 @@
 # Tasks
 
-Branch: `051-opportunistic-objective` (next free feature id — confirm before creating), started
-after `fix/r94-heater-latch-pin` has merged (it changes the heater thermostat that 1.4 pins). Groups
-1–6 and 8–9 do not depend on W1 and ship first; group 7 waits for
-`openspec/changes/asset-declared-planner-model` to land. Every group is test-first: write the
-test, run it to see it fail, then implement.
+Branch: `051-opportunistic-objective`, worktree `.claude/worktrees/051-opportunistic-objective`,
+based on `main` after W1–W6. R-94 (heater latch pins) is still open on another session's branch;
+if it lands first, rebase and re-record the goldens of group 0 before any production edit of
+this branch. Every group is test-first: write the test, run it to see it fail, then implement.
 
 "VEN tests green" means `cargo check --tests -j 2` in WSL under `scripts/wsl_lock.sh` after a
 free-memory check, then `DOCKER_HOST=Node2 bash run_all_tests.sh --rust` with the Node2 lock held
@@ -36,8 +35,11 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       regenerate TS; VEN UI shows both (Plan history status, warnings list).
 - [ ] 1.3 `UserRequestMode::non_planning_dispatch()` → `NonPlanningDispatch::{StartNow,
       SurplusOnly}` with the mapping of D4, and a test over every variant.
-- [ ] 1.4 `Asset::surplus_claim_rank() -> Option<u8>` (EV 0, heater 1, shiftable 2, battery 3,
-      PV/base load `None`), carried on `AssetSnapshot` via `simulator/snapshot.rs::to_sim_snapshot`.
+- [ ] 1.4 One rank constant per asset kind, returned by both the kind's
+      `AssetMilpContext::surplus_claim_rank` (`*_declared.rs`) and a new
+      `Asset::surplus_claim_rank() -> Option<u8>` (PV/base load `None`; their context keeps
+      `u8::MAX`), carried on `AssetSnapshot` via `simulator/snapshot.rs::to_sim_snapshot`;
+      `plans_golden.rs` unchanged.
       Pin, per asset kind, that the snapshot fields the generic levers read already say "nothing
       to absorb / discharge" when they must (D2): battery at full / at `min_soc_frac`; EV unplugged
       or at target; heater at `temp_max_c` and while latched; shiftable load finished or past its
@@ -49,10 +51,11 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 ## 2. The opportunistic pass (controller, unit level)
 
 - [ ] 2.1 `LeverPolicy` gains a ranking basis (`Cost` | `DeclaredRank`); `rank_levers` sorts by it,
-      hysteresis unchanged. `Lever` gains `asset_id: Option<&str>`. Tests: ranking by declared
-      rank; existing ranking tests unchanged under `Cost`.
-- [ ] 2.2 Generic `LEVER_ABSORB` / `LEVER_DISCHARGE` (capacity and apply from `AssetSnapshot`
-      only, D2), dispatched by data in `apply_ranked_levers`; `apply_ev_lever_opportunistic`
+      hysteresis unchanged (`controller/arbiter/ranked.rs`). Tests: ranking by declared rank,
+      equal ranks in roster order; existing ranking tests unchanged under `Cost`.
+- [ ] 2.2 Generic `LEVER_ABSORB` / `LEVER_DISCHARGE` `LeverId` kinds (capacity and apply from
+      `AssetSnapshot` only, D2), built in `lever_candidates` only when the policy admits them,
+      two new arms in `apply_ranked_levers`; `apply_ev_lever_opportunistic`
       `OPPORTUNISTIC_POLICY` and `arbiter::opportunistic_step(tick, base) -> ArbiterOutcome` (pass
       + limit pass), memoryless from the base setpoints, with its own incumbent fields; its
       outcome carries no `displaced_kw_by_asset`. `apply_ev_lever_opportunistic` and
@@ -81,10 +84,13 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       `!dispatches_from_plan()`, that calls `opportunistic_step`, independent of
       `deviation_arbiter_enabled`. `reconcile` and the no-plan path stay as they are. Inside that
       arm only, collect `active_requests` in `tasks/sim_tick` from
-      `current_ev_session`, the active heater target and active shiftable loads. Under
-      opportunistic dispatch only, and only when no sim inject sets them: the EV session target goes
-      to `ev_soc_target_override`, `min(target_temp_c, temp_max_c)` of a start-now heater request
-      to `heater_temp_max_override` (`tasks/sim_tick/tick.rs`). Tests: start-now heater cuts out
+      `current_ev_session(asset_id, now)` per EV, `heater_targets()` and active
+      `shiftable_loads()`. New per-asset `TickInputs`/`TickOverrides` maps
+      `ev_soc_target_by_asset` and `heater_temp_max_by_asset` (same shape as
+      `ev_departure_by_asset`), filled only in the opportunistic arm: each EV's session target,
+      and `min(target_temp_c, temp_max_c)` of each heater's start-now request. A scalar sim
+      inject, when set, still wins (`tasks/sim_tick/tick.rs`, the EV and heater
+      `apply_tick_overrides`). Tests: start-now heater cuts out
       at the request target, not at `temp_max_c`; it stays off until `target − thermostat_delta_c`
       and then reheats (no switching every tick over 600 simulated ticks); planned objectives
       unchanged; opportunistic plan with a 3 kW battery allocation commands 0 kW on a balanced
@@ -141,18 +147,20 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       `VEN/src/entities/units.rs` re-exports; architecture audit still green. Unit tests in
       lab-core (round trip).
 
-## 7. Opportunistic forecast (after W1)
+## 7. Opportunistic forecast
 
 - [ ] 7.1 Extract the per-slot skeleton (tariffs, caps, baseline, PV) shared by `fallback_plan`
-      and `translate_to_plan` into one function; both call it. `plans_golden` (from W1) holds.
+      and `translate_to_plan` into one function; both call it. `plans_golden.rs` holds.
 - [ ] 7.2 `simulator/opportunistic_forecast.rs` (D6): per slot build snapshot, tick, base
       setpoints, call `opportunistic_step`, then `SimState::tick` with slot-mean PV and base load
       as measured overrides, `now` = slot start (the EV's own usage schedule decides plugging) and
       `dt_s` = slot length; request targets injected as in 3.2. Returns a per-slot, per-asset power and state trace. Tests: noon surplus
       charges battery, evening discharges to floor; scheduled 3 kW limit respected; forecast PV
       equals the input series (smoothing bypassed).
-- [ ] 7.3 `milp_planner::plan_from_forecast` builds a W1 `SolveOutput` from the trace and calls
-      `translate_to_plan` (`Simulated`, friction 0, marginal values of D8). Test: exporting slot's
+- [ ] 7.3 `AssetMilpContext::solution_from_trace(net_kw, states)` per kind (each in its own
+      `*_declared.rs`, unit-tested there), and `milp_planner::plan_from_forecast` building the
+      `SolveOutput` from those and calling `translate_to_plan` with the same contexts
+      (`Simulated`, friction 0, marginal values of D8). Test: exporting slot's
       marginal fields equal the export tariff; plan carries `objective: opportunistic`.
 - [ ] 7.4 `cycle.rs` guard calls the forecaster instead of 4.1's empty plan;
       `OpportunisticNoForecast` deleted. Guard test: one forecast step and one live tick given the
