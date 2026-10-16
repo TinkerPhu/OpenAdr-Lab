@@ -214,9 +214,16 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "the golden holds 2 lines but this run produced 3")]
-    fn assert_matches_golden_rejects_a_run_longer_than_the_golden() {
+    #[should_panic(expected = "differs at line 2")]
+    fn assert_matches_golden_rejects_a_line_the_golden_does_not_have() {
         let actual: Vec<String> = ["## one", "x 1.0", "z"].map(String::from).to_vec();
+        assert_matches_golden(&actual, "## one\nx 1.0\n", "plan");
+    }
+
+    #[test]
+    #[should_panic(expected = "the golden holds 2 lines but this run produced 1")]
+    fn assert_matches_golden_rejects_a_run_shorter_than_the_golden() {
+        let actual: Vec<String> = ["## one"].map(String::from).to_vec();
         assert_matches_golden(&actual, "## one\nx 1.0\n", "plan");
     }
 
