@@ -1,6 +1,6 @@
-# Plan: what is left of the Node3 CI (deploy, flaky retry, push notification)
+# Plan: what is left of the Node3 CI (deploy)
 
-**Status: partly implemented.** The board, the runner, `ci-handoff.sh`, `ci-next.sh`, the merge
+**Status: partly implemented** (flaky retry is built too, see TESTING.md). The board, the runner, `ci-handoff.sh`, `ci-next.sh`, the merge
 queue and the host-mode fixes are built and described in `docs/guidelines/TESTING.md`
 ("CI on Node3"). This plan keeps only what is not built yet.
 
@@ -20,17 +20,6 @@ by a session after the user said so; the runner builds and ships, nothing deploy
   this repository's branches; it never runs fork pull requests.
 - Existing deploy procedure to replace or call: `.claude/skills/deploy-node1/SKILL.md`.
 
-## 2. Flaky versus red
-
-A failing E2E scenario is re-run once on its own; a pass on retry makes the ticket `flaky` (named
-in `result.md`, still to be looked at) instead of `red`. Needs a way to run single scenarios in the
-test stack from `run_all_tests.sh`; not designed yet.
-
-## 3. Phone push
-
-`runner.sh` already posts to ntfy.sh when `NTFY_TOPIC` is set in `/srv/ci/env`. Choosing a topic is
-the user's call (anyone who knows the topic can read the messages: no secrets in them).
-
 ## Reuses
 
 `scripts/ci/board.sh` (tickets), `scripts/ci/runner.sh`, `scripts/docker_host_lock.sh`,
@@ -38,4 +27,4 @@ the user's call (anyone who knows the topic can read the messages: no secrets in
 
 ## When this is done
 
-Fold deploy and flaky retry into `docs/guidelines/TESTING.md` and delete this plan.
+Fold deploy into `docs/guidelines/TESTING.md` and delete this plan.

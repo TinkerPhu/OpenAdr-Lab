@@ -9,8 +9,7 @@
 #   3. full tier (TIERS contains "full"): run_all_tests.sh --rust --e2e --resilience here;
 #   4. KIND=merge and everything green: fast-forwards origin/main to the tested commit.
 # A docs-only change runs the audits only. The verdict goes into the ticket (status, result.md)
-# and, if NTFY_TOPIC is set in /srv/ci/env, to a phone push. Nothing here resumes a session:
-# the user does that with scripts/ci/ci-next.sh.
+# Nothing here resumes a session: the user does that with scripts/ci/ci-next.sh.
 #
 # Installed by scripts/ci/install.sh into /srv/ci/bin, so a ticket that changes these very
 # scripts is tested by the previous version of them.
@@ -25,7 +24,6 @@ PY="$CI_ROOT/venv/bin/python3"; [ -x "$PY" ] || PY=python3
 export BOARD_DIR="${BOARD_DIR:-$CI_ROOT/board}" BOARD_NO_MAIN=1
 # shellcheck source=board.sh
 source "$HERE/board.sh"
-[ -f "$CI_ROOT/env" ] && source "$CI_ROOT/env"           # NTFY_TOPIC=...
 
 UNIT_TEST="docker compose -f tests/docker-compose.ven-unit-test.yml"   # the harness's cargo caches are volumes
 MAX_ATTEMPTS=3
@@ -132,6 +130,11 @@ write_result() { # $1 = ticket
             [ -n "$s" ] || continue
             IFS='|' read -r name rc secs <<<"$s"; echo "| $name | $rc | $secs |"
         done
+        if [ -s "$TICKET_DIR/full.log" ] && grep -q '^FLAKY_SCENARIO:' "$TICKET_DIR/full.log"; then
+            echo; echo "## Flaky: failed once, passed on its own retry (look at these)"; echo; echo '```'
+            grep -h '^FLAKY_SCENARIO:' "$TICKET_DIR/full.log" | sort -u
+            echo '```'
+        fi
         if [ -n "$FAILED_STEP" ]; then
             echo; echo "## Failed: $FAILED_STEP"; echo
             if [ -s "$TICKET_DIR/full.log" ] && grep -q "Failing scenarios" "$TICKET_DIR/full.log" 2>/dev/null; then
@@ -146,12 +149,6 @@ write_result() { # $1 = ticket
         fi
         echo; echo "Logs: $TICKET_DIR/{run,quick,full}.log on Node3"
     } > "$TICKET_DIR/result.md.tmp" && mv "$TICKET_DIR/result.md.tmp" "$TICKET_DIR/result.md"
-}
-
-notify() { # $1 = ticket
-    [ -n "${NTFY_TOPIC:-}" ] || return 0
-    curl -fsS -m 10 -H "Title: CI $VERDICT: $BRANCH" -d "$1 — $VERDICT${NOTE:+ ($NOTE)}. Resume with: ci-next" \
-        "https://ntfy.sh/$NTFY_TOPIC" >/dev/null 2>&1 || true
 }
 
 process_ticket() {
@@ -199,7 +196,7 @@ process_ticket() {
     } >&8 2>&1
     exec 8>&-
     write_result "$t"
-    if [ "$VERDICT" = requeue ]; then board_set_status "$t" queued; else board_set_status "$t" "$VERDICT"; notify "$t"; fi
+    if [ "$VERDICT" = requeue ]; then board_set_status "$t" queued; else board_set_status "$t" "$VERDICT"; fi
 }
 
 main() {

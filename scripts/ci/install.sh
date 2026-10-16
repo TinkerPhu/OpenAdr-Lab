@@ -9,7 +9,6 @@
 #
 # Layout:  /srv/ci/board/     tickets (board.sh)        /srv/ci/archive/   old tickets
 #          /srv/ci/bin/       ci/{runner,board}.sh, docker_host_lock.sh, lib/
-#          /srv/ci/env        optional: NTFY_TOPIC=<topic> for phone pushes
 #          /srv/ci/deploy_key push key (write access to this repository only)
 set -euo pipefail
 

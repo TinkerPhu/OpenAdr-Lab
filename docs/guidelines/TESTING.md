@@ -308,12 +308,16 @@ tested by the previous version.
 - Pause: `sudo systemctl stop ci-runner.timer` (a running ticket finishes). Is it alive:
   `systemctl is-active ci-runner.timer`; timer log: `journalctl -u ci-runner`.
 - Push access: `/srv/ci/deploy_key` is a write-enabled deploy key for this repository only.
-- Phone push: put `NTFY_TOPIC=<topic>` into `/srv/ci/env` (ntfy.sh).
 - Tests of the mechanism: `scripts/ci/test_board.sh`, `scripts/ci/test_handoff.sh`,
   `scripts/test_lease_lock.sh`.
 
-Not built yet: deploying a tested build to Node1/Node2 from the runner, and re-running a failed
-E2E scenario once to tell a flaky one from a red one (`docs/plans/ci-node3-handoff.md`).
+Flaky versus red: `tests/entrypoint.sh` re-runs each failed scenario once on its own
+(`tests/retry_failed.sh`, pinned by `tests/test_retry_failed.sh`). A scenario that passes on the
+retry does not fail the pass; it is named in a `FLAKY_SCENARIO:` log line and the runner lists it
+under "Flaky" in `result.md`, and the ticket still merges. One that fails again is red.
+
+Not built yet: deploying a tested build to Node1/Node2 from the runner
+(`docs/plans/ci-node3-handoff.md`).
 
 ---
 
