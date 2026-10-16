@@ -225,7 +225,9 @@ resumes the session with the result
 ### Handing a branch over
 
 Commit everything first, **including the journal and key-learnings entries** (they are tested and
-merged with the code), push, then hand off and stop:
+merged with the code), push, then hand off. Finished work: stop until the result arrives. A
+`--kind check` hand-off of an unfinished branch's milestone: keep working on new commits (the ticket
+tests the commit it recorded) and do not hand off again while it is in flight:
 
 ```bash
 git push -f origin HEAD:<branch>

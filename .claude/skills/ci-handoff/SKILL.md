@@ -22,9 +22,14 @@ If it is not, say so and merge the old way (manual gate, own docker host run).
    `Debt-deferred:` line the debt gate needs: they are tested and merged together with the code.
 3. `git push -f origin HEAD:<branch>`.
 4. `bash scripts/ci/ci-handoff.sh` (`--kind check` to test without merging).
-5. Tell the user the ticket name and stop. Do not wait, poll or start the suite yourself. The user
+5. Tell the user the ticket name. Do not wait, poll or start the suite yourself. The user
    resumes you with `scripts/ci/ci-next.sh` when the result is there (a full run takes about an hour,
    queued tickets longer).
+   - **Finished work** (`--kind merge`): stop. There is nothing left to do until the result arrives.
+   - **Work in progress** (`--kind check` on a milestone of an unfinished branch): do not stop. Keep
+     working on new commits; the ticket tests the commit it recorded, so later pushes do not
+     disturb it. Do not hand the branch off again while that ticket is in flight; fold its result
+     into the branch when it arrives, and hand off once more (as a merge) when the work is done.
 
 ## When the result arrives
 

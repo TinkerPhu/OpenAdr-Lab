@@ -69,7 +69,10 @@ touched, the python audits): commit the journal and KEY_LEARNINGS entries WITH t
 the full suite yourself, do not merge to main, do not wait for the result. The user brings you the
 result with `scripts/ci/ci-next.sh`: merged means delete the branch and worktree and finish the
 task; red, conflict or stale means fix and hand off again. Use `--kind check` for a run that must
-not merge. Full description: docs/guidelines/TESTING.md "CI on Node3", skill ci-handoff. If the
+not merge. Stop only after handing off finished work: a `--kind check` hand-off of work in progress
+(a milestone tested while the rest is still being built) does not end the task. Keep working on new
+commits; the ticket tests the commit it recorded, so later pushes do not disturb it. Do not hand the
+branch off again while that ticket is in flight, and fold its result into the branch when it comes. Full description: docs/guidelines/TESTING.md "CI on Node3", skill ci-handoff. If the
 runner is not running (`ssh Node3 systemctl is-active ci-runner.timer`), merge the old way.
 
 no-needless-runs: every build and test run costs minutes to hours on shared hardware, so start none
