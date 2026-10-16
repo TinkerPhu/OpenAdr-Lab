@@ -45,6 +45,9 @@ Your first message is the runner's `result.md`.
 
 ## Notes
 
+- Start no build or test run that is not needed (docs/guidelines/TESTING.md, "Rules for runs"):
+  nothing twice for the same commit, nothing while a run is in flight, warm caches first.
+
 - One ticket at a time is tested; others queue oldest first. `bash scripts/ci/ci-next.sh --all` shows the board.
 - Do not ask the runner to test an unpushed commit; `ci-handoff.sh` refuses it.
 - Docs-only changes take the short path (audits only) and merge in minutes.

@@ -72,6 +72,14 @@ task; red, conflict or stale means fix and hand off again. Use `--kind check` fo
 not merge. Full description: docs/guidelines/TESTING.md "CI on Node3", skill ci-handoff. If the
 runner is not running (`ssh Node3 systemctl is-active ci-runner.timer`), merge the old way.
 
+no-needless-runs: every build and test run costs minutes to hours on shared hardware, so start none
+that is not needed. Do not repeat a check that already passed on the same commit; do not start a
+run while one is in flight (wait for it, or ask); look for warm caches and volumes before any
+build that would start cold; do not run the Rust or E2E suites for a change they cannot see (docs,
+wiki, openspec, scripts that no test runs: the runner's docs-only path covers those); run the
+narrowest test that proves the change while working and leave the full gate to the runner. When a
+run is lost to the environment (killed shell, restarted WSL), find out why before starting it again.
+
 one-checkout-per-host: each docker host has a SINGLE working tree at
 /srv/docker/openadr_lab, and `run_all_tests.sh` does NOT switch it to your branch: it
 only `git pull`s whatever branch the host already has checked out, then builds and tests
