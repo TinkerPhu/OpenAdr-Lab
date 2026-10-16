@@ -4,7 +4,9 @@
 //! Each scenario runs `solve_milp_two_phase` (phase 1, phase 2, then the marginal-cost pass) and
 //! records, through `probe!` (see `model_probe.rs`), every variable definition, the objective(s),
 //! the warm start and every constraint in the order they were added, plus a full-precision digest
-//! of what came back. The result is compared with `golden/model_fingerprints.txt`.
+//! of what came back. The result is compared with `golden/model_fingerprints.txt`. The golden
+//! holds nothing that depends on the CPU: no term order, and solver outputs rounded (see
+//! `model_probe.rs`, `float_noise.rs`), so it is checked unchanged on x86 and on aarch64.
 //!
 //! The golden was captured from the code *before* the solver skeleton was shared
 //! (`model_skeleton.rs`), so a difference is a change in what the solver is given or returns, never
@@ -15,6 +17,7 @@
 //! Scenarios are small enough to solve to optimality in well under their time limits, so no
 //! wall-clock budget decides an outcome and the records are reproducible.
 
+use super::float_noise::{quantise_floats, same_within_float_noise};
 use super::*;
 
 use crate::controller::milp_planner::model_probe::recorder;
@@ -330,7 +333,7 @@ fn record(f: &Fixture) -> Vec<String> {
     lines.push(format!("status {:?}", winning.status));
     lines.push(format!(
         "solution {}",
-        recorder::digest(&solution_text(&winning))
+        recorder::digest(&quantise_floats(&solution_text(&winning)))
     ));
     lines
 }
@@ -360,13 +363,14 @@ fn solve_models_match_the_recorded_golden() {
         if let Some(name) = got.strip_prefix("## ") {
             scenario = name;
         }
-        let want = expected.get(i).copied();
-        assert_eq!(
-            Some(got.as_str()),
-            want,
+        let want = expected
+            .get(i)
+            .copied()
+            .unwrap_or("(the golden ends before this record)");
+        assert!(
+            same_within_float_noise(got, want),
             "model differs at record {i} of scenario `{scenario}`: either the solver is given a \
-             different model or it returned a different answer. `sorted=` equal but `sent=` \
-             different means only the order inside one expression changed."
+             different model or it returned a different answer.\n  got:  {got}\n  want: {want}"
         );
     }
     assert_eq!(
