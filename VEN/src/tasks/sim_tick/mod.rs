@@ -9,6 +9,9 @@ mod forecast_wiring;
 mod post_lock;
 mod publish;
 mod setpoints;
+#[cfg(test)]
+#[path = "tests/setpoints_golden.rs"]
+mod setpoints_golden;
 mod tick;
 mod usage_sim_plan_ahead;
 

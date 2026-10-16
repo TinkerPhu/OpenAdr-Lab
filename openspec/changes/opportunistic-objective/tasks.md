@@ -12,17 +12,19 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 
 ## 0. Invariance net (before any production edit)
 
-- [ ] 0.1 Tick golden: a test that replays a fixed set of planned-tick scenarios through
+- [x] 0.1 Tick golden (`tasks/sim_tick/tests/setpoints_golden.rs`, floats at 1e-9: the arbiter's
+      sums over `HashMap`s differ in the last bit between processes): a test that replays a fixed set of planned-tick scenarios through
       `build_tick_setpoints` and records every asset setpoint and every `ArbiterOutcome` field,
       with an `UPDATE_TICK_GOLDEN=1` writer. Scenarios: plan slot present / absent / expired; EV
       overlay on / off; deviation correction on / off; an import limit with each switching lever;
       a DISPATCH_SETPOINT window; comms loss; an alert window; heater `heater_setpoint_c` inject.
       Record on unmodified code; it must pass unchanged after every later group (D0).
-- [ ] 0.2 Frozen copy of today's `rank_levers` in the test module, and a randomized test (fixed
+- [x] 0.2 Frozen copy of today's `rank_levers` in the test module, and a randomized test (fixed
       seed, 10 000 candidate sets incl. equal costs and an incumbent) that the `Cost` basis
       returns the same order.
-- [ ] 0.3 Gate golden: today's `evaluate_acceptance_gate` decisions over a table of plan pairs
-      (all triggers, solved/failed combinations, decay, switch surcharge), recorded before 4.2.
+- [x] 0.3 Gate net: a frozen copy of today's `evaluate_acceptance_gate` compared on 10 000 random
+      pairs of planning plans (triggers, solved/failed, age, expiry, decay, switch surcharge)
+      (`services/planning/gate_frozen_tests.rs`).
 
 ## 1. Declarations (no behaviour change)
 

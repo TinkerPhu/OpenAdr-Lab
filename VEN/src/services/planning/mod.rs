@@ -22,6 +22,8 @@ use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::state::AppState;
 use lab_core::time_series::{Interpolation, TimeSeries};
 
+#[cfg(test)]
+mod gate_frozen_tests;
 mod service;
 
 pub struct PlanningService;

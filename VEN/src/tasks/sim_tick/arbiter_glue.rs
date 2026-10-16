@@ -126,6 +126,11 @@ pub(crate) async fn record_arbiter_outcome(
 pub(crate) struct OverlayEnabled(HashMap<String, bool>);
 
 impl OverlayEnabled {
+    #[cfg(test)]
+    pub(crate) fn from_map(overlay_by_asset: HashMap<String, bool>) -> Self {
+        Self(overlay_by_asset)
+    }
+
     pub(crate) fn of(&self, asset_id: &str) -> bool {
         self.0
             .get(asset_id)
@@ -176,7 +181,9 @@ pub(crate) async fn resolve_overlay_enabled(
 
 /// Both passes' storage bridges this tick, summed per asset — next tick's
 /// `ArbiterTick::prev_bridge_kw_by_asset`.
-fn both_passes_bridge_kw(outcome: &controller::arbiter::ArbiterOutcome) -> HashMap<String, f64> {
+pub(super) fn both_passes_bridge_kw(
+    outcome: &controller::arbiter::ArbiterOutcome,
+) -> HashMap<String, f64> {
     let limit_bridges = outcome.limit.iter().flat_map(|l| &l.bridge_kw_by_asset);
     let mut bridge_kw_by_asset = HashMap::new();
     for (asset_id, kw) in outcome.bridge_kw_by_asset.iter().chain(limit_bridges) {
