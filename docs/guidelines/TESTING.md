@@ -332,7 +332,10 @@ ships them to the target (same CPU architecture on all three hosts), takes the t
 the running image as `:previous`, and switches the services over with `up -d --no-build`
 (`scripts/ci/deploy.sh`; allowlisted targets Node1/Node2 and stacks VEN, VTN,
 VEN/scale_out/node2; pinned by `scripts/ci/test_deploy.sh`). Status `deployed` or `red`. Needs an SSH key
-of the runner user on Node3 (`~/.ssh`) that Node1 and Node2 accept. This
+of the runner user on Node3 that Node1 and Node2 accept: `scripts/ci/install.sh` creates
+`~/.ssh/ci_deploy_ed25519` and the `Node1`/`Node2` ssh aliases and prints the public key, which
+must be added to `authorized_keys` on both hosts (never commit the key). Rebuilding Node3 means
+`scripts/ci/install.sh` plus registering the printed GitHub deploy key and these two host keys. This
 replaces the scp-based `deploy-node1` skill for tested builds; that skill stays for trying
 uncommitted edits.
 
