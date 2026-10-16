@@ -3563,3 +3563,15 @@ right for keeping an x86 plan identical to the last bit; it is no longer needed 
   `HashMap`, whose iteration order changes per process, so the last bit of a sum moves. Compare at
   a stated tolerance (1e-9 kW here) and say why in the golden's header; run it in three separate
   processes before trusting it.
+
+## A limit judged on this tick releases a lagging actuator it has just cut (2026-10-17)
+
+- The limit pass projected import with each asset's power **this tick**. For the EV charger,
+  which applies a command a tick late, that is the previous command: once the pass had cut it, the
+  next tick read "within the limit" and let the full command through, which landed a tick later
+  above the limit. Import alternated 7.5 / 2.9 kW against 3 kW. A pass that enforces a limit
+  must also check where its commands **land** (`limit::hold_where_commands_land`); this tick's
+  part is the bridge's.
+- It hides at 1 s ticks (one tick in two over the limit looks like noise) and shows at once in a
+  forecast with 30-minute slots that runs the same decision. Stepping the live decision at a
+  coarse step is a cheap test for any controller with a lagging actuator.

@@ -16165,3 +16165,24 @@ GB-55 hold became their own functions instead. A cargo run started while files w
 reported errors that were not the change's; and `wsl bash -lc "...; echo $?"` from Git Bash
 printed `EXIT=0` for a failed cargo (the quoting swallowed the status) and lost its `/tmp` log, so
 builds ran through a script file with logs on the Windows side.
+
+**Group 7 (the forecast).** Under `opportunistic` the cycle steps a clone of the site through
+the planner's own slots with the live tick's decision and adopts what it saw
+(`simulator::opportunistic_forecast`, `milp_planner::plan_from_forecast`). The decision had lived
+in `tasks/sim_tick`, out of the simulator's reach; it became `controller::arbiter::
+opportunistic_step`, with the stages after any pass (`dispatch_stages`) moved into the arbiter,
+so the forecaster runs the same function. Each asset reads its own part back from the trace
+(`AssetMilpContext::solution_from_trace`); the plan then goes through `translate_to_plan` like a
+solved one, with status `SIMULATED`, the real cap and penalty exceedance of the trace, and D8's
+marginal values. A guard test pins that one forecast step and one live tick command the same
+setpoints, and the opportunistic arm stopped reading the plan for its lever slot and EV overlays,
+so a forecast plan with allocations cannot make the two diverge.
+
+**Issues.** The forecast's first limit test failed: import alternated between 7.5 and 2.9 kW
+against a 3 kW limit. The limit pass judged a lagging charger by what it draws this tick, released
+a cut it had just made, and the full command landed a tick later; at 1 s ticks this looks like
+noise. `limit::hold_where_commands_land` also checks where commands land. The opportunistic step
+applies it; planning mode would change recorded decisions (tick golden `plan_import_limit` shows
+the same release), which this change keeps identical, so that is R-145 for the user. `cycle.rs`
+was at the 200-line cap, so the guard moved to `tasks/planning/plan_for.rs`; `results.rs` (488)
+got its third caller of the new per-slot skeleton (7.1) through a new file.
