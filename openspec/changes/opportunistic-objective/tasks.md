@@ -139,7 +139,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       `DEFAULT_REPORT_CADENCE_S`, logged. Tests in `openadr_interface.rs` and
       `services/obligation.rs`, including: other `frequency` values unchanged; throttle; immediate
       after an objective change.
-- [ ] 6.5 Move `energy_kwh` and a new `mean_power_kw` to a new `lab_core::units`;
+- [x] 6.5 Move `energy_kwh` and a new `mean_power_kw` to a new `lab_core::units`;
       `VEN/src/entities/units.rs` re-exports; architecture audit still green. Unit tests in
       lab-core (round trip).
 

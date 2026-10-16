@@ -5,24 +5,11 @@
 //! places in two styles (`num_milliseconds() / 3_600_000.0` and `seconds / 3600.0`), so a
 //! changed convention or a slip had to be found everywhere (R-111). Names carry the units.
 //! `audit_ven_architecture.py` rule 10 keeps the inline spellings out.
+//!
+//! The conversions the BFF makes too (hours from a step, energy from power and back) live in
+//! `lab_core::units` and are re-exported here, so the VEN still names one module for all of them.
 
-use chrono::Duration;
-
-/// A step in seconds as hours - the `dt_h` a power is integrated over.
-pub fn dt_h_from_s(s: f64) -> f64 {
-    s / 3600.0
-}
-
-/// A `Duration` as hours, at millisecond precision. For a whole number of seconds this is
-/// bit-identical to `dt_h_from_s(seconds)`.
-pub fn dt_h_from_duration(d: Duration) -> f64 {
-    d.num_milliseconds() as f64 / 3_600_000.0
-}
-
-/// Energy [kWh] of `power_kw` held for `dt_h` hours.
-pub fn energy_kwh(power_kw: f64, dt_h: f64) -> f64 {
-    power_kw * dt_h
-}
+pub use lab_core::units::{dt_h_from_duration, dt_h_from_s, energy_kwh};
 
 /// Energy [kWh] of `power_kw` held for `minutes`. Not `energy_kwh(power_kw, minutes / 60.0)`:
 /// the multiplication comes first so the result is bit-identical to the `power * minutes / 60.0`
@@ -51,32 +38,14 @@ mod tests {
         assert_eq!(pct_from_frac(0.0), 0.0);
     }
 
+    /// The Zone A step is a twelfth of an hour through the shared conversion.
     #[test]
-    fn steps_become_hours() {
-        assert_eq!(dt_h_from_s(1800.0), 0.5);
+    fn the_zone_a_step_is_a_twelfth_of_an_hour() {
         assert_eq!(dt_h_from_s(ZONE_A_STEP_S), 1.0 / 12.0);
-        assert_eq!(dt_h_from_duration(Duration::seconds(300)), 1.0 / 12.0);
-        assert_eq!(
-            dt_h_from_duration(Duration::milliseconds(500)),
-            0.5 / 3600.0
-        );
-    }
-
-    /// The two spellings this module replaced must agree for every whole-second step.
-    #[test]
-    fn a_duration_and_its_seconds_give_the_same_dt_h() {
-        for s in [1, 59, 60, 300, 900, 3600, 7200, 86_400, 604_800] {
-            assert_eq!(
-                dt_h_from_duration(Duration::seconds(s)),
-                dt_h_from_s(s as f64),
-                "{s} s"
-            );
-        }
     }
 
     #[test]
-    fn energy_is_power_times_hours_or_minutes() {
-        assert_eq!(energy_kwh(2.0, 0.25), 0.5);
+    fn energy_is_power_times_minutes() {
         assert_eq!(energy_kwh_from_min(2.0, 15.0), 0.5);
         assert_eq!(energy_kwh_from_min(2.0, 60.0), 2.0);
     }

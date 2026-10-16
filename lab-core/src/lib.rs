@@ -23,6 +23,7 @@ pub mod fleet_channel;
 pub mod test_fixtures;
 pub mod time_series;
 pub mod time_window;
+pub mod units;
 pub mod vtn_auth;
 pub mod wire_contract;
 
