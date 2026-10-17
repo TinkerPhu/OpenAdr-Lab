@@ -288,6 +288,11 @@ pub struct HeaterMilpVars {
     pub s_low: Vec<Variable>,
     /// Continuous ≥ 0: switching indicator per step. sw[0] measures switch from initial hardware state. len = n.
     pub sw: Vec<Variable>,
+    /// Continuous ≥ 0: how far a `MustRun` deadline falls short of its target [kWh];
+    /// fixed 0 otherwise. An unreachable target (a thermostat latch holding the heater
+    /// off, too little power or time) is a reported gap, not an infeasible site solve —
+    /// what R-93 did for the EV.
+    pub s_short_kwh: Variable,
     /// Power per stage [kW] — cached from context for the heater's net power.
     pub p_step_kw: f64,
 }
@@ -299,10 +304,17 @@ pub struct HeaterSolOutput {
     pub z_heat_ready: f64,
     /// Tank energy above T_min [kWh] per slot. len = n.
     pub e_tank_kwh: Vec<f64>,
+    /// How far the deadline target is missed [kWh]; 0.0 when met or absent.
+    pub shortfall_kwh: f64,
 }
 
 /// Below-minimum tank violation penalty [€/kWh]. Used by heater objective (Phase 1).
 pub const M_LOW_EUR_PER_KWH: f64 = 10.0;
+
+/// Missed-deadline penalty [€/kWh] (Phase 1, so Phase 2's cost cap holds it too). Ten
+/// times the below-minimum penalty and far above any tariff or comfort bid, so the plan
+/// only falls short where the heater cannot deliver; finite, so it then still solves.
+pub const HEATER_SHORTFALL_PENALTY_EUR_KWH: f64 = 100.0;
 
 // R-23: the `AssetMilpContext` trait and its contract types live in the domain-ring
 // `controller::asset_milp_port` (domain-level `SolveRequest`/`SolverPort` must not

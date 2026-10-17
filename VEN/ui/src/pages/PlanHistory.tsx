@@ -20,6 +20,7 @@ const WARNING_KIND_LABELS: Record<WarningKind, string> = {
   PEAK_PENALTY_EXCEEDED: "Peak penalty exceeded",
   EV_CORE_ENERGY_UNMET: "EV guaranteed charge not delivered",
   TARGET_ABOVE_LIMIT: "Target above the charge limit",
+  HEATER_TARGET_UNMET: "Heater target not reached",
   OTHER: "Other",
 };
 
@@ -31,6 +32,7 @@ const WARNING_KIND_COLOR: Record<WarningKind, "error" | "warning" | "default"> =
   PEAK_PENALTY_EXCEEDED: "warning",
   EV_CORE_ENERGY_UNMET: "warning",
   TARGET_ABOVE_LIMIT: "warning",
+  HEATER_TARGET_UNMET: "warning",
   OTHER: "default",
 };
 

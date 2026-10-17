@@ -1,7 +1,7 @@
 ## all_assets_default
 == solve_phase1
-vars n=444 fb899d72997ec7a9
-expr objective terms=299 sorted=18fc4445a43878ee
+vars n=445 b4e31b9bc58d2dc3
+expr objective terms=300 sorted=4b580d8aedc3f1fb
 con eq=true terms=7 sorted=6e98248d34a8ee45
 con eq=false terms=1 sorted=ef873b99710761bd
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -437,30 +437,30 @@ con eq=false terms=3 sorted=2edc3e1c784526c4
 con eq=false terms=3 sorted=f62706bde80e4e42
 con eq=false terms=3 sorted=300cf33cba195579
 con eq=false terms=3 sorted=b07535ff06a7220f
-con eq=false terms=2 sorted=3519381a4501fbd1
-con eq=false terms=2 sorted=b40e6ffe708af133
-con eq=false terms=3 sorted=441fc9b9e82db49a
-con eq=false terms=2 sorted=3a07f5214955dbd3
-con eq=false terms=2 sorted=ba38c538b11386e7
-con eq=false terms=3 sorted=be82d8faee9d119b
-con eq=false terms=2 sorted=8eb0e9103b5c3f9a
-con eq=false terms=2 sorted=7c1ed6631e19a7dc
-con eq=false terms=3 sorted=a1da35da4c4608e3
-con eq=false terms=2 sorted=26047af6cf3b99c0
-con eq=false terms=2 sorted=5ec11b4617b28e08
-con eq=false terms=3 sorted=e8406239253cee42
-con eq=false terms=2 sorted=ded32d5a6900ce21
-con eq=false terms=2 sorted=f1995ce048656434
-con eq=false terms=3 sorted=3d0fb6df548b3824
-con eq=false terms=2 sorted=04dfdd9b59d724e7
-con eq=false terms=2 sorted=3f79c5af1344e480
-con eq=false terms=3 sorted=622080f13a05c5ed
+con eq=false terms=2 sorted=9613ef88e9a0b080
+con eq=false terms=2 sorted=229168afbe1260ba
+con eq=false terms=3 sorted=9e0d371f2ed2f8eb
+con eq=false terms=2 sorted=655b44f2967597b3
+con eq=false terms=2 sorted=11b292049a53109f
+con eq=false terms=3 sorted=b0836e7a43ca6a33
+con eq=false terms=2 sorted=8a3bc8a390e9a113
+con eq=false terms=2 sorted=19493573e429459d
+con eq=false terms=3 sorted=730f84ac5a841c12
+con eq=false terms=2 sorted=d9c710416f4a559b
+con eq=false terms=2 sorted=b70ea00d78661783
+con eq=false terms=3 sorted=3a44fdf20a5a2931
+con eq=false terms=2 sorted=3d04ac19b04c0610
+con eq=false terms=2 sorted=8fc0120881f51615
+con eq=false terms=3 sorted=c681e254cab92abd
+con eq=false terms=2 sorted=963649290e801c00
+con eq=false terms=2 sorted=ae235a215e9bed67
+con eq=false terms=3 sorted=f461d25d5b023d1a
 == solve_phase2
-vars n=560 d4555ce467ef1c43
+vars n=561 e6ff1ac3aba0864e
 expr friction terms=287 sorted=387fcb330917410c
-expr phase1_cap terms=391 sorted=c7b91e638ab0e746
-warm terms=503 sorted=666f120b0089c7fd
-con eq=false terms=391 sorted=1ef50673ab1ebb0a
+expr phase1_cap terms=392 sorted=3ff3af88778698d4
+warm terms=504 sorted=47fe765e18711976
+con eq=false terms=392 sorted=908d32ef2de5ed80
 con eq=true terms=7 sorted=e46f5158ffb5eb69
 con eq=false terms=1 sorted=ef873b99710761bd
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -1058,27 +1058,27 @@ con eq=false terms=3 sorted=bf2872db78da370f
 con eq=false terms=3 sorted=d28b9bf570cd7b45
 con eq=false terms=3 sorted=b3fad4c560ac480f
 con eq=false terms=3 sorted=3f893ff8aa3e174d
-con eq=false terms=2 sorted=8ea6211e710322c2
-con eq=false terms=2 sorted=2c402f6e6eb03b0a
-con eq=false terms=3 sorted=c6daa9ea700df57f
-con eq=false terms=2 sorted=7bc08f4b0902fa14
-con eq=false terms=2 sorted=f3a15fa9643afcae
-con eq=false terms=3 sorted=8b3700df437b6892
-con eq=false terms=2 sorted=b4d82f9f9cc43762
-con eq=false terms=2 sorted=c65594bdc6405432
-con eq=false terms=3 sorted=1176b2771bc6f391
-con eq=false terms=2 sorted=97aad556da651008
-con eq=false terms=2 sorted=f06dc3a5f1b79e76
-con eq=false terms=3 sorted=2a2099c2ce76fc14
-con eq=false terms=2 sorted=3ecf657a4cd11949
-con eq=false terms=2 sorted=ca0f20cf53a91fb2
-con eq=false terms=3 sorted=bf74902f6ba62caa
-con eq=false terms=2 sorted=76f0d1fd2deda707
-con eq=false terms=2 sorted=805e5467f4948a6e
-con eq=false terms=3 sorted=00cc1660defd5a2f
+con eq=false terms=2 sorted=098a6f5f11a6e2db
+con eq=false terms=2 sorted=8903249df73089c3
+con eq=false terms=3 sorted=b6623bf5b223213e
+con eq=false terms=2 sorted=0411845ef54f97ef
+con eq=false terms=2 sorted=d7125b7877c9c63d
+con eq=false terms=3 sorted=964d68008df21ac1
+con eq=false terms=2 sorted=d46ecaf470bf16fb
+con eq=false terms=2 sorted=a3b9e444fd298b4b
+con eq=false terms=3 sorted=6d86c0c71eb2b888
+con eq=false terms=2 sorted=0fecf75181de5877
+con eq=false terms=2 sorted=60e093e7de45e9f1
+con eq=false terms=3 sorted=e68afdb51a74b143
+con eq=false terms=2 sorted=2e7ea5e9bf7e2cb8
+con eq=false terms=2 sorted=a77370568a9256cb
+con eq=false terms=3 sorted=d3b7180defe26ffb
+con eq=false terms=2 sorted=d018aa09937202c3
+con eq=false terms=2 sorted=f43df3d0464a2142
+con eq=false terms=3 sorted=4c2a28608d45c153
 == solve_marginal_costs
-vars n=444 61a271a8caea2e03
-expr objective terms=299 sorted=18fc4445a43878ee
+vars n=445 3dbc9cb111315921
+expr objective terms=300 sorted=4b580d8aedc3f1fb
 con eq=true terms=7 sorted=6e98248d34a8ee45
 con eq=false terms=1 sorted=ef873b99710761bd
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -1514,31 +1514,31 @@ con eq=false terms=3 sorted=2edc3e1c784526c4
 con eq=false terms=3 sorted=f62706bde80e4e42
 con eq=false terms=3 sorted=300cf33cba195579
 con eq=false terms=3 sorted=b07535ff06a7220f
-con eq=false terms=2 sorted=3519381a4501fbd1
-con eq=false terms=2 sorted=b40e6ffe708af133
-con eq=false terms=3 sorted=441fc9b9e82db49a
-con eq=false terms=2 sorted=3a07f5214955dbd3
-con eq=false terms=2 sorted=ba38c538b11386e7
-con eq=false terms=3 sorted=be82d8faee9d119b
-con eq=false terms=2 sorted=8eb0e9103b5c3f9a
-con eq=false terms=2 sorted=7c1ed6631e19a7dc
-con eq=false terms=3 sorted=a1da35da4c4608e3
-con eq=false terms=2 sorted=26047af6cf3b99c0
-con eq=false terms=2 sorted=5ec11b4617b28e08
-con eq=false terms=3 sorted=e8406239253cee42
-con eq=false terms=2 sorted=ded32d5a6900ce21
-con eq=false terms=2 sorted=f1995ce048656434
-con eq=false terms=3 sorted=3d0fb6df548b3824
-con eq=false terms=2 sorted=04dfdd9b59d724e7
-con eq=false terms=2 sorted=3f79c5af1344e480
-con eq=false terms=3 sorted=622080f13a05c5ed
+con eq=false terms=2 sorted=9613ef88e9a0b080
+con eq=false terms=2 sorted=229168afbe1260ba
+con eq=false terms=3 sorted=9e0d371f2ed2f8eb
+con eq=false terms=2 sorted=655b44f2967597b3
+con eq=false terms=2 sorted=11b292049a53109f
+con eq=false terms=3 sorted=b0836e7a43ca6a33
+con eq=false terms=2 sorted=8a3bc8a390e9a113
+con eq=false terms=2 sorted=19493573e429459d
+con eq=false terms=3 sorted=730f84ac5a841c12
+con eq=false terms=2 sorted=d9c710416f4a559b
+con eq=false terms=2 sorted=b70ea00d78661783
+con eq=false terms=3 sorted=3a44fdf20a5a2931
+con eq=false terms=2 sorted=3d04ac19b04c0610
+con eq=false terms=2 sorted=8fc0120881f51615
+con eq=false terms=3 sorted=c681e254cab92abd
+con eq=false terms=2 sorted=963649290e801c00
+con eq=false terms=2 sorted=ae235a215e9bed67
+con eq=false terms=3 sorted=f461d25d5b023d1a
 result c_star=3521.304694852319 friction=3533.3225410425725 marginal=[0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275]
 status Optimal
 solution 53a76d5e462e2447
 ## all_assets_both_interactions
 == solve_phase1
-vars n=468 aca4dae5583eba39
-expr objective terms=323 sorted=bb02b8bc51035486
+vars n=469 08eb2c8f533c8819
+expr objective terms=324 sorted=9628e1dfa81f8cd9
 con eq=true terms=7 sorted=6e98248d34a8ee45
 con eq=false terms=1 sorted=ef873b99710761bd
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -1974,54 +1974,54 @@ con eq=false terms=3 sorted=2edc3e1c784526c4
 con eq=false terms=3 sorted=f62706bde80e4e42
 con eq=false terms=3 sorted=300cf33cba195579
 con eq=false terms=3 sorted=b07535ff06a7220f
-con eq=false terms=2 sorted=3519381a4501fbd1
-con eq=false terms=2 sorted=b40e6ffe708af133
-con eq=false terms=3 sorted=441fc9b9e82db49a
-con eq=false terms=2 sorted=3a07f5214955dbd3
-con eq=false terms=2 sorted=ba38c538b11386e7
-con eq=false terms=3 sorted=be82d8faee9d119b
-con eq=false terms=2 sorted=8eb0e9103b5c3f9a
-con eq=false terms=2 sorted=7c1ed6631e19a7dc
-con eq=false terms=3 sorted=a1da35da4c4608e3
-con eq=false terms=2 sorted=26047af6cf3b99c0
-con eq=false terms=2 sorted=5ec11b4617b28e08
-con eq=false terms=3 sorted=e8406239253cee42
-con eq=false terms=2 sorted=ded32d5a6900ce21
-con eq=false terms=2 sorted=f1995ce048656434
-con eq=false terms=3 sorted=3d0fb6df548b3824
-con eq=false terms=2 sorted=04dfdd9b59d724e7
-con eq=false terms=2 sorted=3f79c5af1344e480
-con eq=false terms=3 sorted=622080f13a05c5ed
-con eq=false terms=5 sorted=88216596fa223719
-con eq=false terms=5 sorted=1cf8141f406c5900
-con eq=false terms=5 sorted=b0137fcc0f6f98fc
-con eq=false terms=5 sorted=bf4918091371366d
-con eq=false terms=5 sorted=078c1b98450b1ffa
-con eq=false terms=5 sorted=8703001c66b8eb7b
-con eq=false terms=5 sorted=55b9ab77babf8096
-con eq=false terms=5 sorted=87da89dd6d201926
-con eq=false terms=5 sorted=3136a4fac590cf62
-con eq=false terms=5 sorted=404e5fefc5a29aaa
-con eq=false terms=5 sorted=7f29de6f74d60c94
-con eq=false terms=5 sorted=64616119a56ddd07
-con eq=false terms=5 sorted=e937585e05e2fe69
-con eq=false terms=5 sorted=2fb14e895cbbfa54
-con eq=false terms=5 sorted=2081a3b42b992c46
-con eq=false terms=5 sorted=4098410efda867bd
-con eq=false terms=5 sorted=54103e19aafb2754
-con eq=false terms=5 sorted=9a9039dc7839acc7
-con eq=false terms=5 sorted=d3fdfed83a58b709
-con eq=false terms=5 sorted=384a41e2a82c7c6a
-con eq=false terms=5 sorted=bfab6d947ddd50b9
-con eq=false terms=5 sorted=1a0501dcf30bd7c8
-con eq=false terms=5 sorted=73a876a5fbe02dd9
-con eq=false terms=5 sorted=623b6e8b830e1647
+con eq=false terms=2 sorted=9613ef88e9a0b080
+con eq=false terms=2 sorted=229168afbe1260ba
+con eq=false terms=3 sorted=9e0d371f2ed2f8eb
+con eq=false terms=2 sorted=655b44f2967597b3
+con eq=false terms=2 sorted=11b292049a53109f
+con eq=false terms=3 sorted=b0836e7a43ca6a33
+con eq=false terms=2 sorted=8a3bc8a390e9a113
+con eq=false terms=2 sorted=19493573e429459d
+con eq=false terms=3 sorted=730f84ac5a841c12
+con eq=false terms=2 sorted=d9c710416f4a559b
+con eq=false terms=2 sorted=b70ea00d78661783
+con eq=false terms=3 sorted=3a44fdf20a5a2931
+con eq=false terms=2 sorted=3d04ac19b04c0610
+con eq=false terms=2 sorted=8fc0120881f51615
+con eq=false terms=3 sorted=c681e254cab92abd
+con eq=false terms=2 sorted=963649290e801c00
+con eq=false terms=2 sorted=ae235a215e9bed67
+con eq=false terms=3 sorted=f461d25d5b023d1a
+con eq=false terms=5 sorted=890ad6ccfa343810
+con eq=false terms=5 sorted=a1917c1665084bcb
+con eq=false terms=5 sorted=e0ec5f807b4448d5
+con eq=false terms=5 sorted=e46afea81f37c7f2
+con eq=false terms=5 sorted=d7ef4cd99b39e54b
+con eq=false terms=5 sorted=4e0b0a8507f30525
+con eq=false terms=5 sorted=68d1eda561533077
+con eq=false terms=5 sorted=6426b01f9e186905
+con eq=false terms=5 sorted=ddfd85d3679640b3
+con eq=false terms=5 sorted=22abb05d9fb40ebd
+con eq=false terms=5 sorted=1a2e883c4f514eed
+con eq=false terms=5 sorted=54d5d87f660b3c2c
+con eq=false terms=5 sorted=a0a1446238be7e20
+con eq=false terms=5 sorted=78b0aab60fca9783
+con eq=false terms=5 sorted=442e7f27c263fd27
+con eq=false terms=5 sorted=22c312d8f0da385d
+con eq=false terms=5 sorted=ed2aaff99a8eaaad
+con eq=false terms=5 sorted=fa9b492dfbf6a5ec
+con eq=false terms=5 sorted=a82017087f27d340
+con eq=false terms=5 sorted=a8d86ce664b0cd7d
+con eq=false terms=5 sorted=ecea59b07f3b1130
+con eq=false terms=5 sorted=ea4bac5956b024b3
+con eq=false terms=5 sorted=1fc122c0825659d0
+con eq=false terms=5 sorted=2a8b30d7ae63ed60
 == solve_phase2
-vars n=584 4196dee09f32fc0f
+vars n=585 175d2c02a3653de0
 expr friction terms=287 sorted=387fcb330917410c
-expr phase1_cap terms=415 sorted=9a31c2795e918d5a
-warm terms=503 sorted=c5ca5ed2355caee3
-con eq=false terms=415 sorted=59c266733c906257
+expr phase1_cap terms=416 sorted=001431b715bb5efa
+warm terms=504 sorted=0af5457f3cba15cc
+con eq=false terms=416 sorted=569912e1e95182b1
 con eq=true terms=7 sorted=e46f5158ffb5eb69
 con eq=false terms=1 sorted=ef873b99710761bd
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -2619,51 +2619,51 @@ con eq=false terms=3 sorted=bf2872db78da370f
 con eq=false terms=3 sorted=d28b9bf570cd7b45
 con eq=false terms=3 sorted=b3fad4c560ac480f
 con eq=false terms=3 sorted=3f893ff8aa3e174d
-con eq=false terms=2 sorted=8ea6211e710322c2
-con eq=false terms=2 sorted=2c402f6e6eb03b0a
-con eq=false terms=3 sorted=c6daa9ea700df57f
-con eq=false terms=2 sorted=7bc08f4b0902fa14
-con eq=false terms=2 sorted=f3a15fa9643afcae
-con eq=false terms=3 sorted=8b3700df437b6892
-con eq=false terms=2 sorted=b4d82f9f9cc43762
-con eq=false terms=2 sorted=c65594bdc6405432
-con eq=false terms=3 sorted=1176b2771bc6f391
-con eq=false terms=2 sorted=97aad556da651008
-con eq=false terms=2 sorted=f06dc3a5f1b79e76
-con eq=false terms=3 sorted=2a2099c2ce76fc14
-con eq=false terms=2 sorted=3ecf657a4cd11949
-con eq=false terms=2 sorted=ca0f20cf53a91fb2
-con eq=false terms=3 sorted=bf74902f6ba62caa
-con eq=false terms=2 sorted=76f0d1fd2deda707
-con eq=false terms=2 sorted=805e5467f4948a6e
-con eq=false terms=3 sorted=00cc1660defd5a2f
-con eq=false terms=5 sorted=8b9c03312c04933a
-con eq=false terms=5 sorted=ccdf01f20ef694ef
-con eq=false terms=5 sorted=7b4a0748b733d1f3
-con eq=false terms=5 sorted=23c8a1f17a166f73
-con eq=false terms=5 sorted=10b1cb00bd4ffc50
-con eq=false terms=5 sorted=7666f036f6a55325
-con eq=false terms=5 sorted=3324d6e7e0cdecf9
-con eq=false terms=5 sorted=15e1e2b586b34579
-con eq=false terms=5 sorted=40a84b720e869b85
-con eq=false terms=5 sorted=cd9c8a0c220f807c
-con eq=false terms=5 sorted=a119d66139d4f3ff
-con eq=false terms=5 sorted=1ff824c87fd1a988
-con eq=false terms=5 sorted=14ce81471d4dc192
-con eq=false terms=5 sorted=0f0d00efc983691c
-con eq=false terms=5 sorted=2f34a3f52b67e5ba
-con eq=false terms=5 sorted=06822ec63672a671
-con eq=false terms=5 sorted=783ecfdf4eb4e48f
-con eq=false terms=5 sorted=7c76afa2be9522c8
-con eq=false terms=5 sorted=3c0e7fdcaf5dc56e
-con eq=false terms=5 sorted=1c304a9fab916386
-con eq=false terms=5 sorted=bc4245e29d34b7e6
-con eq=false terms=5 sorted=efee2ac944591343
-con eq=false terms=5 sorted=5dfefade539a535e
-con eq=false terms=5 sorted=4815f63afe05fced
+con eq=false terms=2 sorted=098a6f5f11a6e2db
+con eq=false terms=2 sorted=8903249df73089c3
+con eq=false terms=3 sorted=b6623bf5b223213e
+con eq=false terms=2 sorted=0411845ef54f97ef
+con eq=false terms=2 sorted=d7125b7877c9c63d
+con eq=false terms=3 sorted=964d68008df21ac1
+con eq=false terms=2 sorted=d46ecaf470bf16fb
+con eq=false terms=2 sorted=a3b9e444fd298b4b
+con eq=false terms=3 sorted=6d86c0c71eb2b888
+con eq=false terms=2 sorted=0fecf75181de5877
+con eq=false terms=2 sorted=60e093e7de45e9f1
+con eq=false terms=3 sorted=e68afdb51a74b143
+con eq=false terms=2 sorted=2e7ea5e9bf7e2cb8
+con eq=false terms=2 sorted=a77370568a9256cb
+con eq=false terms=3 sorted=d3b7180defe26ffb
+con eq=false terms=2 sorted=d018aa09937202c3
+con eq=false terms=2 sorted=f43df3d0464a2142
+con eq=false terms=3 sorted=4c2a28608d45c153
+con eq=false terms=5 sorted=cd80044b303ab18b
+con eq=false terms=5 sorted=cb5c0f44efae9434
+con eq=false terms=5 sorted=d06d5e5d00161fa2
+con eq=false terms=5 sorted=9ef49dfdb75a301c
+con eq=false terms=5 sorted=64991ee636d9d059
+con eq=false terms=5 sorted=ce66e9f8104d27c6
+con eq=false terms=5 sorted=cffa5aefa54b4770
+con eq=false terms=5 sorted=e951fc28f2af5036
+con eq=false terms=5 sorted=c205a1ad1bf893ac
+con eq=false terms=5 sorted=45649ba84e4a7a1a
+con eq=false terms=5 sorted=90a1686c7bea1fbe
+con eq=false terms=5 sorted=9983d23c7ef26273
+con eq=false terms=5 sorted=439932750f0fae63
+con eq=false terms=5 sorted=93e104e38c3fa873
+con eq=false terms=5 sorted=7118a50f2f9e040b
+con eq=false terms=5 sorted=25fe62e5ff5cc482
+con eq=false terms=5 sorted=0aca73e2a1378d0e
+con eq=false terms=5 sorted=e4751209994c6e7f
+con eq=false terms=5 sorted=f81dc724452689ef
+con eq=false terms=5 sorted=1bfad4cbf6f1a1de
+con eq=false terms=5 sorted=2b6182e705e95fc7
+con eq=false terms=5 sorted=df992bacece0c518
+con eq=false terms=5 sorted=9844bf23bacccf1f
+con eq=false terms=5 sorted=da5747a71f02741a
 == solve_marginal_costs
-vars n=468 eefd14ba57006ae3
-expr objective terms=323 sorted=bb02b8bc51035486
+vars n=469 870867191bbc6ea3
+expr objective terms=324 sorted=9628e1dfa81f8cd9
 con eq=true terms=7 sorted=6e98248d34a8ee45
 con eq=false terms=1 sorted=ef873b99710761bd
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -3099,48 +3099,48 @@ con eq=false terms=3 sorted=2edc3e1c784526c4
 con eq=false terms=3 sorted=f62706bde80e4e42
 con eq=false terms=3 sorted=300cf33cba195579
 con eq=false terms=3 sorted=b07535ff06a7220f
-con eq=false terms=2 sorted=3519381a4501fbd1
-con eq=false terms=2 sorted=b40e6ffe708af133
-con eq=false terms=3 sorted=441fc9b9e82db49a
-con eq=false terms=2 sorted=3a07f5214955dbd3
-con eq=false terms=2 sorted=ba38c538b11386e7
-con eq=false terms=3 sorted=be82d8faee9d119b
-con eq=false terms=2 sorted=8eb0e9103b5c3f9a
-con eq=false terms=2 sorted=7c1ed6631e19a7dc
-con eq=false terms=3 sorted=a1da35da4c4608e3
-con eq=false terms=2 sorted=26047af6cf3b99c0
-con eq=false terms=2 sorted=5ec11b4617b28e08
-con eq=false terms=3 sorted=e8406239253cee42
-con eq=false terms=2 sorted=ded32d5a6900ce21
-con eq=false terms=2 sorted=f1995ce048656434
-con eq=false terms=3 sorted=3d0fb6df548b3824
-con eq=false terms=2 sorted=04dfdd9b59d724e7
-con eq=false terms=2 sorted=3f79c5af1344e480
-con eq=false terms=3 sorted=622080f13a05c5ed
-con eq=false terms=5 sorted=88216596fa223719
-con eq=false terms=5 sorted=1cf8141f406c5900
-con eq=false terms=5 sorted=b0137fcc0f6f98fc
-con eq=false terms=5 sorted=bf4918091371366d
-con eq=false terms=5 sorted=078c1b98450b1ffa
-con eq=false terms=5 sorted=8703001c66b8eb7b
-con eq=false terms=5 sorted=55b9ab77babf8096
-con eq=false terms=5 sorted=87da89dd6d201926
-con eq=false terms=5 sorted=3136a4fac590cf62
-con eq=false terms=5 sorted=404e5fefc5a29aaa
-con eq=false terms=5 sorted=7f29de6f74d60c94
-con eq=false terms=5 sorted=64616119a56ddd07
-con eq=false terms=5 sorted=e937585e05e2fe69
-con eq=false terms=5 sorted=2fb14e895cbbfa54
-con eq=false terms=5 sorted=2081a3b42b992c46
-con eq=false terms=5 sorted=4098410efda867bd
-con eq=false terms=5 sorted=54103e19aafb2754
-con eq=false terms=5 sorted=9a9039dc7839acc7
-con eq=false terms=5 sorted=d3fdfed83a58b709
-con eq=false terms=5 sorted=384a41e2a82c7c6a
-con eq=false terms=5 sorted=bfab6d947ddd50b9
-con eq=false terms=5 sorted=1a0501dcf30bd7c8
-con eq=false terms=5 sorted=73a876a5fbe02dd9
-con eq=false terms=5 sorted=623b6e8b830e1647
+con eq=false terms=2 sorted=9613ef88e9a0b080
+con eq=false terms=2 sorted=229168afbe1260ba
+con eq=false terms=3 sorted=9e0d371f2ed2f8eb
+con eq=false terms=2 sorted=655b44f2967597b3
+con eq=false terms=2 sorted=11b292049a53109f
+con eq=false terms=3 sorted=b0836e7a43ca6a33
+con eq=false terms=2 sorted=8a3bc8a390e9a113
+con eq=false terms=2 sorted=19493573e429459d
+con eq=false terms=3 sorted=730f84ac5a841c12
+con eq=false terms=2 sorted=d9c710416f4a559b
+con eq=false terms=2 sorted=b70ea00d78661783
+con eq=false terms=3 sorted=3a44fdf20a5a2931
+con eq=false terms=2 sorted=3d04ac19b04c0610
+con eq=false terms=2 sorted=8fc0120881f51615
+con eq=false terms=3 sorted=c681e254cab92abd
+con eq=false terms=2 sorted=963649290e801c00
+con eq=false terms=2 sorted=ae235a215e9bed67
+con eq=false terms=3 sorted=f461d25d5b023d1a
+con eq=false terms=5 sorted=890ad6ccfa343810
+con eq=false terms=5 sorted=a1917c1665084bcb
+con eq=false terms=5 sorted=e0ec5f807b4448d5
+con eq=false terms=5 sorted=e46afea81f37c7f2
+con eq=false terms=5 sorted=d7ef4cd99b39e54b
+con eq=false terms=5 sorted=4e0b0a8507f30525
+con eq=false terms=5 sorted=68d1eda561533077
+con eq=false terms=5 sorted=6426b01f9e186905
+con eq=false terms=5 sorted=ddfd85d3679640b3
+con eq=false terms=5 sorted=22abb05d9fb40ebd
+con eq=false terms=5 sorted=1a2e883c4f514eed
+con eq=false terms=5 sorted=54d5d87f660b3c2c
+con eq=false terms=5 sorted=a0a1446238be7e20
+con eq=false terms=5 sorted=78b0aab60fca9783
+con eq=false terms=5 sorted=442e7f27c263fd27
+con eq=false terms=5 sorted=22c312d8f0da385d
+con eq=false terms=5 sorted=ed2aaff99a8eaaad
+con eq=false terms=5 sorted=fa9b492dfbf6a5ec
+con eq=false terms=5 sorted=a82017087f27d340
+con eq=false terms=5 sorted=a8d86ce664b0cd7d
+con eq=false terms=5 sorted=ecea59b07f3b1130
+con eq=false terms=5 sorted=ea4bac5956b024b3
+con eq=false terms=5 sorted=1fc122c0825659d0
+con eq=false terms=5 sorted=2a8b30d7ae63ed60
 result c_star=3522.8979358524343 friction=3533.5052539520157 marginal=[0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.039999999999999994, 0.039999999999999994, 0.039999999999999994, 0.039999999999999994, 0.039999999999999994, 0.039999999999999994, 0.039999999999999994, 0.039999999999999994, 0.039999999999999994, 0.039999999999999994, 0.039999999999999994, 0.039999999999999994]
 status GapLimit
 solution 5f9052cb2e675334
@@ -4573,8 +4573,8 @@ status Optimal
 solution 6c3bc44d1171f482
 ## heater_only
 == solve_phase1
-vars n=217 46f9cda713b84f6c
-expr objective terms=169 sorted=3aa7ea8012eb358f
+vars n=218 0b98a367f75852ac
+expr objective terms=170 sorted=402a00511f4f6d26
 con eq=true terms=3 sorted=bd06190726c140d7
 con eq=false terms=2 sorted=b9507d7de32a85fc
 con eq=false terms=2 sorted=809358c593a09a00
@@ -4840,11 +4840,11 @@ con eq=false terms=3 sorted=1192ffb602ff4e5d
 con eq=false terms=3 sorted=89620eaeb35f2860
 con eq=false terms=3 sorted=11bc87a45019403a
 == solve_phase2
-vars n=217 46f9cda713b84f6c
+vars n=218 0b98a367f75852ac
 expr friction terms=72 sorted=70e8413a6bbde114
-expr phase1_cap terms=169 sorted=3aa7ea8012eb358f
-warm terms=217 sorted=7e2fe1f79dd79682
-con eq=false terms=169 sorted=7bc68f6e3591863c
+expr phase1_cap terms=170 sorted=402a00511f4f6d26
+warm terms=218 sorted=cb4b539bc5d34419
+con eq=false terms=170 sorted=2963cc168f398b13
 con eq=true terms=3 sorted=bd06190726c140d7
 con eq=false terms=2 sorted=b9507d7de32a85fc
 con eq=false terms=2 sorted=809358c593a09a00
@@ -5110,8 +5110,8 @@ con eq=false terms=3 sorted=1192ffb602ff4e5d
 con eq=false terms=3 sorted=89620eaeb35f2860
 con eq=false terms=3 sorted=11bc87a45019403a
 == solve_marginal_costs
-vars n=217 15ab3ca69b994dba
-expr objective terms=169 sorted=3aa7ea8012eb358f
+vars n=218 fb31c0a88a43c6fe
+expr objective terms=170 sorted=402a00511f4f6d26
 con eq=true terms=3 sorted=bd06190726c140d7
 con eq=false terms=2 sorted=b9507d7de32a85fc
 con eq=false terms=2 sorted=809358c593a09a00
@@ -5460,8 +5460,8 @@ status Optimal
 solution 45b0d3ac88a8faed
 ## penalty_rule
 == solve_phase1
-vars n=446 fb7838ccccc14ffc
-expr objective terms=301 sorted=a173e5b92d6db3af
+vars n=447 1e91cfe5c20f5cb0
+expr objective terms=302 sorted=b830b5fee240c31e
 con eq=true terms=7 sorted=0c3ac7eed4f3804c
 con eq=false terms=1 sorted=ef873b99710761bd
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -5897,24 +5897,24 @@ con eq=false terms=3 sorted=0c5d40ff045b1e92
 con eq=false terms=3 sorted=f2c652a5645143b0
 con eq=false terms=3 sorted=a4c8d595d9543e07
 con eq=false terms=3 sorted=4a8ae569c234b4fd
-con eq=false terms=2 sorted=8eb0e9103b5c3f9a
-con eq=false terms=2 sorted=7c1ed6631e19a7dc
-con eq=false terms=3 sorted=a1da35da4c4608e3
-con eq=false terms=2 sorted=26047af6cf3b99c0
-con eq=false terms=2 sorted=5ec11b4617b28e08
-con eq=false terms=3 sorted=e8406239253cee42
-con eq=false terms=2 sorted=ded32d5a6900ce21
-con eq=false terms=2 sorted=f1995ce048656434
-con eq=false terms=3 sorted=3d0fb6df548b3824
-con eq=false terms=2 sorted=04dfdd9b59d724e7
-con eq=false terms=2 sorted=3f79c5af1344e480
-con eq=false terms=3 sorted=622080f13a05c5ed
-con eq=false terms=2 sorted=aeba5dd298b26b89
-con eq=false terms=2 sorted=f986473c52de1b94
-con eq=false terms=3 sorted=d8f830035a484faa
-con eq=false terms=2 sorted=a9c1d04202d7463b
-con eq=false terms=2 sorted=0022beb24180a9c1
-con eq=false terms=3 sorted=2a8c5dc2fbb78a8e
+con eq=false terms=2 sorted=8a3bc8a390e9a113
+con eq=false terms=2 sorted=19493573e429459d
+con eq=false terms=3 sorted=730f84ac5a841c12
+con eq=false terms=2 sorted=d9c710416f4a559b
+con eq=false terms=2 sorted=b70ea00d78661783
+con eq=false terms=3 sorted=3a44fdf20a5a2931
+con eq=false terms=2 sorted=3d04ac19b04c0610
+con eq=false terms=2 sorted=8fc0120881f51615
+con eq=false terms=3 sorted=c681e254cab92abd
+con eq=false terms=2 sorted=963649290e801c00
+con eq=false terms=2 sorted=ae235a215e9bed67
+con eq=false terms=3 sorted=f461d25d5b023d1a
+con eq=false terms=2 sorted=83a3cb71c1dbb9f8
+con eq=false terms=2 sorted=25bfa6c0764c4575
+con eq=false terms=3 sorted=ed3ab7e1de8492fb
+con eq=false terms=2 sorted=17d8b7fdfab71760
+con eq=false terms=2 sorted=3b94096f3361e1f2
+con eq=false terms=3 sorted=69e0836cba676f2d
 con eq=false terms=2 sorted=3ce9054116055989
 con eq=false terms=2 sorted=e1a6d3e6008d1dd2
 con eq=false terms=2 sorted=ff1f973fd565bc97
@@ -5940,11 +5940,11 @@ con eq=false terms=2 sorted=ec9992bbe606d4a9
 con eq=false terms=2 sorted=6e33c3b9d0054fd8
 con eq=false terms=2 sorted=3873dbcac02de1fb
 == solve_phase2
-vars n=562 b17ee4634059759a
+vars n=563 0319b374749f7fa5
 expr friction terms=287 sorted=eeb6f617851ba0a3
-expr phase1_cap terms=393 sorted=7d603f40e3cec712
-warm terms=503 sorted=ffd5c47b1818f598
-con eq=false terms=393 sorted=1d721c366106006e
+expr phase1_cap terms=394 sorted=fc3ce47564278ade
+warm terms=504 sorted=1c208bb21f0ff66d
+con eq=false terms=394 sorted=50c04a605e5d75c2
 con eq=true terms=7 sorted=30211cdeee5f4ab8
 con eq=false terms=1 sorted=ef873b99710761bd
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -6542,24 +6542,24 @@ con eq=false terms=3 sorted=25fd73853f500ebf
 con eq=false terms=3 sorted=6e45fda4c82b2151
 con eq=false terms=3 sorted=670fe06815d00fa6
 con eq=false terms=3 sorted=3bb24fd5f1ef2988
-con eq=false terms=2 sorted=b4d82f9f9cc43762
-con eq=false terms=2 sorted=c65594bdc6405432
-con eq=false terms=3 sorted=1176b2771bc6f391
-con eq=false terms=2 sorted=97aad556da651008
-con eq=false terms=2 sorted=f06dc3a5f1b79e76
-con eq=false terms=3 sorted=2a2099c2ce76fc14
-con eq=false terms=2 sorted=3ecf657a4cd11949
-con eq=false terms=2 sorted=ca0f20cf53a91fb2
-con eq=false terms=3 sorted=bf74902f6ba62caa
-con eq=false terms=2 sorted=76f0d1fd2deda707
-con eq=false terms=2 sorted=805e5467f4948a6e
-con eq=false terms=3 sorted=00cc1660defd5a2f
-con eq=false terms=2 sorted=10d34849c0f238f6
-con eq=false terms=2 sorted=7286d64ed940bce9
-con eq=false terms=3 sorted=62a67130b668052b
-con eq=false terms=2 sorted=39010a3065424378
-con eq=false terms=2 sorted=9fb1012b4e16e82a
-con eq=false terms=3 sorted=ed8364e3606713a1
+con eq=false terms=2 sorted=d46ecaf470bf16fb
+con eq=false terms=2 sorted=a3b9e444fd298b4b
+con eq=false terms=3 sorted=6d86c0c71eb2b888
+con eq=false terms=2 sorted=0fecf75181de5877
+con eq=false terms=2 sorted=60e093e7de45e9f1
+con eq=false terms=3 sorted=e68afdb51a74b143
+con eq=false terms=2 sorted=2e7ea5e9bf7e2cb8
+con eq=false terms=2 sorted=a77370568a9256cb
+con eq=false terms=3 sorted=d3b7180defe26ffb
+con eq=false terms=2 sorted=d018aa09937202c3
+con eq=false terms=2 sorted=f43df3d0464a2142
+con eq=false terms=3 sorted=4c2a28608d45c153
+con eq=false terms=2 sorted=d2424d2a4e00f43f
+con eq=false terms=2 sorted=41e96f70bfbaaa58
+con eq=false terms=3 sorted=b013ced620576dda
+con eq=false terms=2 sorted=d27e52459f6ab2f3
+con eq=false terms=2 sorted=e48b762265cdb3f9
+con eq=false terms=3 sorted=02b6a077458acdf2
 con eq=false terms=2 sorted=3ce9054116055989
 con eq=false terms=2 sorted=e1a6d3e6008d1dd2
 con eq=false terms=2 sorted=ff1f973fd565bc97
@@ -6585,8 +6585,8 @@ con eq=false terms=2 sorted=ec9992bbe606d4a9
 con eq=false terms=2 sorted=6e33c3b9d0054fd8
 con eq=false terms=2 sorted=3873dbcac02de1fb
 == solve_marginal_costs
-vars n=446 15ebc8c04325cb5a
-expr objective terms=301 sorted=a173e5b92d6db3af
+vars n=447 2f527af96843840e
+expr objective terms=302 sorted=b830b5fee240c31e
 con eq=true terms=7 sorted=0c3ac7eed4f3804c
 con eq=false terms=1 sorted=ef873b99710761bd
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -7022,24 +7022,24 @@ con eq=false terms=3 sorted=0c5d40ff045b1e92
 con eq=false terms=3 sorted=f2c652a5645143b0
 con eq=false terms=3 sorted=a4c8d595d9543e07
 con eq=false terms=3 sorted=4a8ae569c234b4fd
-con eq=false terms=2 sorted=8eb0e9103b5c3f9a
-con eq=false terms=2 sorted=7c1ed6631e19a7dc
-con eq=false terms=3 sorted=a1da35da4c4608e3
-con eq=false terms=2 sorted=26047af6cf3b99c0
-con eq=false terms=2 sorted=5ec11b4617b28e08
-con eq=false terms=3 sorted=e8406239253cee42
-con eq=false terms=2 sorted=ded32d5a6900ce21
-con eq=false terms=2 sorted=f1995ce048656434
-con eq=false terms=3 sorted=3d0fb6df548b3824
-con eq=false terms=2 sorted=04dfdd9b59d724e7
-con eq=false terms=2 sorted=3f79c5af1344e480
-con eq=false terms=3 sorted=622080f13a05c5ed
-con eq=false terms=2 sorted=aeba5dd298b26b89
-con eq=false terms=2 sorted=f986473c52de1b94
-con eq=false terms=3 sorted=d8f830035a484faa
-con eq=false terms=2 sorted=a9c1d04202d7463b
-con eq=false terms=2 sorted=0022beb24180a9c1
-con eq=false terms=3 sorted=2a8c5dc2fbb78a8e
+con eq=false terms=2 sorted=8a3bc8a390e9a113
+con eq=false terms=2 sorted=19493573e429459d
+con eq=false terms=3 sorted=730f84ac5a841c12
+con eq=false terms=2 sorted=d9c710416f4a559b
+con eq=false terms=2 sorted=b70ea00d78661783
+con eq=false terms=3 sorted=3a44fdf20a5a2931
+con eq=false terms=2 sorted=3d04ac19b04c0610
+con eq=false terms=2 sorted=8fc0120881f51615
+con eq=false terms=3 sorted=c681e254cab92abd
+con eq=false terms=2 sorted=963649290e801c00
+con eq=false terms=2 sorted=ae235a215e9bed67
+con eq=false terms=3 sorted=f461d25d5b023d1a
+con eq=false terms=2 sorted=83a3cb71c1dbb9f8
+con eq=false terms=2 sorted=25bfa6c0764c4575
+con eq=false terms=3 sorted=ed3ab7e1de8492fb
+con eq=false terms=2 sorted=17d8b7fdfab71760
+con eq=false terms=2 sorted=3b94096f3361e1f2
+con eq=false terms=3 sorted=69e0836cba676f2d
 con eq=false terms=2 sorted=3ce9054116055989
 con eq=false terms=2 sorted=e1a6d3e6008d1dd2
 con eq=false terms=2 sorted=ff1f973fd565bc97
@@ -7069,8 +7069,8 @@ status Optimal
 solution 6e9428cd6bc04af9
 ## import_and_export_slack
 == solve_phase1
-vars n=438 a164ce33b394aa60
-expr objective terms=293 sorted=b4ce1a522bd301c9
+vars n=439 f60f49580e89c8a3
+expr objective terms=294 sorted=030f4af8397a9eef
 con eq=true terms=7 sorted=6e98248d34a8ee45
 con eq=false terms=1 sorted=5ddac74df71b72e7
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -7507,11 +7507,11 @@ con eq=false terms=3 sorted=f62706bde80e4e42
 con eq=false terms=3 sorted=300cf33cba195579
 con eq=false terms=3 sorted=b07535ff06a7220f
 == solve_phase2
-vars n=554 c02218f4dde85d32
+vars n=555 4d6258a29a036426
 expr friction terms=287 sorted=387fcb330917410c
-expr phase1_cap terms=385 sorted=e04936a656b6204b
-warm terms=503 sorted=02019c195671a8a3
-con eq=false terms=385 sorted=2869e8fa5f342d0e
+expr phase1_cap terms=386 sorted=f2668c3e0993d4ba
+warm terms=504 sorted=b4654561b150318c
+con eq=false terms=386 sorted=05d175e8a12a3351
 con eq=true terms=7 sorted=e46f5158ffb5eb69
 con eq=false terms=1 sorted=5ddac74df71b72e7
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -8110,8 +8110,8 @@ con eq=false terms=3 sorted=d28b9bf570cd7b45
 con eq=false terms=3 sorted=b3fad4c560ac480f
 con eq=false terms=3 sorted=3f893ff8aa3e174d
 == solve_marginal_costs
-vars n=438 2023d171bd69f10a
-expr objective terms=293 sorted=b4ce1a522bd301c9
+vars n=439 44be2130fad67d45
+expr objective terms=294 sorted=030f4af8397a9eef
 con eq=true terms=7 sorted=6e98248d34a8ee45
 con eq=false terms=1 sorted=5ddac74df71b72e7
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -8552,8 +8552,8 @@ status Optimal
 solution b896643ac9ccad44
 ## phase2_skipped
 == solve_phase1
-vars n=444 fb899d72997ec7a9
-expr objective terms=299 sorted=18fc4445a43878ee
+vars n=445 b4e31b9bc58d2dc3
+expr objective terms=300 sorted=4b580d8aedc3f1fb
 con eq=true terms=7 sorted=6e98248d34a8ee45
 con eq=false terms=1 sorted=ef873b99710761bd
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -8989,27 +8989,27 @@ con eq=false terms=3 sorted=2edc3e1c784526c4
 con eq=false terms=3 sorted=f62706bde80e4e42
 con eq=false terms=3 sorted=300cf33cba195579
 con eq=false terms=3 sorted=b07535ff06a7220f
-con eq=false terms=2 sorted=3519381a4501fbd1
-con eq=false terms=2 sorted=b40e6ffe708af133
-con eq=false terms=3 sorted=441fc9b9e82db49a
-con eq=false terms=2 sorted=3a07f5214955dbd3
-con eq=false terms=2 sorted=ba38c538b11386e7
-con eq=false terms=3 sorted=be82d8faee9d119b
-con eq=false terms=2 sorted=8eb0e9103b5c3f9a
-con eq=false terms=2 sorted=7c1ed6631e19a7dc
-con eq=false terms=3 sorted=a1da35da4c4608e3
-con eq=false terms=2 sorted=26047af6cf3b99c0
-con eq=false terms=2 sorted=5ec11b4617b28e08
-con eq=false terms=3 sorted=e8406239253cee42
-con eq=false terms=2 sorted=ded32d5a6900ce21
-con eq=false terms=2 sorted=f1995ce048656434
-con eq=false terms=3 sorted=3d0fb6df548b3824
-con eq=false terms=2 sorted=04dfdd9b59d724e7
-con eq=false terms=2 sorted=3f79c5af1344e480
-con eq=false terms=3 sorted=622080f13a05c5ed
+con eq=false terms=2 sorted=9613ef88e9a0b080
+con eq=false terms=2 sorted=229168afbe1260ba
+con eq=false terms=3 sorted=9e0d371f2ed2f8eb
+con eq=false terms=2 sorted=655b44f2967597b3
+con eq=false terms=2 sorted=11b292049a53109f
+con eq=false terms=3 sorted=b0836e7a43ca6a33
+con eq=false terms=2 sorted=8a3bc8a390e9a113
+con eq=false terms=2 sorted=19493573e429459d
+con eq=false terms=3 sorted=730f84ac5a841c12
+con eq=false terms=2 sorted=d9c710416f4a559b
+con eq=false terms=2 sorted=b70ea00d78661783
+con eq=false terms=3 sorted=3a44fdf20a5a2931
+con eq=false terms=2 sorted=3d04ac19b04c0610
+con eq=false terms=2 sorted=8fc0120881f51615
+con eq=false terms=3 sorted=c681e254cab92abd
+con eq=false terms=2 sorted=963649290e801c00
+con eq=false terms=2 sorted=ae235a215e9bed67
+con eq=false terms=3 sorted=f461d25d5b023d1a
 == solve_marginal_costs
-vars n=444 61a271a8caea2e03
-expr objective terms=299 sorted=18fc4445a43878ee
+vars n=445 3dbc9cb111315921
+expr objective terms=300 sorted=4b580d8aedc3f1fb
 con eq=true terms=7 sorted=6e98248d34a8ee45
 con eq=false terms=1 sorted=ef873b99710761bd
 con eq=false terms=2 sorted=b9507d7de32a85fc
@@ -9445,24 +9445,24 @@ con eq=false terms=3 sorted=2edc3e1c784526c4
 con eq=false terms=3 sorted=f62706bde80e4e42
 con eq=false terms=3 sorted=300cf33cba195579
 con eq=false terms=3 sorted=b07535ff06a7220f
-con eq=false terms=2 sorted=3519381a4501fbd1
-con eq=false terms=2 sorted=b40e6ffe708af133
-con eq=false terms=3 sorted=441fc9b9e82db49a
-con eq=false terms=2 sorted=3a07f5214955dbd3
-con eq=false terms=2 sorted=ba38c538b11386e7
-con eq=false terms=3 sorted=be82d8faee9d119b
-con eq=false terms=2 sorted=8eb0e9103b5c3f9a
-con eq=false terms=2 sorted=7c1ed6631e19a7dc
-con eq=false terms=3 sorted=a1da35da4c4608e3
-con eq=false terms=2 sorted=26047af6cf3b99c0
-con eq=false terms=2 sorted=5ec11b4617b28e08
-con eq=false terms=3 sorted=e8406239253cee42
-con eq=false terms=2 sorted=ded32d5a6900ce21
-con eq=false terms=2 sorted=f1995ce048656434
-con eq=false terms=3 sorted=3d0fb6df548b3824
-con eq=false terms=2 sorted=04dfdd9b59d724e7
-con eq=false terms=2 sorted=3f79c5af1344e480
-con eq=false terms=3 sorted=622080f13a05c5ed
+con eq=false terms=2 sorted=9613ef88e9a0b080
+con eq=false terms=2 sorted=229168afbe1260ba
+con eq=false terms=3 sorted=9e0d371f2ed2f8eb
+con eq=false terms=2 sorted=655b44f2967597b3
+con eq=false terms=2 sorted=11b292049a53109f
+con eq=false terms=3 sorted=b0836e7a43ca6a33
+con eq=false terms=2 sorted=8a3bc8a390e9a113
+con eq=false terms=2 sorted=19493573e429459d
+con eq=false terms=3 sorted=730f84ac5a841c12
+con eq=false terms=2 sorted=d9c710416f4a559b
+con eq=false terms=2 sorted=b70ea00d78661783
+con eq=false terms=3 sorted=3a44fdf20a5a2931
+con eq=false terms=2 sorted=3d04ac19b04c0610
+con eq=false terms=2 sorted=8fc0120881f51615
+con eq=false terms=3 sorted=c681e254cab92abd
+con eq=false terms=2 sorted=963649290e801c00
+con eq=false terms=2 sorted=ae235a215e9bed67
+con eq=false terms=3 sorted=f461d25d5b023d1a
 result c_star=3521.304694852319 friction=0.0 marginal=[0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275, 0.0275]
 status Optimal
 solution 8451cf3236a51288

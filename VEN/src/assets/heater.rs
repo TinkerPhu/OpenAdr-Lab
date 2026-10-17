@@ -188,20 +188,11 @@ impl Heater {
         let loss_kw = (state.temperature_c - self.ambient_temp_c) * self.k_loss_kw_per_c;
         let delta_c = (actual - loss_kw - self.draw_kw) / self.thermal_mass_kwh_per_c * dt_h;
         let new_temp = state.temperature_c + delta_c;
-        let emergency_latched = self.emergency_active_in(state, self.emergency_mode)
-            && new_temp < self.temp_min_c + self.thermostat_delta_c;
-        // The ceiling's counterpart: latch on reaching temp_max_c, hold until a
-        // full delta below it. Without this the relay re-closes on the next tick,
-        // because the tank loses only a hundredth of a degree in one step.
-        //
-        // Arming and release both read `state.temperature_c` -- the value
-        // `thermostat_forced_kw` judged this step by -- so the latch cannot
-        // disagree with the decision it belongs to. Keying release off `new_temp`
-        // would re-latch as soon as the reheat began, trapping the heater off.
-        let ceiling_latched = state.temperature_c >= self.temp_max_c
-            || new_temp >= self.temp_max_c
-            || (state.ceiling_latched
-                && state.temperature_c > self.temp_max_c - self.thermostat_delta_c);
+        // The ceiling latch holds the relay open until a full delta below the cut-out.
+        // Without it the relay re-closes on the next tick, because the tank loses only
+        // a hundredth of a degree in one step (`heater_thermostat.rs`).
+        let (emergency_latched, ceiling_latched) =
+            self.latches_after(state, new_temp, self.emergency_mode);
         (
             HeaterState {
                 temperature_c: new_temp,
@@ -573,6 +564,88 @@ mod tests {
             emergency_latched: false,
             ceiling_latched: false,
         }
+    }
+
+    // ── R-94: what the thermostat will force, forecast for the planner ──────
+
+    /// Five-minute slots, the planner's near zone.
+    fn five_minute_slots(n: usize) -> Vec<f64> {
+        vec![300.0 / 3600.0; n]
+    }
+
+    #[test]
+    fn forced_kw_ahead_holds_a_ceiling_latch_off_until_the_deadband_releases() {
+        // 0.2326 kWh/°C, 1 kW demand: 0.358 °C per slot. From 79.9 °C the latch holds
+        // while a slot starts above 77 °C: slots 0..=8 (8 x 0.358 = 2.87 °C).
+        let heater = hot_water_heater();
+        let latched = HeaterState {
+            ceiling_latched: true,
+            ..state_at(79.9, 0.0)
+        };
+        let forced = heater.forced_kw_ahead(&latched, 1.0, &five_minute_slots(24));
+        assert_eq!(forced, vec![0.0; 9]);
+    }
+
+    #[test]
+    fn forced_kw_ahead_runs_an_emergency_at_full_power_until_floor_plus_delta() {
+        // Full power less 1 kW demand: +1.79 °C per slot. 39.5 °C fires the emergency,
+        // 41.3 °C is inside its band, 43.1 °C is past it.
+        let heater = hot_water_heater();
+        let forced = heater.forced_kw_ahead(&state_at(39.5, 0.0), 1.0, &five_minute_slots(24));
+        assert_eq!(forced, vec![heater.max_kw; 2]);
+    }
+
+    #[test]
+    fn forced_kw_ahead_is_empty_when_the_thermostat_forces_nothing() {
+        let heater = hot_water_heater();
+        let forced = heater.forced_kw_ahead(&state_at(60.0, 0.0), 1.0, &five_minute_slots(24));
+        assert!(forced.is_empty());
+    }
+
+    #[test]
+    fn forced_kw_ahead_forces_no_emergency_under_curtail() {
+        let mut heater = hot_water_heater();
+        heater.emergency_mode = HeaterEmergencyMode::Curtail;
+        let forced = heater.forced_kw_ahead(&state_at(39.5, 0.0), 1.0, &five_minute_slots(24));
+        assert!(
+            forced.is_empty(),
+            "Curtail lets the tank drift, got {forced:?}"
+        );
+    }
+
+    #[test]
+    fn forced_kw_ahead_leaves_a_latched_heater_free_under_absorb() {
+        // Absorb cuts out at the safety ceiling (90 °C), so a latch armed at the
+        // comfort ceiling (80 °C) holds nothing below 87 °C.
+        let mut heater = hot_water_heater();
+        heater.emergency_mode = HeaterEmergencyMode::Absorb;
+        let latched = HeaterState {
+            ceiling_latched: true,
+            ..state_at(79.9, 0.0)
+        };
+        assert!(heater
+            .forced_kw_ahead(&latched, 1.0, &five_minute_slots(24))
+            .is_empty());
+    }
+
+    #[test]
+    fn absorb_keeps_heating_through_temp_max_from_below() {
+        // Absorb exists to take heat past the comfort ceiling. Crossing temp_max_c used
+        // to arm the comfort-ceiling latch, which then held the relay open, so a tank
+        // heating up from below never got past 80 °C.
+        let mut heater = hot_water_heater();
+        heater.emergency_mode = HeaterEmergencyMode::Absorb;
+        let mut state = state_at(79.5, heater.max_kw);
+        for _ in 0..10 {
+            state = heater
+                .step_inner(&state, heater.max_kw, Duration::seconds(60))
+                .0;
+        }
+        assert!(
+            state.temperature_c > 81.0,
+            "Absorb stopped at {:.2} °C",
+            state.temperature_c
+        );
     }
 
     /// A heater whose thermostat emergency fired earlier and is still inside

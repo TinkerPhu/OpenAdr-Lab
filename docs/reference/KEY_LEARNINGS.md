@@ -3210,7 +3210,8 @@ Rules:
   at full power latched its thermostat on (below `temp_min + thermostat_delta`, a heater that runs
   stays on until it leaves the band). That outlived the scenario by an hour and failed three
   `@isolated` scenarios 20 minutes later, whose plan-vs-site checks met a heater no plan had asked
-  for (the MILP does not model the latch, R-94).
+  for (the MILP did not model the latch then; since R-94 it pins a latch the heater already has,
+  but a later scenario's own expectations still assume a free heater).
 - When a scenario injects asset state, choose values outside the asset's latch bands, or restore a
   state that leaves the latch released. Read the failure's timeline against earlier scenarios'
   injects before suspecting the code under test: here the branch's code change was bit-identical.
@@ -3518,3 +3519,15 @@ right for keeping an x86 plan identical to the last bit; it is no longer needed 
   Each reader now asks the schedule at its own time, so a boundary is crossed on the next tick, not
   the next poll; deleting the stored copy was what exposed the third stand-in implementation (the
   grid asset recorded no injected limit while the arbiter enforced it).
+
+## Before fixing what a model may choose, check every hard row that reads it (R-94, 2026-10-13)
+
+- Pinning the heater off for a thermostat latch is physics, but the MILP also held a hard
+  deadline row on the same tank: a target above the coast turned a correct pin into an infeasible
+  site solve. Fixing variables is only safe once every hard constraint reading them has a way to
+  give: here a priced shortfall slack, the shape R-93 gave the EV.
+- A new slack is a new column in every solve that warm-starts: seed it, or phase 2 starts from an
+  infeasible point (the R-97 `u_bat` lesson).
+- Replaying a live rule for a forecast runs it through states the live tests never combined. The
+  thermostat forecast found that Absorb armed the comfort-ceiling latch and so could never heat
+  past `temp_max_c` from below; its unit test only ever started above it.

@@ -24,6 +24,7 @@ fn warning_kind_str(kind: WarningKind) -> &'static str {
         WarningKind::PeakPenaltyExceeded => "PEAK_PENALTY_EXCEEDED",
         WarningKind::EvCoreEnergyUnmet => "EV_CORE_ENERGY_UNMET",
         WarningKind::TargetAboveLimit => "TARGET_ABOVE_LIMIT",
+        WarningKind::HeaterTargetUnmet => "HEATER_TARGET_UNMET",
         WarningKind::Other => "OTHER",
     }
 }
@@ -37,6 +38,7 @@ fn parse_warning_kind(s: &str) -> Result<WarningKind, DomainError> {
         "PEAK_PENALTY_EXCEEDED" => Ok(WarningKind::PeakPenaltyExceeded),
         "EV_CORE_ENERGY_UNMET" => Ok(WarningKind::EvCoreEnergyUnmet),
         "TARGET_ABOVE_LIMIT" => Ok(WarningKind::TargetAboveLimit),
+        "HEATER_TARGET_UNMET" => Ok(WarningKind::HeaterTargetUnmet),
         "OTHER" => Ok(WarningKind::Other),
         other => Err(DomainError::StorageError(format!(
             "invalid stored warning_kind: {other}"

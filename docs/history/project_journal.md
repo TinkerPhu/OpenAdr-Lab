@@ -16033,3 +16033,35 @@ for tomorrow bound today.
   `last_updated` assertion went (the parser no longer derives it, the poll stores it) and the
   subscription+reservation test reads inside the event's window, since the state is now read at a moment.
 - Not done: §8.10.1's grid-power-outage rule (needs an outage signal).
+## R-94: the planner pins the thermostat latch the heater already has (fix/r94-heater-latch-pin)
+
+**What.** `HeaterMilpContext::from_state` read only the tank temperature, never
+`ceiling_latched` / `emergency_latched`, so while a tank coasted down from its ceiling every
+300 s replan planned slot-0 heat the heater refused. The heater now forecasts what its thermostat
+will force (`Heater::forced_kw_ahead`, the thermostat rule replayed in the MILP's tank model) and
+`assets/heater_pins.rs` fixes those stages before the solve, over the plan in force's anchor. A
+heater session's deadline got a shortfall slack (`s_short_kwh`), read back as
+`SolveOutput::heat_shortfall_kwh` and reported as a `HEATER_TARGET_UNMET` plan warning (VEN UI
+Plan History label, notification feed). BDD: `ven_user_request.feature`, "A heater target the
+latched heater cannot reach in time is reported on the plan".
+
+**Rebased onto W3-W7 (2026-10-17).** The branch was cut before the asset-declared planner model; the shortfall warning now comes from `DeclaredHeater::read` like the EV's, not from `SolveOutput`. The new `s_short_kwh` column moves the Phase 2 incumbent in `all_sessions`: with it switched off the old plan golden holds, with it on the heater takes full stage in slots it took half stage in, inside Phase 2's cost cap. Both goldens were re-recorded; the plan change is solver tie-breaking among capped-cost plans, not a new rule. `SiteHeadroom*` moved to `entities/site_headroom.rs` to keep `plan.rs` under the cap.
+
+**Why this shape.** The analysis (2026-10-13, user decision) weighed two fixes against R-97's
+solve time: pin the existing latch (no variables, fewer free integers in the expensive near zone)
+or model the deadband exactly (a latch binary per slot with big-M rows, removing up to 3 K of
+slack each time the plan touches the ceiling — on the VENs that already time out). The first was
+chosen; a future latch is left to the next replan.
+
+**Issues.** (1) Pinning the heater off made a hard deadline row infeasible whenever the target lay
+above the coast: the register's plan said to clamp the target, but R-93 had already replaced the
+EV's pre-solve reachability clamp with a solved slack, so the heater got the same shape. That also
+fixes the older case of a target too far for the heater's power, which used to fail the whole
+site's solve. The slack is seeded in phase 2's warm start, since an incomplete start is what made
+phase 2 fail on heater+battery before (R-97). (2) Replaying the rule found an Absorb bug: the
+ceiling latch armed at `temp_max_c` in every mode, so Absorb could never take a tank heating up
+from below past `temp_max_c`; the latch now follows the mode's cut-out ceiling
+(`Heater::latches_after`, shared by the live tick and the forecast). (3) The duplication ratchet
+refused three functions growing by 1-8 lines; the stage pins and the initial stage moved to
+`heater_pins.rs`, the heater warm start and the session warnings into their own functions, and
+slot durations from `cum_s` into `entities::time_grid::slot_hours`.

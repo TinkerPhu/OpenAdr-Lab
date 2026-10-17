@@ -197,8 +197,9 @@ Feature: VEN User Request Manager — Stage 5
     # The "test" profile's heater: 3.0 kW, 18-23 C. 21.5 C now, so 22.5 C needs energy.
     # Not lower: below temp_min + thermostat_delta (21 C) a heater that runs latches its
     # thermostat on at full power until 21 C, and that outlives this scenario by an hour,
-    # so later scenarios (the @isolated pass's plan-vs-site checks) met a heater no plan
-    # had asked for (R-94: the MILP does not model the latch).
+    # so later scenarios (the @isolated pass's plan-vs-site checks) would meet a heater
+    # running on its latch (the plan now pins it, R-94, but a later scenario's own
+    # expectations do not allow for it).
     Given I inject heater_temp_c 21.5 via sim inject
     When I POST the VEN UI's heater request with target_temp_c 22.5
     Then the response status is 201
@@ -207,6 +208,22 @@ Feature: VEN User Request Manager — Stage 5
     And the saved user request runs at 3 kW and needs a positive amount of energy
     When I DELETE the saved user request
     Then the response status is 204
+
+  # R-94: at temp_max_c (23 C) the thermostat cuts out and holds the relay open until
+  # temp_max_c - thermostat_delta_c (20 C). A target of 23 C in 30 minutes is then out of
+  # reach: the plan keeps the heater off, as the heater will, and says the target is unmet
+  # instead of planning heat the heater refuses.
+  Scenario: A heater target the latched heater cannot reach in time is reported on the plan
+    Given I inject heater_temp_c 23.0 via sim inject
+    When I POST a heater user request with target_temp_c 23 ready in 30 minutes
+    Then the response status is 201
+    When I save the request ID
+    Then the VEN plan reports the heater target unmet within 180 seconds
+    When I DELETE the saved user request
+    Then the response status is 204
+    # Leave the latch released (20 C is temp_max_c - thermostat_delta_c, the profile's
+    # starting temperature): a heater left latched off for hours leaks into later scenarios.
+    Given I inject heater_temp_c 20.0 via sim inject
 
   Scenario: A heater request without a target aims for the heater's declared default
     # The "test" profile's heater declares default_target_temp_c: 21.0.

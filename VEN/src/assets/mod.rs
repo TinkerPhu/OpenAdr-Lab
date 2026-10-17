@@ -23,6 +23,7 @@ mod heater_control_schema;
 mod heater_declared;
 mod heater_emergency;
 mod heater_milp;
+mod heater_pins;
 mod heater_thermostat;
 mod history;
 pub mod load_window;

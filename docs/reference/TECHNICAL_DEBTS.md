@@ -28,7 +28,6 @@
 
 | ID | Sev | Kind | Cost | Why open | Affected files | Description |
 |----|-----|------|------|----------|----------------|-------------|
-| R-94 | S3 | bug | Small | FIX | `VEN/src/assets/heater_milp.rs`, `VEN/src/assets/heater_thermostat.rs` | The MILP ignores the heater's thermostat latch (`ceiling_latched`, `emergency_latched`), so every replan during a coast plans heat the asset refuses. Solution chosen (2026-10-13): pin the stages of the latch the heater already has, predicted by the heater itself; no new MILP variables. `heater_milp.rs` is at 500/500 production lines, so code has to move out first. Details below. |
 | R-32 | S3 | duplication | Medium | too-big: first step: a shared OAuth client crate | `VTN/bff/src/vtn_client.rs`, `VEN/src/vtn.rs` | `VTN/bff/src/vtn_client.rs` duplicates `VEN/src/vtn.rs`'s OAuth token + 401-retry + get/put-JSON plumbing (~300 lines each). Separate crates — extraction needs a shared workspace crate; record only, don't force. |
 | R-110 | S3 | architecture | Medium | too-big: first step: split `state/mod.rs` by concern (requests/sessions, plan, controller trace, settings) behind the same `AppState` handle | `VEN/src/state/mod.rs`, `VEN/src/simulator/mod.rs`, `VEN/src/simulator/capacity_headroom.rs` | God objects: `state/mod.rs` has about 100 public items; `simulator/mod.rs` 54, plus a 1366-line `capacity_headroom.rs` holding domain-ring computations inside the infra ring. (The `AppCtx` part is done: no handler takes the whole of it since R-110's first step, audit rule 11.) |
 | R-118 | S3 | architecture | Medium | too-big: first step: split `translate_to_plan` (266 lines) into one function per group of plan fields (slots, summary, cost breakdown, warnings); its whole output is already recorded per scenario by `tests/plans_golden.rs`, which must stay byte-identical | `VEN/src/controller/milp_planner/inputs.rs`, `VEN/src/controller/milp_planner/results.rs`, `VEN/src/profile/validate.rs` | **18 production functions are over 100 lines** (re-measured 2026-10-14) (`build_milp_inputs`, once the worst at 394, is done: 2026-10-10, `milp_planner/input_stages.rs`, guarded by `tests/inputs_golden.rs`) (`scripts/audit_duplication_baseline.json` lists them), because `audit_file_sizes.py` measures files, not functions, so a file can stay under 500 lines while one function in it does everything. The worst now: `profile::validate` 354, `translate_to_plan` 266 (its per-kind allocation blocks became one asset-declared loop, 2026-10-14), `ev_session_context::from_state` 240, `tick_once` 178, `build_measurement_report_for_obligation` 175, `spawn_event_poll` 158. R-40 records that cap-driven file splits moved code without simplifying it. The ratchet in `scripts/audit_duplication.py` now refuses a new or longer one, so the count can only fall; these 18 remain to be split. |
@@ -46,7 +45,7 @@
 
 | ID | Description | Gain |
 |----|-------------|------|
-| R-40 | **File-size near-cap watch (production lines, re-measured 2026-10-09).** `scripts/audit_file_sizes.py` is the authority; run it and do not trust this row. At the cap edge today (cap 500): `assets/heater_milp.rs` **500**, `assets/shiftable_load.rs` 492, `controller/arbiter.rs` 483, `assets/pv.rs` 478, `services/planning/mod.rs` 477, `assets/ev_milp.rs` 477, `milp_planner/results.rs` 474, `assets/ev.rs` 469, `simulator/mod.rs` 464, `entities/asset.rs` 463, `state/mod.rs` 461, `entities/plan.rs` 460, `profile/schema.rs` 457; in `tasks/` (cap 200): `history_sampler/mod.rs` 182, `poll_events/mod.rs` 177, `sim_tick/tick.rs` 176, `poll_signals.rs` 172. **The lesson of the 2026-10-03 sweep belongs in this row:** a cap is met the right way by moving out what the ring does not own, and the wrong way by slicing orchestration thinner (names like `helpers`, `context`, `post_lock` say *when* code runs, not what it does). `heater_milp.rs` at the cap means R-94 and R-97 both start by moving code out of it. | N/A — monitoring only, not an actionable fix until a cap is crossed |
+| R-40 | **File-size near-cap watch (production lines, re-measured 2026-10-09).** `scripts/audit_file_sizes.py` is the authority; run it and do not trust this row. At the cap edge today (cap 500): `assets/shiftable_load.rs` 492, `controller/arbiter.rs` 483, `assets/pv.rs` 478, `services/planning/mod.rs` 477, `assets/ev_milp.rs` 477, `milp_planner/results.rs` 474, `assets/ev.rs` 469, `simulator/mod.rs` 464, `entities/asset.rs` 463, `state/mod.rs` 461, `entities/plan.rs` 460, `profile/schema.rs` 457; in `tasks/` (cap 200): `history_sampler/mod.rs` 182, `poll_events/mod.rs` 177, `sim_tick/tick.rs` 176, `poll_signals.rs` 172. **The lesson of the 2026-10-03 sweep belongs in this row:** a cap is met the right way by moving out what the ring does not own, and the wrong way by slicing orchestration thinner (names like `helpers`, `context`, `post_lock` say *when* code runs, not what it does). (`heater_milp.rs` was met this way on 2026-10-13: the pre-solve stage pins moved to `assets/heater_pins.rs`.) | N/A — monitoring only, not an actionable fix until a cap is crossed |
 
 ---
 
@@ -62,52 +61,6 @@
       `scripts/`-level note or CI retry step) rather than leaving it tribal knowledge.
 - [ ] 1.5 This item stays in the register until the crash stops reproducing across several
       full-suite runs — remove only then, not merely once a workaround is documented.
-
-## R-94 — the MILP does not model the heater's thermostat deadband
-
-**Where:** `VEN/src/assets/heater_milp.rs` (tank model) vs
-`VEN/src/assets/heater_thermostat.rs` (the deadband), introduced with
-`thermostat_delta_c` (2026-09-27).
-
-The MILP bounds tank energy at `temp_max_c` (`heater_milp.rs`'s `e_max`) but knows nothing
-about the deadband: "once at the ceiling, stay off until `temp_max_c - thermostat_delta_c`",
-and its mirror, "an emergency at `temp_min_c` runs full power until `temp_min_c +
-thermostat_delta_c`". `HeaterMilpContext::from_state` reads only the temperature, never
-`ceiling_latched` / `emergency_latched`. So while the heater coasts off a latch (0.7 kWh on
-ven-3 at 3 K), every 300 s replan plans slot-0 heat the asset refuses — typically at midday,
-when the plan wants to keep the tank full on PV surplus. It surfaces as a plan/actual
-deviation, not as an infeasibility.
-
-**Solution (decided 2026-10-13): pin the latch the heater already has.**
-
-- The heater predicts its own forced stages from now: step its state forward with the
-  thermostat rule (`thermostat_forced_kw_in`, `heater_thermostat.rs`) and the MILP's own
-  `q_dem_kw`, until the latch releases. Forced off at the ceiling → stage 0; emergency →
-  `n_stages`. The asset answers, the planner does not re-derive the rule
-  (`asset-competence-assurance`).
-- `from_state` fixes those slots' `y_heat` bounds, the same mechanism `anchored_kw` uses; a
-  forced stage overrides an anchor and is never dropped (it is physics, an anchor is a
-  preference).
-- Absorb mode (ceiling raised to `temp_safety_max_c`) and Curtail mode (no emergency) fall
-  out of `thermostat_forced_kw_in`'s `mode` argument; no separate branch.
-- A `MustRun` deadline inside the pinned window would make the hard `e_tank[td] >= e_target`
-  row infeasible and fail the whole site's solve (the failure `anchor_the_tank_can_hold`
-  exists to prevent): lower `e_target` to the coast trajectory's value at `td` and surface
-  that in the UI.
-- Test first: latched start → pinned zeros; emergency start → pinned full power; Absorb →
-  no pin; deadline inside the coast → feasible. Bench a latched-start case against
-  `bench_phase1_vs_tank_slack` to confirm phase 1 is not slower.
-
-**Solve-time effect:** no new variables; it fixes free integers in the near zone (the
-expensive 5-minute slots, `R97_PLANNER_BENCHMARKS.md`), so neutral or faster.
-
-**Rejected: modelling the deadband exactly** (a per-slot latch binary with big-M arm/release
-rows, i.e. latches the plan would cause later in the horizon). It adds ~288 binaries with a
-weak relaxation and removes up to `thermostat_delta_c` of thermal slack each time the plan
-touches the ceiling (20 % of ven-3's 15 K band) — exactly what makes the slack-poor heater
-VENs time out (R-97). The next replan sees any future latch within 300 s and pins it, so the
-remaining error sits beyond the executed window. Do not re-file without fleet evidence that
-it bites.
 
 ## R-97 — MILP solve time sits close to its own timeout on heater VENs
 
@@ -149,8 +102,8 @@ it bites.
   looser gap or coarser far zones only on slack-poor VENs.
 - A feasibility-first step so a timed-out incumbent respects a capacity limit.
 - No reformulation tested so far removes the difficulty without changing the physics: the
-  relaxation is weak because the discreteness is real. R-94 (the thermostat deadband) touches the
-  same model; its chosen fix only pins stages and adds no variables, and the exact deadband
-  model was rejected for this row's sake.
+  relaxation is weak because the discreteness is real. The thermostat deadband (R-94, fixed
+  2026-10-13) was handled by pinning the latch the heater already has, which adds no variables;
+  modelling it exactly (a latch binary per slot) was rejected for this row's sake.
 - ven-19 is a 10x outlier in its own class (battery + EV); `round_trip_efficiency` 0.93 is the
   suspect, untested.

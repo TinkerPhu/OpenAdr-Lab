@@ -126,7 +126,11 @@ Click **Submit**. The new row appears in the User Requests table with status **A
 
 A request ends on its own when its time has passed: an EV request turns **COMPLETED** at its
 departure, a heater request at its ready-by time (the heater then goes back to running only when
-it pays). A second heater request replaces the first, which turns **CANCELLED**. Finished requests
+it pays). If the heater cannot reach a request's target by its ready-by time — its thermostat has
+cut out at the top of the band and stays off until it has cooled by `thermostat_delta_c`, or the
+time is too short for its power — the plan says so: **Plan History** lists the plan with a
+"Heater target not reached" warning, and the notification feed shows it, instead of the plan
+proposing heat the heater would refuse. A second heater request replaces the first, which turns **CANCELLED**. Finished requests
 stay listed under **Done** for at least 7 days; older ones stay while they are among the 20 most
 recently finished.
 
