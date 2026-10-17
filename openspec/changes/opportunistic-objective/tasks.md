@@ -196,7 +196,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       Also the `before` series (D11): a change of a VEN's `objective` leaf keeps its newest forecast
       report id in `fleet_store.rs`; tests: change keeps it, second change replaces it, VEN with no
       report omitted, offline VEN excluded, kWh→kW on the `before` series.
-- [ ] 8.6 VTN UI Fleet page: Objective column (value, source, pending), per-row and fleet
+- [x] 8.6 VTN UI Fleet page: Objective column (value, source, pending), per-row and fleet
       selectors, Release per row and for all; expandable row with the VEN's plan chart.
       `FleetPowerChart` forecast overlay with objective legend and the faint dashed `before` series. UI unit tests; eslint clean.
 

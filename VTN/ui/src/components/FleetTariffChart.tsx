@@ -39,16 +39,19 @@ const CHART_HEIGHT = CELL_CHART_HEIGHT * 2;
 export function FleetTariffChart({
   signals,
   windowMinutes,
+  aheadMinutes = 0,
   tickMinutes,
   nowMs,
 }: {
   signals?: FleetSignals;
   windowMinutes: number;
+  /** Minutes of future both Fleet charts show (`fleetAheadMinutes`); the same on both. */
+  aheadMinutes?: number;
   /** Tick spacing, chosen per window by the page so both charts agree. */
   tickMinutes: number;
   nowMs: number;
 }) {
-  const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes);
+  const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes, aheadMinutes);
   const ticks = fleetChartTicks(tMin, tMax, tickMinutes);
 
   // Memoised: one React element plus one DOM rect per band, rebuilt on every

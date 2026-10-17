@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
@@ -12,6 +12,15 @@ const mockLive = {
       netPowerKw: 4,
       state: "online",
       receivedAt: new Date().toISOString(),
+      objective: {
+        objective: "min_cost",
+        source: "profile" as const,
+        set_at: null,
+        profile_objective: "min_cost",
+        available_objectives: ["min_cost", "opportunistic"],
+      },
+      command: { objective: "opportunistic", requested_at: "2026-10-17T12:00:00Z" },
+      commandPending: true,
     },
     {
       venName: "ven-2",
@@ -41,18 +50,44 @@ const mockHistory = {
   ],
 };
 
+const setVen = vi.fn();
+const setFleet = vi.fn();
+
+vi.mock("../components/VenPlanChart", () => ({
+  VenPlanChart: ({ plan }: { plan: { objective: string } }) => (
+    <div data-testid="ven-plan-stub">{plan.objective}</div>
+  ),
+}));
+
 // The chart has its own test file; here it only has to not be recharts.
 vi.mock("../components/FleetPowerChart", () => ({
-  FleetPowerChart: ({ windowMinutes, reportingVens }: { windowMinutes: number; reportingVens: number }) => (
-    <div data-testid="fleet-chart-stub" data-reporting={reportingVens}>
+  FleetPowerChart: ({
+    windowMinutes,
+    reportingVens,
+    forecast,
+    aheadMinutes,
+  }: {
+    windowMinutes: number;
+    reportingVens: number;
+    forecast?: { slots: unknown[] };
+    aheadMinutes?: number;
+  }) => (
+    <div
+      data-testid="fleet-chart-stub"
+      data-reporting={reportingVens}
+      data-forecast-slots={forecast?.slots.length ?? 0}
+      data-ahead={aheadMinutes}
+    >
       {windowMinutes}
     </div>
   ),
 }));
 
 vi.mock("../components/FleetTariffChart", () => ({
-  FleetTariffChart: ({ windowMinutes }: { windowMinutes: number }) => (
-    <div data-testid="fleet-tariff-stub">{windowMinutes}</div>
+  FleetTariffChart: ({ windowMinutes, aheadMinutes }: { windowMinutes: number; aheadMinutes?: number }) => (
+    <div data-testid="fleet-tariff-stub" data-ahead={aheadMinutes}>
+      {windowMinutes}
+    </div>
   ),
 }));
 
@@ -63,6 +98,13 @@ vi.mock("../api/hooks", () => ({
   // it only has to be idle rather than absent.
   useFleetReactions: vi.fn(() => ({ data: undefined, isError: false })),
   useFleetSignals: vi.fn(() => ({ data: undefined, isError: false })),
+  useFleetForecast: vi.fn(() => ({
+    data: { stepSeconds: 900, slots: [{ start: "2026-10-17T12:15:00Z", kw: 3, vens: 2, objectives: {} }], before: null, assumedUnitVens: [] },
+    isError: false,
+  })),
+  useVenPlan: vi.fn(() => ({ data: { objective: "opportunistic", solve_status: "SIMULATED", slots: [] }, isError: false })),
+  useSetVenObjective: vi.fn(() => ({ mutate: setVen, isError: false })),
+  useSetFleetObjective: vi.fn(() => ({ mutate: setFleet, isError: false })),
 }));
 
 function renderFleet() {
@@ -154,5 +196,48 @@ describe("FleetPage", () => {
     renderFleet();
     expect(screen.getByTestId("fleet-history-error")).toBeVisible();
     expect(screen.queryByTestId("sparkline")).not.toBeInTheDocument();
+  });
+
+  // openspec opportunistic-objective D12: the objective in force, who set it, and a fleet command
+  // still on its way.
+  it("shows each VEN's objective, its source and a pending command", () => {
+    renderFleet();
+    const cell = screen.getByTestId("fleet-objective-ven-1");
+    expect(cell).toHaveTextContent("min_cost");
+    expect(cell).toHaveTextContent("profile");
+    expect(screen.getByTestId("fleet-pending-ven-1")).toHaveTextContent("pending: opportunistic");
+    expect(screen.getByTestId("fleet-objective-ven-2")).toHaveTextContent("—");
+  });
+
+  it("releases one VEN's command", () => {
+    setVen.mockClear();
+    renderFleet();
+    fireEvent.click(screen.getByTestId("fleet-release-ven-1"));
+    expect(setVen).toHaveBeenCalledWith({ venName: "ven-1", objective: null });
+    expect(screen.getByTestId("fleet-release-ven-2")).toBeDisabled();
+  });
+
+  it("switches and releases the whole fleet", () => {
+    setFleet.mockClear();
+    renderFleet();
+    fireEvent.change(screen.getByTestId("fleet-objective-select"), { target: { value: "opportunistic" } });
+    fireEvent.click(screen.getByTestId("fleet-objective-apply"));
+    fireEvent.click(screen.getByTestId("fleet-objective-release"));
+    expect(setFleet.mock.calls).toEqual([["opportunistic"], [null]]);
+  });
+
+  it("opens a VEN's plan under its row", () => {
+    renderFleet();
+    expect(screen.queryByTestId("fleet-plan-row-ven-1")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("fleet-expand-ven-1"));
+    expect(screen.getByTestId("fleet-plan-row-ven-1")).toHaveTextContent("opportunistic");
+  });
+
+  it("hands the forecast and one look-ahead to both charts", () => {
+    renderFleet();
+    const chart = screen.getByTestId("fleet-chart-stub");
+    expect(chart).toHaveAttribute("data-forecast-slots", "1");
+    expect(chart.getAttribute("data-ahead")).toBe(screen.getByTestId("fleet-tariff-stub").getAttribute("data-ahead"));
+    expect(chart).toHaveAttribute("data-ahead", "720");
   });
 });

@@ -56,6 +56,48 @@ export function useFleetReactions(eventId: string) {
   });
 }
 
+/** The fleet forecast, refetched on the VENs' 15-minute reporting cadence's scale. */
+export function useFleetForecast(stepSeconds: number) {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["fleet", "forecast", stepSeconds],
+    queryFn: () => api.fleetForecast(stepSeconds),
+    refetchInterval: 60_000,
+  });
+}
+
+/** One VEN's adopted plan, fetched only while its row is open. */
+export function useVenPlan(venName: string, open: boolean) {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["fleet", "plan", venName],
+    queryFn: () => api.venPlan(venName),
+    enabled: open,
+    refetchInterval: 60_000,
+  });
+}
+
+/** Command one VEN's objective (`objective: null` releases it). */
+export function useSetVenObjective() {
+  const { api } = useBffContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ venName, objective }: { venName: string; objective: string | null }) =>
+      api.setVenObjective(venName, objective),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fleet", "power"] }),
+  });
+}
+
+/** Command the whole fleet's objective (`null` releases every VEN). */
+export function useSetFleetObjective() {
+  const { api } = useBffContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (objective: string | null) => api.setFleetObjective(objective),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fleet", "power"] }),
+  });
+}
+
 /** The signal bands over the same window the power chart is drawing. */
 export function useFleetSignals(minutes: number) {
   const { api } = useBffContext();

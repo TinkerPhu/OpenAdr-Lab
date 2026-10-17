@@ -39,6 +39,56 @@ export type FleetVenLive = {
   netPowerKw: number | null;
   state: string | null;
   receivedAt: string;
+  /** The VEN's own `objective` leaf (its `GET /plan/objective` body), passed through. */
+  objective?: VenObjective | null;
+  /** The fleet's command for this VEN, as the broker holds it; null once released. */
+  command?: ObjectiveCommand | null;
+  /** A command is in force that the VEN does not report applied yet. */
+  commandPending?: boolean;
+};
+
+/** What a VEN says about its objective (VEN `ObjectiveSetting`, wire names kept). */
+export type VenObjective = {
+  objective: string;
+  source: "profile" | "ven_ui" | "fleet";
+  set_at: string | null;
+  profile_objective: string;
+  available_objectives: string[];
+};
+
+/** The body of a VEN's `command/objective` leaf. */
+export type ObjectiveCommand = { objective: string; requested_at: string };
+
+/** One slot of the fleet forecast: the online VENs' summed forecast power and who is behind it. */
+export type FleetForecastSlot = {
+  start: string;
+  kw: number;
+  vens: number;
+  objectives: Record<string, number>;
+};
+
+/**
+ * What the fleet says it will draw (D11), and the same sum from before the last objective
+ * change (`before`). `assumedUnitVens` declared no unit and were read in the profile's kWh.
+ */
+export type FleetForecast = {
+  stepSeconds: number;
+  slots: FleetForecastSlot[];
+  before: { changed_at: string | null; slots: FleetForecastSlot[] } | null;
+  assumedUnitVens: string[];
+};
+
+/** The part of a VEN's adopted plan the drill-down draws (VEN `Plan`, wire names kept). */
+export type VenPlan = {
+  objective: string;
+  solve_status: string;
+  slots: {
+    start: string;
+    end: string;
+    net_import_kw: number;
+    net_export_kw: number;
+    planned_kw_by_asset: Record<string, number>;
+  }[];
 };
 
 export type FleetLive = {

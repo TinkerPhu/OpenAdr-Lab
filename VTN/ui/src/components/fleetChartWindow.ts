@@ -23,12 +23,20 @@ import { roundedTimeTicks } from "@lab/ui/axisDomain";
  * same values to both charts, rather than each deriving its own.
  */
 
-/** The window both Fleet charts draw, from one clock reading. */
+/** The window both Fleet charts draw, from one clock reading: `windowMinutes` of history and
+ *  `aheadMinutes` of the future the fleet forecast covers. */
 export function fleetChartWindow(
   nowMs: number,
   windowMinutes: number,
+  aheadMinutes = 0,
 ): { tMin: number; tMax: number } {
-  return { tMin: nowMs - windowMinutes * 60_000, tMax: nowMs };
+  return { tMin: nowMs - windowMinutes * 60_000, tMax: nowMs + aheadMinutes * 60_000 };
+}
+
+/** How far ahead both Fleet charts look: half the history window, so the forecast is visible
+ *  without squeezing the history it continues. */
+export function fleetAheadMinutes(windowMinutes: number): number {
+  return windowMinutes / 2;
 }
 
 /**

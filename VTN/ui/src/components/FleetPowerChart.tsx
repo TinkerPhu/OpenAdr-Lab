@@ -16,13 +16,42 @@ import {
 import { renderDayNightShading } from "@lab/ui/DayNightShading";
 import { LAB_LOCATION } from "../utils/labLocation";
 
+import type { FleetForecast, FleetForecastSlot } from "../api/types";
 import type { FleetHistory } from "../api/types";
 import { venColor, FLEET_SUM_COLOR } from "../utils/venColor";
 import { compareVenNames } from "../utils/venOrder";
+import { objectiveMix } from "../utils/fleetObjective";
 
 /** The series key the fleet total is drawn under. Prefixed so it can never
  *  collide with a VEN actually named "fleet". */
 export const FLEET_KEY = "__fleet__";
+/** The fleet forecast and its pre-change counterpart (openspec `opportunistic-objective` D12). */
+export const FORECAST_KEY = "__forecast__";
+export const BEFORE_KEY = "__before__";
+
+/** One dashed overlay of the fleet total: the forecast, or the forecast from before the last
+ *  objective change. Declared as data so the two differ only in what they say. */
+function forecastSeries(
+  key: string,
+  label: string,
+  look: Pick<TimeSeriesSeriesSpec, "strokeDasharray" | "strokeOpacity" | "strokeWidth">,
+): TimeSeriesSeriesSpec {
+  return {
+    key,
+    label,
+    axisId: AXIS_ID,
+    dataKey: (row) => row.values?.[key] ?? null,
+    color: FLEET_SUM_COLOR,
+    type: "stepAfter",
+    connectNulls: false,
+    formatter: (v: number) => `${v.toFixed(2)} kW`,
+    ...look,
+  };
+}
+
+function forecastSamples(key: string, slots: FleetForecastSlot[]): NamedSample[] {
+  return slots.map((s) => ({ ts: Date.parse(s.start), key, value: s.kw }));
+}
 
 const AXIS_ID = "kw";
 
@@ -55,8 +84,14 @@ export function FleetPowerChart({
   tickMinutes,
   nowMs,
   reportingVens,
+  forecast,
+  aheadMinutes = 0,
 }: {
   history: FleetHistory;
+  /** The fleet forecast to draw ahead of now, dashed, with its pre-change counterpart. */
+  forecast?: FleetForecast;
+  /** Minutes of future both Fleet charts show (`fleetAheadMinutes`). */
+  aheadMinutes?: number;
   windowMinutes: number;
   /** VENs reporting right now (the live feed's `contributingVens`). It is what separates a store
    * that is still filling from one nothing is writing to: both resample to zero rows. */
@@ -65,7 +100,7 @@ export function FleetPowerChart({
   tickMinutes: number;
   nowMs: number;
 }) {
-  const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes);
+  const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes, aheadMinutes);
   const ticks = fleetChartTicks(tMin, tMax, tickMinutes);
 
   // Memoised: one React element plus one DOM rect per band, rebuilt on every
@@ -92,6 +127,8 @@ export function FleetPowerChart({
     for (const point of history.fleet) {
       samples.push({ ts: Date.parse(point.ts), key: FLEET_KEY, value: point.netPowerKw });
     }
+    samples.push(...forecastSamples(FORECAST_KEY, forecast?.slots ?? []));
+    samples.push(...forecastSamples(BEFORE_KEY, forecast?.before?.slots ?? []));
 
     const rows = mergeTimestampedSeries([], samples);
 
@@ -124,9 +161,25 @@ export function FleetPowerChart({
       formatter: (v: number) => `${v.toFixed(2)} kW`,
     });
 
+    if (forecast && forecast.slots.length > 0) {
+      // The legend names the objectives behind the soonest slot, so a reader sees what the
+      // dashed line assumes without hovering it.
+      const mix = objectiveMix(forecast.slots[0].objectives);
+      series.push(forecastSeries(FORECAST_KEY, `forecast (${mix})`, { strokeDasharray: "6 4", strokeWidth: 2 }));
+    }
+    if (forecast?.before && forecast.before.slots.length > 0) {
+      const at = forecast.before.changed_at ? new Date(forecast.before.changed_at).toLocaleTimeString() : "";
+      series.push(
+        forecastSeries(BEFORE_KEY, `forecast before the change ${at}`.trim(), {
+          strokeDasharray: "2 4",
+          strokeOpacity: 0.45,
+        }),
+      );
+    }
+
     const values = rows.flatMap((row) => Object.values(row.values ?? {}));
     return { rows, series, values };
-  }, [history]);
+  }, [history, forecast]);
 
   if (rows.length === 0) {
     // Two different causes of the same empty array, and only the second is "no telemetry": the
@@ -199,6 +252,13 @@ export function FleetPowerChart({
       <Typography variant="caption" color="text.secondary" data-testid="fleet-chart-source">
         {history.source === "raw" ? "raw samples" : "1-minute means"}, {history.stepSeconds}s buckets
       </Typography>
+      {/* `wire-contracts`: a VEN whose report declared no unit was read in the profile's kWh,
+          and that assumption is shown, not silent. */}
+      {forecast && forecast.assumedUnitVens.length > 0 && (
+        <Typography variant="caption" color="warning.main" display="block" data-testid="fleet-forecast-assumed">
+          Forecast unit assumed (kWh) for {forecast.assumedUnitVens.join(", ")}: their reports declare none.
+        </Typography>
+      )}
     </>
   );
 }

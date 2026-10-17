@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { FleetPowerChart, FLEET_KEY } from "../components/FleetPowerChart";
+import { FleetPowerChart, FLEET_KEY, FORECAST_KEY, BEFORE_KEY } from "../components/FleetPowerChart";
 import { venColor, FLEET_SUM_COLOR } from "../utils/venColor";
-import type { FleetHistory } from "../api/types";
+import type { FleetForecast, FleetHistory } from "../api/types";
 
 // The chart itself is recharts; what matters here is what gets handed to it.
 const chartProps: Record<string, unknown>[] = [];
@@ -197,5 +197,50 @@ describe("venColor", () => {
   it("is stable for a name and distinct between neighbours", () => {
     expect(venColor("ven-1")).toBe(venColor("ven-1"));
     expect(venColor("ven-1")).not.toBe(venColor("ven-2"));
+  });
+
+  // openspec opportunistic-objective D12: the forecast continues the fleet total, dashed, and its
+  // pre-change counterpart is drawn fainter; the legend names the objectives behind it.
+  it("overlays the fleet forecast and the forecast from before the change", () => {
+    const forecast: FleetForecast = {
+      stepSeconds: 900,
+      slots: [
+        { start: "2026-09-22T09:15:00Z", kw: 3, vens: 3, objectives: { opportunistic: 2, min_cost: 1 } },
+        { start: "2026-09-22T09:30:00Z", kw: 1, vens: 3, objectives: { opportunistic: 2, min_cost: 1 } },
+      ],
+      before: {
+        changed_at: "2026-09-22T09:00:00Z",
+        slots: [{ start: "2026-09-22T09:15:00Z", kw: 5, vens: 3, objectives: { min_cost: 3 } }],
+      },
+      assumedUnitVens: ["ven-3"],
+    };
+    chartProps.length = 0;
+    render(
+      <FleetPowerChart
+        history={history()}
+        forecast={forecast}
+        windowMinutes={60}
+        aheadMinutes={30}
+        tickMinutes={10}
+        nowMs={Date.parse("2026-09-22T09:01:30Z")}
+        reportingVens={2}
+      />,
+    );
+    const props = chartProps[0];
+    const series = props.series as (Series & { strokeDasharray?: string; strokeOpacity?: number })[];
+    const fc = series.find((s) => s.key === FORECAST_KEY)!;
+    const before = series.find((s) => s.key === BEFORE_KEY)!;
+    expect(fc.label).toBe("forecast (opportunistic 2 · min_cost 1)");
+    expect(fc.strokeDasharray).toBeTruthy();
+    expect(before.strokeOpacity).toBeLessThan(1);
+    expect(props.tMax).toBe(Date.parse("2026-09-22T09:31:30Z"));
+    const rows = props.data as Row[];
+    expect(rows.find((r) => r.ts === Date.parse("2026-09-22T09:15:00Z"))!.values![FORECAST_KEY]).toBe(3);
+    expect(screen.getByTestId("fleet-forecast-assumed")).toHaveTextContent("ven-3");
+  });
+
+  it("draws no forecast series without a forecast", () => {
+    const series = renderChart().series as Series[];
+    expect(series.map((s) => s.key)).not.toContain(FORECAST_KEY);
   });
 });

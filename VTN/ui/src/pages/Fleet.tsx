@@ -1,10 +1,19 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
-  Alert, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow,
-  TextField, Typography,
+  Alert, Button, Chip, IconButton, MenuItem, Paper, Stack, Table, TableBody, TableCell,
+  TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
-import { useFleetHistory, useFleetPower, useFleetSignals } from "../api/hooks";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import {
+  useFleetForecast, useFleetHistory, useFleetPower, useFleetSignals, useSetFleetObjective,
+  useSetVenObjective, useVenPlan,
+} from "../api/hooks";
+import type { FleetVenLive } from "../api/types";
 import { FleetPowerChart } from "../components/FleetPowerChart";
+import { VenPlanChart } from "../components/VenPlanChart";
+import { fleetAheadMinutes } from "../components/fleetChartWindow";
+import { fleetObjectiveChoices, sourceLabel } from "../utils/fleetObjective";
 import { FleetTariffChart } from "../components/FleetTariffChart";
 import { FleetReactions } from "../components/FleetReactions";
 import { formatAge } from "../utils/relativeTime";
@@ -23,13 +32,139 @@ const WINDOWS = [
   { minutes: 1440, stepSeconds: 900, tickMinutes: 180, label: "24 hours" },
 ];
 
+/** The forecast grid: the VENs report every 15 minutes, so finer would only repeat slots. */
+const FORECAST_STEP_S = 900;
+
+/** One VEN's objective as it reports it, who set it, and whether the fleet's command is still
+ *  on its way (D12). */
+function ObjectiveCell({ ven }: { ven: FleetVenLive }) {
+  if (!ven.objective) {
+    return <TableCell data-testid={`fleet-objective-${ven.venName}`}>—</TableCell>;
+  }
+  return (
+    <TableCell data-testid={`fleet-objective-${ven.venName}`}>
+      <Stack direction="row" spacing={0.5} alignItems="center">
+        <span>{ven.objective.objective}</span>
+        <Chip size="small" variant="outlined" label={sourceLabel(ven.objective.source)} />
+        {ven.commandPending && (
+          <Chip
+            size="small"
+            color="warning"
+            label={`pending: ${ven.command?.objective ?? "release"}`}
+            data-testid={`fleet-pending-${ven.venName}`}
+          />
+        )}
+      </Stack>
+    </TableCell>
+  );
+}
+
+/** Command this VEN's objective, or release the fleet's command so it returns to its own. */
+function CommandCell({ ven }: { ven: FleetVenLive }) {
+  const setObjective = useSetVenObjective();
+  const choices = ven.objective?.available_objectives ?? [];
+  return (
+    <TableCell>
+      <Stack direction="row" spacing={1} alignItems="center">
+        <TextField
+          select
+          size="small"
+          value={ven.command?.objective ?? ""}
+          disabled={choices.length === 0}
+          onChange={(e) => setObjective.mutate({ venName: ven.venName, objective: e.target.value })}
+          inputProps={{ "data-testid": `fleet-command-${ven.venName}` }}
+          sx={{ minWidth: 150 }}
+        >
+          {choices.map((o) => (
+            <MenuItem key={o} value={o}>
+              {o}
+            </MenuItem>
+          ))}
+        </TextField>
+        <Button
+          size="small"
+          disabled={!ven.command}
+          onClick={() => setObjective.mutate({ venName: ven.venName, objective: null })}
+          data-testid={`fleet-release-${ven.venName}`}
+        >
+          Release
+        </Button>
+      </Stack>
+      {setObjective.isError && (
+        <Typography variant="caption" color="error">
+          {(setObjective.error as Error).message}
+        </Typography>
+      )}
+    </TableCell>
+  );
+}
+
+/** The VEN's adopted plan, fetched only while the row is open. */
+function VenPlanRow({ venName, nowMs }: { venName: string; nowMs: number }) {
+  const plan = useVenPlan(venName, true);
+  if (plan.isError) {
+    return (
+      <Typography variant="body2" data-testid={`fleet-plan-missing-${venName}`}>
+        {venName} has published no plan yet.
+      </Typography>
+    );
+  }
+  return plan.data ? <VenPlanChart plan={plan.data} nowMs={nowMs} /> : null;
+}
+
+/** Switch every VEN to one objective, one VEN at a time, or release them all. */
+function FleetObjectiveControl({ vens }: { vens: FleetVenLive[] }) {
+  const setFleet = useSetFleetObjective();
+  const [choice, setChoice] = useState("");
+  const choices = fleetObjectiveChoices(vens);
+  return (
+    <Stack direction="row" spacing={1} alignItems="center" mb={1} data-testid="fleet-objective-control">
+      <TextField
+        select
+        size="small"
+        label="Fleet objective"
+        value={choice}
+        onChange={(e) => setChoice(e.target.value)}
+        inputProps={{ "data-testid": "fleet-objective-select" }}
+        sx={{ minWidth: 180 }}
+      >
+        {choices.map((o) => (
+          <MenuItem key={o} value={o}>
+            {o}
+          </MenuItem>
+        ))}
+      </TextField>
+      <Button
+        variant="contained"
+        size="small"
+        disabled={!choice}
+        onClick={() => setFleet.mutate(choice)}
+        data-testid="fleet-objective-apply"
+      >
+        Apply to all
+      </Button>
+      <Button size="small" onClick={() => setFleet.mutate(null)} data-testid="fleet-objective-release">
+        Release all
+      </Button>
+      {setFleet.isError && (
+        <Typography variant="caption" color="error">
+          {(setFleet.error as Error).message}
+        </Typography>
+      )}
+    </Stack>
+  );
+}
+
 export function FleetPage() {
   const [windowIndex, setWindowIndex] = useState(3);
+  const [openVen, setOpenVen] = useState<string | null>(null);
   const chosen = WINDOWS[windowIndex];
+  const aheadMinutes = fleetAheadMinutes(chosen.minutes);
 
   const live = useFleetPower();
   const history = useFleetHistory(chosen.minutes, chosen.stepSeconds);
   const signals = useFleetSignals(chosen.minutes);
+  const forecast = useFleetForecast(FORECAST_STEP_S);
   const now = new Date();
 
   return (
@@ -89,6 +224,7 @@ export function FleetPage() {
         <FleetTariffChart
           signals={signals.data}
           windowMinutes={chosen.minutes}
+          aheadMinutes={aheadMinutes}
           tickMinutes={chosen.tickMinutes}
           nowMs={now.getTime()}
         />
@@ -104,6 +240,8 @@ export function FleetPage() {
         {history.data && (
           <FleetPowerChart
             history={history.data}
+            forecast={forecast.data}
+            aheadMinutes={aheadMinutes}
             windowMinutes={chosen.minutes}
             tickMinutes={chosen.tickMinutes}
             nowMs={now.getTime()}
@@ -116,26 +254,51 @@ export function FleetPage() {
 
       <Paper sx={{ p: 2 }} data-testid="fleet-vens-card">
         <Typography variant="h6">VENs</Typography>
+        <FleetObjectiveControl vens={live.data?.vens ?? []} />
         <Table size="small">
           <TableHead>
             <TableRow>
+              <TableCell />
               <TableCell>VEN</TableCell>
               <TableCell align="right">Net power</TableCell>
               <TableCell>State</TableCell>
+              <TableCell>Objective</TableCell>
+              <TableCell>Fleet command</TableCell>
               <TableCell>Last message</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {byVenName(live.data?.vens ?? [], (v) => v.venName).map((v) => (
-              <TableRow key={v.venName} data-testid={`fleet-ven-${v.venName}`}>
-                <TableCell>{v.venName}</TableCell>
-                <TableCell align="right">{formatKwOrDash(v.netPowerKw)}</TableCell>
-                {/* `offline` is the broker's last will, published on a VEN's
-                    behalf when it died without saying goodbye — the only way
-                    to tell "gone" from "quiet". */}
-                <TableCell>{v.state ?? "unknown"}</TableCell>
-                <TableCell>{formatAge(v.receivedAt, now)}</TableCell>
-              </TableRow>
+              <Fragment key={v.venName}>
+                <TableRow data-testid={`fleet-ven-${v.venName}`}>
+                  <TableCell padding="checkbox">
+                    <IconButton
+                      size="small"
+                      aria-label={`plan of ${v.venName}`}
+                      onClick={() => setOpenVen(openVen === v.venName ? null : v.venName)}
+                      data-testid={`fleet-expand-${v.venName}`}
+                    >
+                      {openVen === v.venName ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                    </IconButton>
+                  </TableCell>
+                  <TableCell>{v.venName}</TableCell>
+                  <TableCell align="right">{formatKwOrDash(v.netPowerKw)}</TableCell>
+                  {/* `offline` is the broker's last will, published on a VEN's
+                      behalf when it died without saying goodbye — the only way
+                      to tell "gone" from "quiet". */}
+                  <TableCell>{v.state ?? "unknown"}</TableCell>
+                  <ObjectiveCell ven={v} />
+                  <CommandCell ven={v} />
+                  <TableCell>{formatAge(v.receivedAt, now)}</TableCell>
+                </TableRow>
+                {openVen === v.venName && (
+                  <TableRow data-testid={`fleet-plan-row-${v.venName}`}>
+                    <TableCell colSpan={7}>
+                      <VenPlanRow venName={v.venName} nowMs={now.getTime()} />
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
             ))}
           </TableBody>
         </Table>
