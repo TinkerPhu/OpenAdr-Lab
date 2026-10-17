@@ -170,17 +170,21 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       `openadr-bff` (that leaf only). Test first: the two new `scripts/test_fleet_acl.sh` cases
       (BFF's command reaches the VEN; a VEN cannot command another) fail on the old ACL, pass on
       the new. Deploy the broker config on Node1 and run the script before 8.2 goes live.
-- [ ] 8.1 `bff/src/fleet.rs::apply_message` ingests `objective`, `plan` and `command/objective`
+- [x] 8.1 `bff/src/fleet.rs::apply_message` ingests `objective`, `plan` and `command/objective`
       leaves (unit tests: each leaf, garbled body keeps the previous value, empty command = no
       command).
-- [ ] 8.2 Publish handle on the BFF MQTT client; `PUT /api/fleet/vens/:ven/objective` and `PUT
+- [x] 8.2 Publish handle on the BFF MQTT client; `PUT /api/fleet/vens/:ven/objective` and `PUT
       /api/fleet/objective` (`{"objective": name | null}`; the published body adds
       `requested_at`), validated against each VEN's
       `available_objectives`, published retained QoS 1. A fleet-wide switch publishes one VEN at a
       time with a configurable spacing (default 10 s) so solves do not pile up. Route tests: 400
       on unknown value names VEN and value; null publishes an empty retained message; fleet-wide
       publishes one per known VEN, spaced.
-- [ ] 8.3 `GET /api/fleet/vens/:ven/plan` from the ingested `plan` leaf.
+- [x] 8.3 `GET /api/fleet/vens/:ven/plan` from the ingested `plan` leaf.
+      (8.2/8.3 note: the BFF has no route-test harness, its handlers take the whole `AppCtx`
+      with a VTN client; the rules are pure functions tested in `bff/src/fleet_command.rs`
+      (validation naming VEN and value, empty retained release, one VEN per spacing in paused
+      time), the handlers stay thin, and 9.2 exercises them end to end.)
 - [ ] 8.4 `scripts/seed_vtn.py`: `USAGE_FORECAST` descriptor on the fleet-monitoring event and
       `PAYLOAD_CONTRACT["USAGE_FORECAST"] = {"units": "KWH"}`; `docs/reference/WIRE_PROFILE.md`
       row if missing (the lab-core table test checks it).

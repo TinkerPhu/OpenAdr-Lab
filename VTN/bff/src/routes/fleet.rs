@@ -74,6 +74,10 @@ async fn live(ctx: AppCtx) -> Json<serde_json::Value> {
             "netPowerKw": net_power_kw,
             "state": live.state,
             "receivedAt": live.received_at,
+            // The VEN's own `objective` body and the fleet's command, as the broker holds them.
+            "objective": live.objective,
+            "command": live.command,
+            "commandPending": live.command_pending(),
         }));
     }
 
@@ -303,4 +307,103 @@ pub async fn fleet_signals(
 
 fn bad_request(message: &str) -> (StatusCode, Json<serde_json::Value>) {
     (StatusCode::BAD_REQUEST, Json(json!({"error": message})))
+}
+
+/// The body of both objective commands: an objective's name, or `null` to release the fleet's
+/// command (the VEN goes back to its profile objective).
+#[derive(Debug, Deserialize)]
+pub struct ObjectiveBody {
+    pub objective: Option<String>,
+}
+
+fn refused(r: crate::fleet_command::CommandRefused) -> (StatusCode, Json<serde_json::Value>) {
+    use crate::fleet_command::CommandRefused::*;
+    let status = match r {
+        UnknownVen(_) => StatusCode::NOT_FOUND,
+        ObjectivesUnknown(_) => StatusCode::CONFLICT,
+        NotAccepted { .. } => StatusCode::BAD_REQUEST,
+    };
+    (status, Json(json!({"error": r.message()})))
+}
+
+fn commands(
+    ctx: &AppCtx,
+) -> Result<
+    std::sync::Arc<dyn crate::fleet_command::CommandPublisher>,
+    (StatusCode, Json<serde_json::Value>),
+> {
+    ctx.fleet_commands.clone().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({"error": "no fleet broker is configured"})),
+    ))
+}
+
+/// `PUT /api/fleet/vens/:ven/objective` — command one VEN's objective, or release it.
+pub async fn put_ven_objective(
+    State(ctx): State<AppCtx>,
+    axum::extract::Path(ven): axum::extract::Path<String>,
+    Json(body): Json<ObjectiveBody>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let publisher = commands(&ctx)?;
+    let objective = body.objective.as_deref();
+    crate::fleet_command::validate(&*ctx.fleet.read().await, &ven, objective).map_err(refused)?;
+    crate::fleet_command::command_ven(
+        publisher.as_ref(),
+        &ctx.fleet_root,
+        &ven,
+        objective,
+        Utc::now(),
+    )
+    .map_err(|e| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": format!("command not published: {e}")})),
+        )
+    })?;
+    Ok(Json(json!({"venName": ven, "objective": body.objective})))
+}
+
+/// `PUT /api/fleet/objective` — command every VEN, one at a time
+/// (`FLEET_OBJECTIVE_SPACING_S` apart); all or nothing on validation.
+pub async fn put_fleet_objective(
+    State(ctx): State<AppCtx>,
+    Json(body): Json<ObjectiveBody>,
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
+    let publisher = commands(&ctx)?;
+    let (targets, skipped) =
+        crate::fleet_command::fleet_targets(&*ctx.fleet.read().await, body.objective.as_deref())
+            .map_err(refused)?;
+    let spacing_s = ctx.config.fleet_objective_spacing_s;
+    crate::fleet_command::command_fleet(
+        publisher,
+        ctx.fleet_root.clone(),
+        targets.clone(),
+        body.objective.clone(),
+        std::time::Duration::from_secs(spacing_s),
+    );
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "objective": body.objective,
+            "vens": targets,
+            // Known VENs that have not said which objectives they accept, so were not commanded.
+            "skipped": skipped,
+            "spacingSeconds": spacing_s,
+        })),
+    ))
+}
+
+/// `GET /api/fleet/vens/:ven/plan` — the plan the VEN adopted last, as it published it.
+pub async fn get_ven_plan(
+    State(ctx): State<AppCtx>,
+    axum::extract::Path(ven): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let fleet = ctx.fleet.read().await;
+    match fleet.get(&ven).and_then(|v| v.plan.clone()) {
+        Some(plan) => Ok(Json(plan)),
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": format!("VEN `{ven}` has published no plan")})),
+        )),
+    }
 }

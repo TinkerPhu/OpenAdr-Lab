@@ -35,6 +35,11 @@ rumqttc = { version = "0.25", default-features = false }
 lab-core = { path = "../../lab-core" }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "json"] }
 
+[dev-dependencies]
+# `test-util` lets a test run tokio's clock paused, so the fleet switch's spacing is
+# asserted in virtual time instead of slept through.
+tokio = { version = "1", features = ["full", "test-util"] }
+
 # `ci`: the profile the E2E test images build with (tests/docker-compose.test.yml).
 # Only our own crates drop to opt-level 1 and build incrementally, so a source edit
 # recompiles quickly; every dependency -- HiGHS (C++, built by cmake from this
