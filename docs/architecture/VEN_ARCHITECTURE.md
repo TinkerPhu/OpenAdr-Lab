@@ -744,13 +744,16 @@ ceiling). Every other asset kind is tier-invariant by design, not by omission �
 per-kind ceiling exists. `Physical` for PV means the true *uncurtailed* generation
 ceiling, not `capability()`'s already-curtailed value.
 
-`asset_max_power(asset, state, t1, t2, direction, tier) -> (power_kw, energy_kwh)`
-and `asset_max_power_series(asset, state, t1, t2_max, direction, tier) ->
-Vec<(elapsed_s, power_kw, cumulative_energy_kwh)>` (`assets/max_power.rs`) are thin
-compositions over the two methods above plus `simulate_forward` — no new simulation
-logic. `asset_max_power` is defined in terms of the series (its last point), built
-specifically so a caller sweeping many `t2` samples for a capacity curve doesn't
-re-walk the schedule from scratch per sample. Wired into the unified capacity/
+`asset_max_power_series(asset, state, t1, t2_max, direction, tier) ->
+Vec<(elapsed_s, power_kw, cumulative_energy_kwh)>` (`assets/max_power.rs`) is a thin
+composition over the two methods above plus `simulate_forward` — no new simulation
+logic. It returns the whole trajectory (power and cumulative energy from one pass), so a
+caller sweeping many `t2` samples for a capacity curve doesn't re-walk the schedule from
+scratch per sample; the `(power, energy)` at one `t2` is its last point, and there is
+deliberately no second endpoint function. Conventions: positive = import, negative =
+export; a consumption-only asset's "export" is its minimum forced import (shiftable load:
+latest start); forecast uncertainty is resolved upstream in the plan, never inside the
+primitive. Wired into the unified capacity/
 envelope engine — §3.0c below — which is what actually fixes the PV/Heater bugs
 described above in the live Diagnostics/Controller charts.
 
