@@ -45,6 +45,8 @@ sudo systemctl restart ci-web.service
 if [ ! -f "$CI_ROOT/deploy_key" ]; then
     ssh-keygen -q -t ed25519 -N "" -C "node3-ci-runner" -f "$CI_ROOT/deploy_key"
 fi
+# The checkout is sparse: a new top-level directory does not arrive on a pull unless listed.
+git -C "$CI_REPO" sparse-checkout add ci 2>/dev/null || true
 git -C "$CI_REPO" config remote.origin.pushurl "$GITHUB_REPO"
 git -C "$CI_REPO" config core.sshCommand "ssh -i $CI_ROOT/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 # Deploy tickets (ci/deploy.sh) ship images to the production hosts over ssh. The runner
