@@ -181,6 +181,8 @@ impl AssetMilpContext for HeaterMilpContext {
                 y_heat,
                 z_heat_ready: 0.0,
                 e_tank_kwh,
+                // Nothing is guaranteed without look-ahead, so nothing falls short of a guarantee.
+                shortfall_kwh: 0.0,
             }),
         }
     }
