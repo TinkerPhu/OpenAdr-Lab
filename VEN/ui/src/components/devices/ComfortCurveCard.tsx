@@ -16,6 +16,7 @@ import {
 import CloseIcon from "@mui/icons-material/Close";
 import {
   useComfortCurve,
+  useComfortCurveCost,
   useDeleteComfortCurve,
   useSetComfortCurve,
 } from "../../api/hooks";
@@ -52,6 +53,7 @@ export function ComfortCurveCard({ sim }: { sim: SimSnapshot | undefined }) {
   // is needed to sync state with the query result.
   const [edited, setEdited] = useState<ComfortRate[] | null>(null);
   const rows = edited ?? data?.rates ?? [];
+  const { data: cost } = useComfortCurveCost(assetId, rows);
   const setRows = (fn: (rs: ComfortRate[]) => ComfortRate[]) => setEdited(fn(rows));
 
   function updateRow(i: number, patch: Partial<ComfortRate>) {
@@ -100,6 +102,28 @@ export function ComfortCurveCard({ sim }: { sim: SimSnapshot | undefined }) {
           a rising curve is rejected.
         </Typography>
         <CurveChart rows={rows} />
+        {cost?.max_cost_eur != null && (
+          <Box data-testid="comfort-cost" sx={{ mt: 1 }}>
+            <Typography variant="body2">
+              Most this curve can spend: €{cost.max_cost_eur.toFixed(2)}
+              {cost.energy_kwh != null && ` for ${cost.energy_kwh.toFixed(1)} kWh`}
+              {" "}(from the current charge to the limit)
+            </Typography>
+            <Typography variant="body2">
+              Planned (current plan): €{cost.planned_cost_eur.toFixed(2)}
+            </Typography>
+            {cost.planned_cost_eur > cost.max_cost_eur + 0.005 && (
+              <Typography
+                variant="body2"
+                color="warning.main"
+                data-testid="comfort-cost-forced"
+              >
+                The plan spends more than the curve allows: a deadline forces charging beyond
+                what the curve values.
+              </Typography>
+            )}
+          </Box>
+        )}
         {rows.length === 0 ? (
           <Typography color="text.secondary">No curve points</Typography>
         ) : (

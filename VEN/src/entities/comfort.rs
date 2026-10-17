@@ -69,6 +69,60 @@ pub fn validate_curve(rates: &[ComfortRate]) -> Result<(), String> {
     Ok(())
 }
 
+/// One band of energy priced at a single marginal bid: what a comfort curve says the next
+/// `kwh` are worth, in €/kWh. Walking a curve from the asset's current charge to its limit
+/// produces these (`assets::ev_comfort`); the planner buys the bands whose bid beats their cost
+/// (`ev-comfort-piecewise-core`), and the comfort-curve card sums them (`max_cost_eur`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnergyBand {
+    /// Energy in this band [kWh].
+    pub kwh: f64,
+    /// What the user bids for each kWh in it [€/kWh].
+    pub eur_per_kwh: f64,
+}
+
+/// The most a curve can cost: the sum of kWh × bid over its bands, i.e. the area under the
+/// curve. Every kWh the planner buys has a tariff no higher than its bid, so a curve's spend is
+/// bounded by this without a constraint.
+pub fn max_cost_eur(bands: &[EnergyBand]) -> f64 {
+    bands.iter().map(|b| b.kwh * b.eur_per_kwh).sum()
+}
+
+/// The energy a set of bands covers [kWh].
+pub fn bands_energy_kwh(bands: &[EnergyBand]) -> f64 {
+    bands.iter().map(|b| b.kwh).sum()
+}
+
+/// What a curve can cost and what the plan spends on its asset, for the comfort-curve card.
+/// `max_cost_eur` and `energy_kwh` are `None` for an asset that does not price energy by a
+/// curve; `planned_cost_eur` is `0.0` when the plan allocates nothing to the asset.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, TS)]
+pub struct ComfortCurveCost {
+    pub max_cost_eur: Option<f64>,
+    pub energy_kwh: Option<f64>,
+    pub planned_cost_eur: f64,
+}
+
+/// The card's two numbers from the asset's own `bands` and the active plan: the one place
+/// that pairs a curve's maximum with the plan's spend.
+pub fn comfort_curve_cost(
+    bands: Option<&[EnergyBand]>,
+    plan: Option<&super::plan::Plan>,
+    asset_id: &str,
+) -> ComfortCurveCost {
+    let planned_cost_eur = plan
+        .and_then(|p| {
+            let until = p.slots.last()?.end;
+            super::plan_cost::asset_planned_cost(&p.slots, asset_id, until)
+        })
+        .map_or(0.0, |(cost_eur, _co2_g)| cost_eur);
+    ComfortCurveCost {
+        max_cost_eur: bands.map(max_cost_eur),
+        energy_kwh: bands.map(bands_energy_kwh),
+        planned_cost_eur,
+    }
+}
+
 /// The curve planning should use: the user override when present, the
 /// asset's built-in default otherwise (BL-19 verify clause).
 pub fn effective_comfort_rates(
@@ -208,6 +262,47 @@ mod tests {
         assert_eq!(
             comfort_curve_source(&overrides, "heater"),
             ComfortCurveSource::Default
+        );
+    }
+
+    #[test]
+    fn comfort_curve_cost_pairs_the_maximum_with_the_plans_spend() {
+        use crate::services::test_support::plans::flat_plan;
+        use chrono::TimeZone;
+        let start = chrono::Utc.with_ymd_and_hms(2026, 4, 11, 6, 0, 0).unwrap();
+        let mut plan = flat_plan(3600, 2, start);
+        plan.slots[1].import_tariff_eur_kwh = 0.25;
+        plan.slots[1]
+            .allocations
+            .push(crate::entities::plan::AssetAllocation {
+                asset_id: "ev".into(),
+                power_kw: 4.0,
+                surplus_power_kw: 0.0,
+                grid_power_kw: 4.0,
+                marginal_value: 0.0,
+                cost_eur: 0.0,
+                co2_g: 0.0,
+            });
+        let bands = [EnergyBand {
+            kwh: 10.0,
+            eur_per_kwh: 0.30,
+        }];
+        let c = comfort_curve_cost(Some(&bands), Some(&plan), "ev");
+        assert_eq!(c.max_cost_eur, Some(3.0));
+        assert_eq!(c.energy_kwh, Some(10.0));
+        assert!((c.planned_cost_eur - 1.0).abs() < 1e-9, "{c:?}");
+    }
+
+    #[test]
+    fn comfort_curve_cost_is_zero_planned_without_an_allocation_and_has_no_maximum_without_bands() {
+        let c = comfort_curve_cost(None, None, "heater");
+        assert_eq!(
+            c,
+            ComfortCurveCost {
+                max_cost_eur: None,
+                energy_kwh: None,
+                planned_cost_eur: 0.0
+            }
         );
     }
 }

@@ -1,5 +1,5 @@
 import { useQuery, useQueries, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { useRef, useEffect, useLayoutEffect } from "react";
+import { useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useVenContext } from "./venContext";
 import type {
   SensorSnapshot, SimInjectState, CreateUserRequestBody,
@@ -64,6 +64,24 @@ export function useComfortCurve(assetId: string) {
   });
 }
 
+/** The curve's maximum cost beside the plan's spend, for the rows on screen (saved or being
+ *  edited). Debounced so typing a bid is one request, not one per keystroke. */
+export function useComfortCurveCost(assetId: string, rates: ComfortRate[]) {
+  const { api } = useVenContext();
+  const key = JSON.stringify(rates);
+  const [settledKey, setSettledKey] = useState(key);
+  useEffect(() => {
+    const t = setTimeout(() => setSettledKey(key), 300);
+    return () => clearTimeout(t);
+  }, [key]);
+  return useQuery({
+    queryKey: ["comfort_curve_cost", api.baseUrl, assetId, settledKey],
+    queryFn: () => api.comfortCurveCost(assetId, JSON.parse(settledKey) as ComfortRate[]),
+    enabled: assetId !== "" && rates.length > 0,
+    retry: false,
+  });
+}
+
 export function useSetComfortCurve() {
   const { api } = useVenContext();
   const queryClient = useQueryClient();
@@ -72,6 +90,7 @@ export function useSetComfortCurve() {
       api.postComfortCurve(assetId, rates),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["comfort_curve"] });
+      queryClient.invalidateQueries({ queryKey: ["comfort_curve_cost"] });
     },
   });
 }
@@ -83,6 +102,7 @@ export function useDeleteComfortCurve() {
     mutationFn: (assetId: string) => api.deleteComfortCurve(assetId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["comfort_curve"] });
+      queryClient.invalidateQueries({ queryKey: ["comfort_curve_cost"] });
     },
   });
 }

@@ -22,6 +22,21 @@ use tower_http::trace::TraceLayer;
 
 use crate::AppCtx;
 
+/// The comfort-curve routes: the curve itself and what it can cost beside the plan's spend.
+fn comfort_curve_routes() -> Router<AppCtx> {
+    Router::new()
+        .route(
+            "/assets/:asset_id/comfort_curve",
+            get(hems::get_comfort_curve)
+                .post(hems::post_comfort_curve)
+                .delete(hems::delete_comfort_curve),
+        )
+        .route(
+            "/assets/:asset_id/comfort_curve/cost",
+            post(hems::post_comfort_curve_cost),
+        )
+}
+
 pub fn build_router(ctx: AppCtx) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -94,12 +109,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/history/plans", get(hems::get_history_plans))
         // Phase A: the asset's own feasible power range.
         .route("/capability/:asset_id", get(assets::get_asset_capability))
-        .route(
-            "/assets/:asset_id/comfort_curve",
-            get(hems::get_comfort_curve)
-                .post(hems::post_comfort_curve)
-                .delete(hems::delete_comfort_curve),
-        )
+        .merge(comfort_curve_routes())
         // HEMS Stage 2 routes
         .route("/capacity", get(hems::get_capacity))
         .route("/capacity/schedule", get(hems::get_capacity_schedule))

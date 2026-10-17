@@ -19,6 +19,7 @@ use crate::controller::sim_roster_port::{CancelOutcome, SimRosterPort};
 use crate::entities::asset::{AssetCapabilityView, ComfortRate};
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::capacity_curve::CapacityCurves;
+use crate::entities::comfort::EnergyBand;
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::ev_usage::EvUsageSimState;
 use crate::entities::plan::{Plan, SiteHeadroom};
@@ -127,6 +128,16 @@ impl SimReadPort for SimHandle {
         let sim = self.sim.lock().await;
         sim.find_asset(asset_id)
             .map(|(_, cfg)| cfg.default_comfort_rates())
+    }
+
+    async fn comfort_bands(
+        &self,
+        asset_id: &str,
+        rates: &[ComfortRate],
+    ) -> Option<Vec<EnergyBand>> {
+        let sim = self.sim.lock().await;
+        let (entry, cfg) = sim.find_asset(asset_id)?;
+        cfg.comfort_bands(&entry.state, rates)
     }
 
     async fn usage_schedule_view(
@@ -278,6 +289,25 @@ mod tests {
             .await
             .is_some());
         assert!(handle.default_comfort_rates("nope").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn comfort_bands_are_the_evs_own_and_none_for_other_assets() {
+        let (handle, _sim) = handle_with(&all_kinds());
+        let rates = handle
+            .default_comfort_rates(crate::ids::ASSET_EV)
+            .await
+            .expect("ev curve");
+        let bands = handle
+            .comfort_bands(crate::ids::ASSET_EV, &rates)
+            .await
+            .expect("the EV prices energy by a curve");
+        assert!(crate::entities::comfort::bands_energy_kwh(&bands) > 0.0);
+        assert!(handle.comfort_bands("nope", &rates).await.is_none());
+        assert!(handle
+            .comfort_bands(crate::ids::ASSET_HEATER, &rates)
+            .await
+            .is_none());
     }
 
     #[tokio::test]

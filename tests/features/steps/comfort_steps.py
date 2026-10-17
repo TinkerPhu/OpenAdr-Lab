@@ -247,3 +247,35 @@ def step_delete_comfort_request(context):
     req_id = context.comfort_request.get("id")
     assert req_id, f"no id in {context.comfort_request}"
     ven_delete(f"/user-requests/{req_id}")
+
+
+# ---------------------------------------------------------------------------
+# GB-53: what a curve can cost beside what the plan spends. A preview: the
+# curve is sent, not stored.
+# ---------------------------------------------------------------------------
+
+@when('I ask what the comfort curve for asset "{asset_id}" with points "{points}" can cost')
+def step_ask_comfort_cost(context, asset_id, points):
+    r = ven_post(f"/assets/{asset_id}/comfort_curve/cost", json=_parse_points(points))
+    context.last_response = r
+    context.comfort_cost = r.json() if r.ok else None
+
+
+@then("the reported energy is above {kwh:g} kWh")
+def step_comfort_cost_energy(context, kwh):
+    energy = context.comfort_cost["energy_kwh"]
+    assert energy is not None and energy > kwh, f"energy {energy} not above {kwh}: {context.comfort_cost}"
+
+
+@then("the reported maximum cost equals {bid:g} EUR per kWh times the reported energy")
+def step_comfort_cost_maximum(context, bid):
+    cost = context.comfort_cost
+    expected = bid * cost["energy_kwh"]
+    assert abs(cost["max_cost_eur"] - expected) < 1e-6, f"expected {expected}, got {cost}"
+
+
+@then("the reported planned spend is not negative")
+def step_comfort_cost_planned(context):
+    planned = context.comfort_cost["planned_cost_eur"]
+    assert planned >= 0.0, f"planned spend {planned}: {context.comfort_cost}"
+

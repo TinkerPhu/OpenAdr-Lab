@@ -16065,3 +16065,22 @@ from below past `temp_max_c`; the latch now follows the mode's cut-out ceiling
 refused three functions growing by 1-8 lines; the stage pins and the initial stage moved to
 `heater_pins.rs`, the heater warm start and the session warnings into their own functions, and
 slot durations from `cum_s` into `entities::time_grid::slot_hours`.
+
+## Cost beside the comfort curve (GB-53 part A, branch 053-comfort-curve-cost-and-spend-input)
+
+**What.** The comfort-curve card shows the most a curve can spend (price-only area under it, from the
+EV's current charge to its limit) beside what the active plan spends on the EV. `POST
+/assets/:id/comfort_curve/cost` computes both for any rows, so an unsaved edit is covered. The asset
+declares its own bands (`Asset::comfort_bands`, EV over `ev_energy_segments`); the plan's spend moved from
+`session_flexibility.rs` to `entities/plan_cost.rs::asset_planned_cost`, now behind the card and the session
+estimate alike. `EvEnergySegment` became an alias of the new `entities::comfort::EnergyBand`.
+
+**Why.** A marginal bid is not something a resident can check; the two numbers already existed in the
+planner and never reached the UI.
+
+**Issues.**
+- Planned spend may exceed the maximum (a hard deadline is owed charging the curve does not value), so
+  the card says so rather than clamping.
+- No handler-level test harness exists for the comfort routes; the pure `comfort_curve_cost` is unit
+  tested and the route's 404/422/no-store behaviour is pinned by the BDD scenario.
+

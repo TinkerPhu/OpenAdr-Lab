@@ -435,6 +435,16 @@ core at all) and `v_extra_eur_kwh`/`e_ev_extra` (whether to top off beyond core)
 allocation. The heater's tier reward has no equivalent gap — `z_heat_mid`/`z_heat_full` are
 coupled to real tank-energy dynamics.
 
+**Cost beside the curve.** The comfort-curve card shows what a curve can cost and what the plan
+spends. The asset answers "what does this curve price, from here to my limit" itself
+(`Asset::comfort_bands`, implemented by the EV over the same `ev_energy_segments` the planner
+buys from, with the CO2 bid left out so the sum is euros): `entities::comfort::max_cost_eur` is
+the sum of kWh × bid over those bands, the area under the curve, and bounds what the planner can
+spend on that curve, since every band it buys has a tariff no higher than its bid. The plan's
+spend is `entities::plan_cost::asset_planned_cost`, the one rule also behind a session's
+estimated cost. `POST /assets/:id/comfort_curve/cost` pairs the two for any rows (a preview, nothing
+stored); the plan can exceed the maximum when a hard deadline forces charging the curve does not value.
+
 Regression coverage: `entities/asset.rs::comfort_rate_tests`, `ev_milp.rs`'s
 `from_state_by_deadline_soft_sources_v_core_eur_from_curve`/`..._falls_back_to_global_defaults`,
 `heater_milp.rs`'s `test_comfort_full_reward_*`/`from_state_sources_comfort_full_reward_*`,

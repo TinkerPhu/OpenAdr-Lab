@@ -3,41 +3,14 @@
 //! window each asset declares (`AssetMilpContext::flexibility_window`); this module knows no
 //! asset kind and never decides what a session needs.
 
-use crate::entities::units::dt_h_from_duration;
 use chrono::{DateTime, Utc};
 
 use crate::controller::milp_planner::{AssetMilpContext, FlexibilityWindow};
 use crate::entities::plan::{PlanTimeSlot, SessionFlexibility};
+use crate::entities::plan_cost::asset_planned_cost;
 use crate::entities::planner_params::PlannerParams;
 
 use super::types::*;
-
-/// Session cost/CO2 from the solved schedule: for every allocation of the asset
-/// in slots before `window_end`, the grid share is priced at the slot import
-/// tariff and the PV-surplus share at its export opportunity price (the revenue
-/// forgone by not exporting it). CO2 comes from the allocation (grid share only
-/// — surplus is zero-carbon). `None` when the schedule has no allocation for
-/// the asset, so callers can fall back to a pre-solve estimate.
-fn solved_session_cost(
-    slots: &[PlanTimeSlot],
-    asset_id: &str,
-    window_end: DateTime<Utc>,
-) -> Option<(f64, f64)> {
-    let mut found = false;
-    let mut cost_eur = 0.0;
-    let mut co2_g = 0.0;
-    for slot in slots.iter().filter(|s| s.start < window_end) {
-        let dt_h = dt_h_from_duration(slot.end - slot.start);
-        for alloc in slot.allocations.iter().filter(|a| a.asset_id == asset_id) {
-            found = true;
-            cost_eur += (alloc.grid_power_kw * slot.import_tariff_eur_kwh
-                + alloc.surplus_power_kw * slot.export_tariff_eur_kwh)
-                * dt_h;
-            co2_g += alloc.co2_g;
-        }
-    }
-    found.then_some((cost_eur, co2_g))
-}
 
 /// One session's flexibility entry by the one rule: the window runs from the later of its
 /// declared start and `now` to its declared end; the cost and CO2 come from the solved schedule
@@ -70,7 +43,7 @@ fn session_entry(
         / count;
     let energy_needed_kwh = window.energy_needed_kwh;
     let (estimated_cost_eur, estimated_co2_g) = solved_slots
-        .and_then(|s| solved_session_cost(s, asset_id, window_end))
+        .and_then(|s| asset_planned_cost(s, asset_id, window_end))
         .unwrap_or((energy_needed_kwh * avg_tariff, energy_needed_kwh * avg_co2));
     SessionFlexibility {
         asset_id: asset_id.to_string(),

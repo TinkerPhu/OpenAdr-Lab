@@ -99,3 +99,24 @@ Feature: User comfort-curve override (WP4.2, BL-19)
     Then the comfort-curve-driven plan has "ev" charging
     When I DELETE the comfort-curve-driven user request
     And I delete the comfort curve override for asset "ev"
+
+  @use_case
+  Scenario: A curve shows what it can cost beside what the plan spends (GB-53)
+    # A marginal bid is hard to judge alone. The card asks the VEN what the curve can cost
+    # for the energy ahead (from the EV's current charge to its limit) and what the active
+    # plan spends on the EV. A flat 0.20 EUR/kWh curve makes the maximum 0.20 x the energy
+    # whatever the vehicle's pack size, so the check needs no knowledge of the profile.
+    Given the comfort curve for asset "ev" reports source "default"
+    And I inject ev_soc 0.20 via sim inject
+    When I ask what the comfort curve for asset "ev" with points "0.0:0.20,1.0:0.20" can cost
+    Then the reported energy is above 1.0 kWh
+    And the reported maximum cost equals 0.20 EUR per kWh times the reported energy
+    And the reported planned spend is not negative
+    And the comfort curve for asset "ev" reports source "default"
+
+  Scenario: The cost preview refuses what the API refuses and names what it does not know
+    When I ask what the comfort curve for asset "ev" with points "0.2:0.10,0.9:0.40" can cost
+    Then the comfort curve request is rejected with status 422
+    When I ask what the comfort curve for asset "toaster" with points "0.5:0.40" can cost
+    Then the comfort curve request is rejected with status 404
+

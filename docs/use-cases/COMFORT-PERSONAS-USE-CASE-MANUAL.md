@@ -268,6 +268,24 @@ wherever the curve is consulted; DELETE restores the default. Invalid curves
 8. `curl -s -X DELETE http://Node1:8211/assets/ev/comfort_curve` →
    HTTP 204; GET reports `"source":"default"` again.
 
+### Steps — what the curve can cost (GB-53)
+
+9. In the **Comfort Curve** card with the EV selected, read the two lines under the chart:
+   **Most this curve can spend** (in €, for the kWh from the EV's current charge to its limit) and
+   **Planned (current plan)** (what the active plan spends on the EV). **Expected:** both shown;
+   edit a bid and the maximum follows after a moment, before you save. A heater or battery shows
+   neither line.
+10. API: `curl -s -X POST http://Node1:8211/assets/ev/comfort_curve/cost -H 'Content-Type:
+    application/json' -d '[{"fill":0.0,"max_marginal_price":0.20,"max_marginal_co2":0},
+    {"fill":1.0,"max_marginal_price":0.20,"max_marginal_co2":0}]'`. **Expected:** `max_cost_eur` =
+    0.20 × `energy_kwh`; the stored curve is unchanged (a preview). A rising curve → 422, an unknown
+    asset → 404.
+11. The plan can spend **more** than the maximum when a hard deadline forces charging beyond what the
+    curve values; the card then says so instead of hiding the difference.
+
+Automated: the "A curve shows what it can cost beside what the plan spends" scenario in
+`tests/features/ven_comfort_curve.feature`.
+
 ### Steps — the curve actually shapes the plan (BL-34)
 
 The curve reaches the MILP solver, not just `AssetRequestSlice` storage — a session's
