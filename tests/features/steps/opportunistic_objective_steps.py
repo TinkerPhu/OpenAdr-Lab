@@ -92,6 +92,17 @@ def _asset_kw(asset_id):
     return r.json()["assets"][asset_id]["power_kw"]
 
 
+@then('within {seconds:d} seconds the "{first}" and the "{second}" together draw at least {kw:g} kW')
+def step_assets_draw_together(context, seconds, first, second, kw):
+    poll_until(
+        lambda: (_asset_kw(first), _asset_kw(second)),
+        lambda p: None not in p and p[0] + p[1] >= kw,
+        timeout=seconds,
+        interval=1,
+        description=f"{first} and {second} drawing at least {kw} kW together",
+    )
+
+
 @then('within {seconds:d} seconds the "{asset_id}" draws at least {kw:g} kW')
 def step_asset_draws_at_least(context, seconds, asset_id, kw):
     poll_until(

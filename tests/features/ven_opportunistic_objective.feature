@@ -11,15 +11,16 @@ Feature: Running without planning (opportunistic objective, UC-19)
     Then GET /plan/objective reports "opportunistic" set by "ven_ui"
     And within 90 seconds the VEN adopts a "SIMULATED" plan under "opportunistic" with slots
 
-  # The order is declared by each asset (EV, heater, shiftable loads, battery). With the EV
-  # unplugged, a 5 kW measured PV output goes first to the heater (3 kW), and the battery takes
-  # what is left after the 0.5 kW base load. A measurement, not an irradiance inject: it outranks
-  # the PV model and every earlier inject, so the surplus is exactly what the scenario says.
-  Scenario: A PV surplus is absorbed in the declared order instead of being exported
+  # The ranked assets (EV, heater, shiftable loads, battery, in the order each declares; pinned by
+  # `controller/arbiter/tests/opportunistic_tests.rs`) take the whole surplus between them, and
+  # the battery takes what the heater leaves. How much the heater takes depends on its own state
+  # (a heater whose ceiling latch is set takes nothing), so the scenario asserts the sum. PV comes
+  # from a published measurement, which outranks the PV model and every earlier inject.
+  Scenario: A PV surplus is absorbed by the ranked assets instead of being exported
     Given the site has no PV, no EV charging, the heater in its band and the battery at 0.5 SoC
     And I set the VEN's objective to "opportunistic"
     And a PV measurement of 5 kW is published to the test Mosquitto broker for VEN-1
-    Then within 30 seconds the "heater" draws at least 2.5 kW
+    Then within 30 seconds the "heater" and the "battery" together draw at least 4 kW
     And within 30 seconds the "battery" draws at least 1 kW
     And the VEN net site power stays at or below 0.5 kW for 10 seconds within 30 seconds
 
