@@ -65,7 +65,8 @@ piecewise-linear, so a step is written as two points, `(lo, p)` and `(hi - e, p)
 next interval's `(hi, p_next)`. Below the first point the curve clamps to the first price (`value_at_fill`). Error: the
 ramp band of width e distorts at most e x battery_kwh x delta_p, about EUR 0.006 per knot at 60 kWh and a 0.10 EUR/kWh
 step; the round-trip test pins at most EUR 0.01. Alternative: points at interval midpoints - rejected, linear
-interpolation between them misses the knots the user typed.
+interpolation between them misses the knots the user typed. As built, a closing point at the last interval's end is added, and the read-back lists one point per stored fill
+inside the priced range plus the limit, so a linear ramp reads back as few rows (saving them turns the ramp into steps).
 
 **D6 - Spend input has its own route.** `POST /assets/:id/comfort_curve/spend` with
 `[{ fill, cumulative_max_cost_eur, max_marginal_co2? }]` returns 201 and the stored `ComfortCurveResponse`; 422 for a

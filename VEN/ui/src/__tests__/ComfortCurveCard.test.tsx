@@ -11,8 +11,17 @@ const roster = makeSim({ ev: {}, heater: {}, battery: {}, pv: {} });
 const mockCurveData = vi.fn(
   (): ComfortCurveResponse => ({ source: "default", rates: [] }),
 );
+const NO_COST: ComfortCurveCost = {
+  max_cost_eur: null,
+  energy_kwh: null,
+  planned_cost_eur: 0,
+  spend_points: null,
+  spend_from_fill: null,
+};
+const mockSetSpend = vi.fn(async () => ({}));
+let mockSetSpendError: Error | null = null;
 const mockCost = vi.fn(
-  (): ComfortCurveCost => ({ max_cost_eur: null, energy_kwh: null, planned_cost_eur: 0 }),
+  (): ComfortCurveCost => ({ ...NO_COST }),
 );
 const mockSetCurve = vi.fn(async () => ({}));
 let mockSetError: Error | null = null;
@@ -22,6 +31,11 @@ vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
   useComfortCurve: () => ({ data: mockCurveData() }),
   useComfortCurveCost: (assetId: string) => ({ data: assetId === "ev" ? mockCost() : undefined }),
+  useSetComfortCurveSpend: () => ({
+    mutateAsync: mockSetSpend,
+    isPending: false,
+    error: mockSetSpendError,
+  }),
   useSetComfortCurve: () => ({
     mutateAsync: mockSetCurve,
     isPending: false,
@@ -32,8 +46,10 @@ vi.mock("../api/hooks", () => ({
 
 describe("ComfortCurveCard", () => {
   beforeEach(() => {
-    mockCost.mockReturnValue({ max_cost_eur: null, energy_kwh: null, planned_cost_eur: 0 });
+    mockCost.mockReturnValue({ ...NO_COST });
     mockSetCurve.mockClear();
+    mockSetSpend.mockClear();
+    mockSetSpendError = null;
     mockSetError = null;
     mockDeleteCurve.mockClear();
     mockCurveData.mockReturnValue({
@@ -152,7 +168,7 @@ describe("ComfortCurveCard", () => {
 
   // comfort-curve-cost-and-spend-input, Part A: what the curve can cost beside what the plan spends.
   it("shows the most the curve can spend beside the plan's spend for the EV", () => {
-    mockCost.mockReturnValue({ max_cost_eur: 4, energy_kwh: 20, planned_cost_eur: 1.4 });
+    mockCost.mockReturnValue({ ...NO_COST, max_cost_eur: 4, energy_kwh: 20, planned_cost_eur: 1.4 });
     render(<ComfortCurveCard sim={roster} />);
     const cost = screen.getByTestId("comfort-cost");
     expect(cost).toHaveTextContent("Most this curve can spend");
@@ -172,8 +188,65 @@ describe("ComfortCurveCard", () => {
   });
 
   it("says charging was forced when the plan spends more than the curve can", () => {
-    mockCost.mockReturnValue({ max_cost_eur: 4, energy_kwh: 20, planned_cost_eur: 5.2 });
+    mockCost.mockReturnValue({ ...NO_COST, max_cost_eur: 4, energy_kwh: 20, planned_cost_eur: 5.2 });
     render(<ComfortCurveCard sim={roster} />);
     expect(screen.getByTestId("comfort-cost-forced")).toHaveTextContent("deadline");
+  });
+
+  // Part B: the same curve as the total you will pay, from the current charge.
+  const SPEND_COST: ComfortCurveCost = {
+    max_cost_eur: 2.5,
+    energy_kwh: 30,
+    planned_cost_eur: 0,
+    spend_from_fill: 0.2,
+    spend_points: [
+      { fill: 0.6, cumulative_max_cost_eur: 2.0, max_marginal_co2: 0 },
+      { fill: 0.8, cumulative_max_cost_eur: 2.5, max_marginal_co2: 0 },
+    ],
+  };
+
+  it("offers no spend view for an asset without spend points", () => {
+    render(<ComfortCurveCard sim={roster} />);
+    expect(screen.queryByTestId("comfort-mode-spend")).toBeNull();
+  });
+
+  it("shows the curve as the total you will pay, from the current charge", async () => {
+    const user = userEvent.setup();
+    mockCost.mockReturnValue(SPEND_COST);
+    render(<ComfortCurveCard sim={roster} />);
+    expect(screen.getByTestId("comfort-mode-spend")).toBeInTheDocument();
+    await user.click(screen.getByTestId("comfort-mode-spend"));
+    expect(screen.getByTestId("comfort-spend-fill-0")).toHaveValue(60);
+    expect(screen.getByTestId("comfort-spend-eur-0")).toHaveValue(2);
+    expect(screen.getByTestId("comfort-spend-eur-1")).toHaveValue(2.5);
+    expect(screen.getByTestId("comfort-spend-basis")).toHaveTextContent("from 20 % (current charge)");
+  });
+
+  it("saves edited spend rows through the spend route", async () => {
+    const user = userEvent.setup();
+    mockCost.mockReturnValue(SPEND_COST);
+    render(<ComfortCurveCard sim={roster} />);
+    await user.click(screen.getByTestId("comfort-mode-spend"));
+    const eur = screen.getByTestId("comfort-spend-eur-1");
+    await user.clear(eur);
+    await user.type(eur, "2.4");
+    await user.click(screen.getByTestId("comfort-save-btn"));
+    expect(mockSetSpend).toHaveBeenCalledWith({
+      assetId: "ev",
+      points: [
+        { fill: 0.6, cumulative_max_cost_eur: 2, max_marginal_co2: 0 },
+        { fill: 0.8, cumulative_max_cost_eur: 2.4, max_marginal_co2: 0 },
+      ],
+    });
+    expect(mockSetCurve).not.toHaveBeenCalled();
+  });
+
+  it("shows the reason the spend route gave", async () => {
+    const user = userEvent.setup();
+    mockCost.mockReturnValue(SPEND_COST);
+    mockSetSpendError = new Error("point 1: adds 0.200 per kWh");
+    render(<ComfortCurveCard sim={roster} />);
+    await user.click(screen.getByTestId("comfort-mode-spend"));
+    expect(screen.getByTestId("comfort-save-error")).toHaveTextContent("point 1: adds 0.200 per kWh");
   });
 });

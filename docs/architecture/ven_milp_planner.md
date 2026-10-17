@@ -445,6 +445,20 @@ spend is `entities::plan_cost::asset_planned_cost`, the one rule also behind a s
 estimated cost. `POST /assets/:id/comfort_curve/cost` pairs the two for any rows (a preview, nothing
 stored); the plan can exceed the maximum when a hard deadline forces charging the curve does not value.
 
+**Spend input.** A curve can be entered as cumulative spend from the current charge
+(`POST /assets/:id/comfort_curve/spend`). `entities/comfort_spend.rs` converts at the boundary: each
+interval's bid is its added spend over its energy (the asset declares the energy per fill and the
+current charge through `Asset::comfort_fill_span`), concavity of spend is the same rule as
+non-increasing bids, and the result goes through `validate_curve` and the ordinary override store, so
+the planner, the stored form and `GET` do not change. The stored curve is piecewise-linear, so a
+constant-price interval is two points, one at its start and one `STEP_GAP_FILL` (0.001 of fill) before
+its end, with a closing point at the last end; the gap misprices about €0.003 per knot at 60 kWh and a
+0.10 €/kWh step. The reverse view (`cumulative_spend_view`) sums the asset's own bands, never a second
+integral, and shows one point per stored fill inside the priced range plus the limit, so a linear
+ramp reads back as few rows. The spend is counted from the charge at the time of reading; the curve
+itself is in absolute state of charge. `budget_eur` / `max_total_cost_eur` are a separate, hard,
+per-session ceiling and are untouched.
+
 Regression coverage: `entities/asset.rs::comfort_rate_tests`, `ev_milp.rs`'s
 `from_state_by_deadline_soft_sources_v_core_eur_from_curve`/`..._falls_back_to_global_defaults`,
 `heater_milp.rs`'s `test_comfort_full_reward_*`/`from_state_sources_comfort_full_reward_*`,

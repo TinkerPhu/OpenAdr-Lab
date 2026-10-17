@@ -335,6 +335,14 @@ impl Asset for EvCharger {
         Some(super::ev_comfort::ev_comfort_bands(self, s.soc_frac, rates))
     }
 
+    fn comfort_fill_span(
+        &self,
+        state: &AssetState,
+    ) -> Option<crate::entities::comfort_spend::ComfortFillSpan> {
+        let s: &EvState = own(state);
+        Some(super::ev_comfort::ev_fill_span(self, s.soc_frac))
+    }
+
     fn default_completion_policy(&self) -> CompletionPolicy {
         crate::entities::asset::CompletionPolicy::Stop
     }

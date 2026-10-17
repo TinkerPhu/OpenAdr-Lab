@@ -35,6 +35,10 @@ fn comfort_curve_routes() -> Router<AppCtx> {
             "/assets/:asset_id/comfort_curve/cost",
             post(hems::post_comfort_curve_cost),
         )
+        .route(
+            "/assets/:asset_id/comfort_curve/spend",
+            post(hems::post_comfort_curve_spend),
+        )
 }
 
 pub fn build_router(ctx: AppCtx) -> Router {

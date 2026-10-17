@@ -5,7 +5,7 @@ import type {
   SensorSnapshot, SimInjectState, CreateUserRequestBody,
   UpdateEvSettingsBody, UpdateArbiterSettingsBody,
   CreateBaselineOverrideBody,
-  PlannerObjective, PlannerEvent, ComfortRate, UserNotificationSeverity,
+  PlannerObjective, PlannerEvent, ComfortRate, ComfortSpendPoint, UserNotificationSeverity,
   EventLogEntry,
 } from "./types";
 import { debugLog } from "@lab/ui/debugLog";
@@ -88,6 +88,19 @@ export function useSetComfortCurve() {
   return useMutation({
     mutationFn: ({ assetId, rates }: { assetId: string; rates: ComfortRate[] }) =>
       api.postComfortCurve(assetId, rates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["comfort_curve"] });
+      queryClient.invalidateQueries({ queryKey: ["comfort_curve_cost"] });
+    },
+  });
+}
+
+export function useSetComfortCurveSpend() {
+  const { api } = useVenContext();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ assetId, points }: { assetId: string; points: ComfortSpendPoint[] }) =>
+      api.postComfortCurveSpend(assetId, points),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["comfort_curve"] });
       queryClient.invalidateQueries({ queryKey: ["comfort_curve_cost"] });

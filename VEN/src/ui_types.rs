@@ -42,6 +42,7 @@ ui_types![
     crate::routes::hems::AssetLedgerHistory,
     crate::routes::hems::ComfortCurveResponse,
     crate::entities::comfort::ComfortCurveCost,
+    crate::entities::comfort_spend::ComfortSpendPoint,
     // System, signals, history, weather, measurement, notifications, arbiter, EV, flexibility
     // (increment 4)
     crate::routes::system::HealthResponse,

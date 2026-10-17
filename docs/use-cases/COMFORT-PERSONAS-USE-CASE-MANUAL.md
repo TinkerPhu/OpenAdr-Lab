@@ -286,6 +286,20 @@ wherever the curve is consulted; DELETE restores the default. Invalid curves
 Automated: the "A curve shows what it can cost beside what the plan spends" scenario in
 `tests/features/ven_comfort_curve.feature`.
 
+### Steps — entering the curve as a total (GB-53)
+
+12. In the card, switch the EV to **Total spend**. **Expected:** rows of *Reach (%)* and *Total (€)*,
+    counted from the EV's current charge, which the card names.
+13. Enter 50 % for €1.50 and 70 % for €2.00 and **Save**. **Expected:** the chip flips to `override`;
+    switching back to **Bid per kWh** shows the marginal bids the VEN derived (€1.50 over the energy
+    from the current charge to 50 %, and so on, constant within each step).
+14. Enter 40 % for €1.00 and 60 % for €3.00. **Expected:** Save is refused naming point 1 and the two
+    per-kWh figures, because the second step costs more per kWh than the first. The heater and
+    battery offer no Total spend view (422 from `POST /assets/heater/comfort_curve/spend`).
+
+Automated: the "A curve entered as the total you will pay" scenarios in
+`tests/features/ven_comfort_curve.feature`.
+
 ### Steps — the curve actually shapes the plan (BL-34)
 
 The curve reaches the MILP solver, not just `AssetRequestSlice` storage — a session's

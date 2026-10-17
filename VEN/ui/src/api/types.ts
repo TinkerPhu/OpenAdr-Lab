@@ -26,6 +26,7 @@ import type { ComfortCurveResponse } from "./generated/ComfortCurveResponse";
 import type { ComfortCurveSource } from "./generated/ComfortCurveSource";
 import type { ComfortRate } from "./generated/ComfortRate";
 import type { ComfortRateInput } from "./generated/ComfortRateInput";
+import type { ComfortSpendPoint } from "./generated/ComfortSpendPoint";
 import type { CommitmentDirection } from "./generated/CommitmentDirection";
 import type { ControlDescriptor } from "./generated/ControlDescriptor";
 import type { ControlKind } from "./generated/ControlKind";
@@ -146,6 +147,7 @@ export type {
   ComfortCurveSource,
   ComfortRate,
   ComfortRateInput,
+  ComfortSpendPoint,
   CommitmentDirection,
   ControlDescriptor,
   ControlKind,

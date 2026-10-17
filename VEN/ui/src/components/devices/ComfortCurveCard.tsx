@@ -11,6 +11,8 @@ import {
   IconButton,
   Stack,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
@@ -19,10 +21,12 @@ import {
   useComfortCurveCost,
   useDeleteComfortCurve,
   useSetComfortCurve,
+  useSetComfortCurveSpend,
 } from "../../api/hooks";
-import type { ComfortRate, SimSnapshot } from "../../api/types";
+import type { ComfortRate, ComfortSpendPoint, SimSnapshot } from "../../api/types";
 import { assetsInRosterOrder } from "../../api/assets";
 import { CurveChart } from "../charts/CurveChart";
+import { ComfortSpendRows } from "./ComfortSpendRows";
 
 /** The asset types a comfort curve prices, with what the curve's x axis means for each —
  *  declared per type rather than branched on at the field (`declare-dont-branch`). For an EV
@@ -46,6 +50,7 @@ export function ComfortCurveCard({ sim }: { sim: SimSnapshot | undefined }) {
   const assetId = chosenId ?? curveAssets[0]?.[0] ?? "";
   const { data } = useComfortCurve(assetId);
   const setMut = useSetComfortCurve();
+  const setSpendMut = useSetComfortCurveSpend();
   const deleteMut = useDeleteComfortCurve();
 
   // The editor shows the fetched curve until the user edits; local edits are
@@ -56,6 +61,13 @@ export function ComfortCurveCard({ sim }: { sim: SimSnapshot | undefined }) {
   const { data: cost } = useComfortCurveCost(assetId, rows);
   const setRows = (fn: (rs: ComfortRate[]) => ComfortRate[]) => setEdited(fn(rows));
 
+  // The total-spend view of the same curve: offered only where the asset declares what a unit of
+  // fill is worth in kWh (the response carries spend points), and edited locally like `edited`.
+  const [wantsSpend, setWantsSpend] = useState(false);
+  const [editedSpend, setEditedSpend] = useState<ComfortSpendPoint[] | null>(null);
+  const spendMode = wantsSpend && cost?.spend_points != null;
+  const spendRows = editedSpend ?? cost?.spend_points ?? [];
+
   function updateRow(i: number, patch: Partial<ComfortRate>) {
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   }
@@ -64,7 +76,12 @@ export function ComfortCurveCard({ sim }: { sim: SimSnapshot | undefined }) {
   const fillLabel = (assetType && FILL_LABEL_BY_TYPE[assetType]) ?? DEFAULT_FILL_LABEL;
   // The API refuses a rising curve and names the offending point; show that
   // rather than letting a failed save look like nothing happened.
-  const saveError = setMut.error instanceof Error ? setMut.error.message : null;
+  const activeSaveError = spendMode ? setSpendMut.error : setMut.error;
+  const saveError = activeSaveError instanceof Error ? activeSaveError.message : null;
+  const saveCurve = () =>
+    spendMode
+      ? setSpendMut.mutateAsync({ assetId, points: spendRows }).then(() => setEditedSpend(null))
+      : setMut.mutateAsync({ assetId, rates: rows }).then(() => setEdited(null));
 
   return (
     <Card data-testid="comfort-curve-card">
@@ -84,7 +101,7 @@ export function ComfortCurveCard({ sim }: { sim: SimSnapshot | undefined }) {
           select
           label="Asset"
           value={assetId}
-          onChange={(e) => { setAssetId(e.target.value); setEdited(null); }}
+          onChange={(e) => { setAssetId(e.target.value); setEdited(null); setEditedSpend(null); }}
           SelectProps={{ native: true }}
           size="small"
           sx={{ mb: 2 }}
@@ -96,10 +113,28 @@ export function ComfortCurveCard({ sim }: { sim: SimSnapshot | undefined }) {
             </option>
           ))}
         </TextField>
+        {cost?.spend_points != null && (
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={spendMode ? "spend" : "marginal"}
+            onChange={(_, v) => v && setWantsSpend(v === "spend")}
+            sx={{ mb: 1 }}
+          >
+            <ToggleButton value="marginal" data-testid="comfort-mode-marginal">
+              Bid per kWh
+            </ToggleButton>
+            <ToggleButton value="spend" data-testid="comfort-mode-spend">
+              Total spend
+            </ToggleButton>
+          </ToggleButtonGroup>
+        )}
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
           Each point is the most you will pay for the <em>next</em> kWh at that level of
-          fill — a marginal bid, not a total. Bids must not rise as fill increases;
-          a rising curve is rejected.
+          fill — a marginal bid. Bids must not rise as fill increases; a rising curve is
+          rejected.
+          {cost?.spend_points != null &&
+            " To say what you will pay in total to reach a level instead, switch to Total spend."}
         </Typography>
         <CurveChart rows={rows} />
         {cost?.max_cost_eur != null && (
@@ -124,7 +159,13 @@ export function ComfortCurveCard({ sim }: { sim: SimSnapshot | undefined }) {
             )}
           </Box>
         )}
-        {rows.length === 0 ? (
+        {spendMode ? (
+          <ComfortSpendRows
+            points={spendRows}
+            fromFill={cost?.spend_from_fill ?? null}
+            onChange={setEditedSpend}
+          />
+        ) : rows.length === 0 ? (
           <Typography color="text.secondary">No curve points</Typography>
         ) : (
           <Stack spacing={1} sx={{ mt: 2 }}>
@@ -190,10 +231,19 @@ export function ComfortCurveCard({ sim }: { sim: SimSnapshot | undefined }) {
           size="small"
           data-testid="comfort-add-btn"
           onClick={() =>
-            setRows((rs) => [
-              ...rs,
-              { fill: 1.0, max_marginal_price: 0.1, max_marginal_co2: 0 },
-            ])
+            spendMode
+              ? setEditedSpend([
+                  ...spendRows,
+                  {
+                    fill: Math.min(1, (spendRows[spendRows.length - 1]?.fill ?? cost?.spend_from_fill ?? 0) + 0.1),
+                    cumulative_max_cost_eur: spendRows[spendRows.length - 1]?.cumulative_max_cost_eur ?? 0,
+                    max_marginal_co2: 0,
+                  },
+                ])
+              : setRows((rs) => [
+                  ...rs,
+                  { fill: 1.0, max_marginal_price: 0.1, max_marginal_co2: 0 },
+                ])
           }
         >
           Add point
@@ -202,8 +252,8 @@ export function ComfortCurveCard({ sim }: { sim: SimSnapshot | undefined }) {
           size="small"
           variant="contained"
           data-testid="comfort-save-btn"
-          disabled={setMut.isPending || rows.length === 0}
-          onClick={() => setMut.mutateAsync({ assetId, rates: rows }).then(() => setEdited(null))}
+          disabled={setMut.isPending || setSpendMut.isPending || (spendMode ? spendRows : rows).length === 0}
+          onClick={saveCurve}
         >
           Save
         </Button>

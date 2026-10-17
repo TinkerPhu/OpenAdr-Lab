@@ -11,7 +11,7 @@ import type {
   HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent, HistoryPage,
   ForecastAccuracyRow, ForecastAccuracySample, PlanHistoryRow, PlanHistorySample,
   TickSample, GridSample, EventReceived, ReportSent,
-  UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, ComfortCurveCost, SignalsState,
+  UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, ComfortCurveCost, ComfortSpendPoint, SignalsState,
   HealthResponse, VtnStatusResponse, TaskStatusEntry, EventLogEntry,
   OadrReportObligation, AssetCapabilityView, AssetForecast,
   MeasurementResponse,
@@ -28,6 +28,17 @@ function toAssetTimelinePoint(pt: TimelinePointBody): AssetTimelinePoint {
 let reqCounter = 0;
 function requestId(): string {
   return `${Date.now()}-${++reqCounter}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** The validator refuses a bad curve and names the offending point in `{"error": ...}` — that
+ *  text is the whole point of the rejection, so it must survive to the editor rather than
+ *  collapse into a status code. */
+async function rejectionReason(r: Response, fallback: string): Promise<string> {
+  const detail = await r
+    .json()
+    .then((b) => (b && typeof b.error === "string" ? b.error : null))
+    .catch(() => null);
+  return detail ?? fallback;
 }
 
 export class VenApi {
@@ -133,16 +144,17 @@ export class VenApi {
 
   async postComfortCurve(assetId: string, rates: ComfortRate[]): Promise<ComfortCurveResponse> {
     const r = await this.jsonReq("POST", `/assets/${assetId}/comfort_curve`, rates);
-    if (!r.ok) {
-      // The validator refuses a rising curve and names the offending point in
-      // `{"error": ...}` — that text is the whole point of the rejection, so it
-      // must survive to the editor rather than collapse into a status code.
-      const detail = await r
-        .json()
-        .then((b) => (b && typeof b.error === "string" ? b.error : null))
-        .catch(() => null);
-      throw new Error(detail ?? `comfort_curve ${r.status}`);
-    }
+    if (!r.ok) throw new Error(await rejectionReason(r, `comfort_curve ${r.status}`));
+    return r.json();
+  }
+
+  /** Install a curve given as cumulative spend from the asset's current charge. */
+  async postComfortCurveSpend(
+    assetId: string,
+    points: ComfortSpendPoint[],
+  ): Promise<ComfortCurveResponse> {
+    const r = await this.jsonReq("POST", `/assets/${assetId}/comfort_curve/spend`, points);
+    if (!r.ok) throw new Error(await rejectionReason(r, `comfort_curve_spend ${r.status}`));
     return r.json();
   }
 

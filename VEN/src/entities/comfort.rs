@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use ts_rs::TS;
 
 use super::asset::ComfortRate;
+use super::comfort_spend::{cumulative_spend_view, ComfortFillSpan, ComfortSpendPoint};
 
 /// Bid-price sanity bound [€/kWh] — an order of magnitude above any real tariff.
 const MAX_BID_EUR_KWH: f64 = 10.0;
@@ -101,12 +102,17 @@ pub struct ComfortCurveCost {
     pub max_cost_eur: Option<f64>,
     pub energy_kwh: Option<f64>,
     pub planned_cost_eur: f64,
+    /// The same curve as cumulative spend from the asset's current charge (`None` where the
+    /// asset declares no span): what the card shows in its spend view.
+    pub spend_points: Option<Vec<ComfortSpendPoint>>,
+    /// The fill those spend points are counted from (the asset's current charge).
+    pub spend_from_fill: Option<f64>,
 }
 
 /// The card's two numbers from the asset's own `bands` and the active plan: the one place
 /// that pairs a curve's maximum with the plan's spend.
 pub fn comfort_curve_cost(
-    bands: Option<&[EnergyBand]>,
+    curve: &ComfortCurveBasis<'_>,
     plan: Option<&super::plan::Plan>,
     asset_id: &str,
 ) -> ComfortCurveCost {
@@ -116,11 +122,24 @@ pub fn comfort_curve_cost(
             super::plan_cost::asset_planned_cost(&p.slots, asset_id, until)
         })
         .map_or(0.0, |(cost_eur, _co2_g)| cost_eur);
+    let bands = curve.bands;
     ComfortCurveCost {
         max_cost_eur: bands.map(max_cost_eur),
         energy_kwh: bands.map(bands_energy_kwh),
         planned_cost_eur,
+        spend_points: bands
+            .zip(curve.span)
+            .map(|(bands, span)| cumulative_spend_view(curve.rates, bands, span)),
+        spend_from_fill: curve.span.map(|span| span.from_fill),
     }
+}
+
+/// What the asset declared about a curve: its priced bands and its fill span, with the curve
+/// itself. Both declarations are `None` together for an asset that prices nothing by a curve.
+pub struct ComfortCurveBasis<'a> {
+    pub rates: &'a [ComfortRate],
+    pub bands: Option<&'a [EnergyBand]>,
+    pub span: Option<&'a ComfortFillSpan>,
 }
 
 /// The curve planning should use: the user override when present, the
@@ -287,7 +306,15 @@ mod tests {
             kwh: 10.0,
             eur_per_kwh: 0.30,
         }];
-        let c = comfort_curve_cost(Some(&bands), Some(&plan), "ev");
+        let c = comfort_curve_cost(
+            &ComfortCurveBasis {
+                rates: &[],
+                bands: Some(&bands),
+                span: None,
+            },
+            Some(&plan),
+            "ev",
+        );
         assert_eq!(c.max_cost_eur, Some(3.0));
         assert_eq!(c.energy_kwh, Some(10.0));
         assert!((c.planned_cost_eur - 1.0).abs() < 1e-9, "{c:?}");
@@ -295,13 +322,23 @@ mod tests {
 
     #[test]
     fn comfort_curve_cost_is_zero_planned_without_an_allocation_and_has_no_maximum_without_bands() {
-        let c = comfort_curve_cost(None, None, "heater");
+        let c = comfort_curve_cost(
+            &ComfortCurveBasis {
+                rates: &[],
+                bands: None,
+                span: None,
+            },
+            None,
+            "heater",
+        );
         assert_eq!(
             c,
             ComfortCurveCost {
                 max_cost_eur: None,
                 energy_kwh: None,
-                planned_cost_eur: 0.0
+                planned_cost_eur: 0.0,
+                spend_points: None,
+                spend_from_fill: None
             }
         );
     }

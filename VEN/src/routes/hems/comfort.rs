@@ -21,6 +21,7 @@ use ts_rs::TS;
 use crate::app_ctx::{Settings, SimRead};
 use crate::entities::asset::ComfortRate;
 use crate::entities::comfort::ComfortCurveSource;
+use crate::entities::comfort_spend::{rates_from_cumulative_spend, ComfortSpendPoint};
 use crate::state::AppState;
 
 /// `GET` / `POST /assets/:id/comfort_curve`: the effective curve and where it comes from.
@@ -53,9 +54,9 @@ pub async fn get_comfort_curve(
     Json(ComfortCurveResponse { source, rates }).into_response()
 }
 
-/// POST /assets/:id/comfort_curve/cost: what the given curve can cost for the energy ahead and
-/// what the active plan spends on the asset. A preview: nothing is stored, so the card can
-/// show it for rows that are not saved yet.
+/// POST /assets/:id/comfort_curve/cost: what the given curve can cost for the energy ahead,
+/// the same curve as cumulative spend, and what the active plan spends on the asset. A preview:
+/// nothing is stored, so the card can show it for rows that are not saved yet.
 pub async fn post_comfort_curve_cost(
     State(sim_read): State<SimRead>,
     State(state): State<AppState>,
@@ -69,31 +70,57 @@ pub async fn post_comfort_curve_cost(
         return crate::routes::error::error_response(StatusCode::UNPROCESSABLE_ENTITY, e);
     }
     let bands = sim_read.comfort_bands(&asset_id, &rates).await;
+    let span = sim_read.comfort_fill_span(&asset_id).await;
     let plan = state.active_plan().await;
     Json(crate::entities::comfort::comfort_curve_cost(
-        bands.as_deref(),
+        &crate::entities::comfort::ComfortCurveBasis {
+            rates: &rates,
+            bands: bands.as_deref(),
+            span: span.as_ref(),
+        },
         plan.as_ref(),
         &asset_id,
     ))
     .into_response()
 }
 
-/// POST /assets/:id/comfort_curve
-pub async fn post_comfort_curve(
+/// POST /assets/:id/comfort_curve/spend: install a curve given as cumulative spend from the
+/// asset's current charge. It becomes the marginal curve the planner reads and is stored like any
+/// override; an asset that declares no energy per fill is refused.
+pub async fn post_comfort_curve_spend(
     State(sim_read): State<SimRead>,
     State(state): State<AppState>,
     State(settings): State<Settings>,
     Path(asset_id): Path<String>,
-    Json(rates): Json<Vec<ComfortRate>>,
+    Json(points): Json<Vec<ComfortSpendPoint>>,
 ) -> impl IntoResponse {
     if default_rates(sim_read.as_ref(), &asset_id).await.is_none() {
         return crate::routes::error::unknown_asset(&asset_id);
     }
+    let Some(span) = sim_read.comfort_fill_span(&asset_id).await else {
+        return crate::routes::error::error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("spend input is not available for asset {asset_id}"),
+        );
+    };
+    match rates_from_cumulative_spend(&points, &span) {
+        Ok(rates) => install_override(&state, settings, &asset_id, rates).await,
+        Err(e) => crate::routes::error::error_response(StatusCode::UNPROCESSABLE_ENTITY, e),
+    }
+}
+
+/// Validate, store and persist a curve as the asset's override: the answer both POST routes give.
+async fn install_override(
+    state: &AppState,
+    settings: Option<std::sync::Arc<dyn crate::controller::SettingsPort>>,
+    asset_id: &str,
+    rates: Vec<ComfortRate>,
+) -> axum::response::Response {
     match crate::services::comfort::set_override(
-        &state,
-        settings.clone(),
+        state,
+        settings,
         Utc::now(),
-        &asset_id,
+        asset_id,
         rates.clone(),
     )
     .await
@@ -111,6 +138,20 @@ pub async fn post_comfort_curve(
         }
         Err(e) => crate::routes::error::error_response(StatusCode::UNPROCESSABLE_ENTITY, e),
     }
+}
+
+/// POST /assets/:id/comfort_curve
+pub async fn post_comfort_curve(
+    State(sim_read): State<SimRead>,
+    State(state): State<AppState>,
+    State(settings): State<Settings>,
+    Path(asset_id): Path<String>,
+    Json(rates): Json<Vec<ComfortRate>>,
+) -> impl IntoResponse {
+    if default_rates(sim_read.as_ref(), &asset_id).await.is_none() {
+        return crate::routes::error::unknown_asset(&asset_id);
+    }
+    install_override(&state, settings.clone(), &asset_id, rates).await
 }
 
 /// DELETE /assets/:id/comfort_curve

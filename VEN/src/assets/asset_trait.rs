@@ -10,6 +10,7 @@ use crate::entities::asset::{
 };
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
 use crate::entities::comfort::EnergyBand;
+use crate::entities::comfort_spend::ComfortFillSpan;
 use crate::entities::device_session::EvSession;
 use crate::entities::ev_usage::EvUsageSimState;
 
@@ -197,6 +198,13 @@ pub trait Asset: Send + Sync {
         _state: &AssetState,
         _rates: &[ComfortRate],
     ) -> Option<Vec<EnergyBand>> {
+        None
+    }
+
+    /// Where this asset's priced energy starts and stops, and what a unit of fill is worth in
+    /// kWh: what turns a cumulative spend into marginal bids. `None` (the default) for an asset
+    /// that does not price energy by a comfort curve.
+    fn comfort_fill_span(&self, _state: &AssetState) -> Option<ComfortFillSpan> {
         None
     }
 

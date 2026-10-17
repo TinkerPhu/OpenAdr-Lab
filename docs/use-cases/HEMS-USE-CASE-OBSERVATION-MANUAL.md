@@ -1103,6 +1103,21 @@ is priced by the curve at the SoC that kWh takes it through.
 10th has no reading here, and the editor's Save is refused with a message naming the point. Equal
 (flat) or falling is accepted.
 
+### What the curve can cost, and entering it as a total
+
+Under the chart the card shows **Most this curve can spend** (for the kWh from the EV's current
+charge to its limit, money bid only) and **Planned (current plan)**, what the active plan spends on
+the EV. Edit a bid and the maximum follows before you save. The plan can spend more than the maximum
+when a firm deadline forces charging the curve does not value; the card says so.
+
+For an EV, **Total spend** lets you give the curve the way people think of it: "I will pay €1.50 in
+total to reach 50 %, €2.00 to reach 70 %". Totals are counted from the **current charge** (shown on
+the card), each step may cost no more per kWh than the one before, and the VEN stores it as the
+marginal bids it plans on. The curve stays in absolute state of charge, so the same totals mean
+something different once the car is at a different charge: the card always shows the stored curve
+back as totals from the charge it has now. A total is not a budget; the request's budget is a
+separate field.
+
 ### Reading the plan against the curve
 
 Charging happens in a slot when the curve's bid at that SoC is **at least the cost of the energy
