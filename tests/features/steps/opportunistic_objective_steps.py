@@ -85,15 +85,6 @@ def step_site_with_plugged_ev(context, soc, battery_soc):
     r.raise_for_status()
 
 
-@when("PV generates {kw:g} kW against the {base_kw:g} kW base load")
-def step_pv_generates(context, kw, base_kw):
-    # The test profile's array is rated 5 kW. A forced irradiance decays over about 47
-    # minutes, so it holds for the seconds this scenario watches.
-    rated_kw = ven_get("/sim").json()["assets"]["pv"].get("rated_kw", 5.0)
-    r = ven_post("/sim/inject", json={"pv_irradiance": kw / rated_kw, "base_load_kw": base_kw})
-    r.raise_for_status()
-
-
 def _asset_kw(asset_id):
     r = ven_get("/sim")
     if not r.ok:
@@ -112,13 +103,25 @@ def step_asset_draws_at_least(context, seconds, asset_id, kw):
     )
 
 
-@then('the "{asset_id}" draws at most {kw:g} kW for {seconds:d} seconds')
-def step_asset_draws_at_most(context, asset_id, kw, seconds):
+@then('the "{asset_id}" stays at or below {kw:g} kW for {hold_s:d} seconds within {seconds:d} seconds')
+def step_asset_held_at_most(context, asset_id, kw, hold_s, seconds):
+    # A charger applies a command a tick late, so whatever the previous scenario left pending
+    # lands first; the claim is that it settles there and stays.
     deadline = time.time() + seconds
+    held_since = None
+    last = None
     while time.time() < deadline:
-        p = _asset_kw(asset_id)
-        assert p is None or p <= kw, f"{asset_id} drew {p} kW, more than {kw} kW"
+        last = _asset_kw(asset_id)
+        if last is not None and last <= kw:
+            held_since = held_since or time.time()
+            if time.time() - held_since >= hold_s:
+                return
+        else:
+            held_since = None
         time.sleep(1)
+    raise AssertionError(
+        f"{asset_id} not held at or below {kw} kW for {hold_s}s within {seconds}s (last {last} kW)"
+    )
 
 
 @then(

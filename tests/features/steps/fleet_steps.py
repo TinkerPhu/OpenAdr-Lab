@@ -254,6 +254,7 @@ def step_fleet_chart_has_a_line_per_ven(context):
     legend = page.locator('[data-testid^="legend-entry-"]')
     labels = {legend.nth(i).inner_text().strip() for i in range(legend.count())}
     context.fleet_legend_labels = labels
+    context.fleet_reporting_vens = reporting
     missing = [name for name in reporting if name not in labels]
     assert not missing, f"reporting VENs missing from the chart legend: {missing} (legend: {labels})"
     assert "fleet total" in labels, f"the fleet total is not drawn: {labels}"
@@ -294,7 +295,9 @@ def step_fleet_page_does_not_deny_reporting_vens(context):
 @then("hiding a VEN in the legend removes its line")
 def step_hiding_a_ven_removes_its_line(context):
     page = context.ui.page
-    name = sorted(n for n in context.fleet_legend_labels if n != "fleet total")[0]
+    # A VEN's line, toggled by its own key (= its name). The legend also holds the fleet total and
+    # the forecast overlays, whose labels are not their keys.
+    name = sorted(context.fleet_reporting_vens)[0]
     before = page.locator('[data-testid="fleet-power-chart"] .recharts-line').count()
     page.click(f'[data-testid="legend-toggle-{name}"]')
     page.wait_for_timeout(500)

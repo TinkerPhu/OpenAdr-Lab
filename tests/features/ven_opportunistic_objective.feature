@@ -11,11 +11,16 @@ Feature: Running without planning (opportunistic objective, UC-19)
     Then GET /plan/objective reports "opportunistic" set by "ven_ui"
     And within 90 seconds the VEN adopts a "SIMULATED" plan under "opportunistic" with slots
 
-  Scenario: A PV surplus charges the battery instead of being exported
+  # The order is declared by each asset (EV, heater, shiftable loads, battery). With the EV
+  # unplugged, a 5 kW measured PV output goes first to the heater (3 kW), and the battery takes
+  # what is left after the 0.5 kW base load. A measurement, not an irradiance inject: it outranks
+  # the PV model and every earlier inject, so the surplus is exactly what the scenario says.
+  Scenario: A PV surplus is absorbed in the declared order instead of being exported
     Given the site has no PV, no EV charging, the heater in its band and the battery at 0.5 SoC
     And I set the VEN's objective to "opportunistic"
-    When PV generates 4 kW against the 0.5 kW base load
-    Then within 30 seconds the "battery" draws at least 2.5 kW
+    And a PV measurement of 5 kW is published to the test Mosquitto broker for VEN-1
+    Then within 30 seconds the "heater" draws at least 2.5 kW
+    And within 30 seconds the "battery" draws at least 1 kW
     And the VEN net site power stays at or below 0.5 kW for 10 seconds within 30 seconds
 
   Scenario: The battery covers import and never exports
@@ -34,7 +39,7 @@ Feature: Running without planning (opportunistic objective, UC-19)
     Given the site has no PV, the EV plugged at 0.3 SoC, the heater in its band and the battery at 0.1 SoC
     And I set the VEN's objective to "opportunistic"
     When I POST a mode EV session with mode "OPPORTUNISTIC" and no budget
-    Then the "ev" draws at most 0.1 kW for 20 seconds
+    Then the "ev" stays at or below 0.1 kW for 20 seconds within 40 seconds
 
   Scenario: An import limit bounds a start-now EV request
     Given limit enforcement is enabled
