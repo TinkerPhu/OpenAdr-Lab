@@ -251,6 +251,25 @@ timeline, step durations, log tails, and an estimated finish time per ticket (me
 same class, chained through the queue). The same data is at `/api/summary` and `/api/tickets`; the routes are in
 `ci/README.md`, the behaviour is pinned by `ci/test_web.py`.
 
+### Suite selection
+
+The runner does not run every suite for every ticket. `ci/suites.map` names, per path pattern, the
+suites a change there can affect (`cargo` = the VEN cargo tier, `rust-vtn` = `--rust`, `e2e`,
+`resilience`, `all`, or `-` for none); the first matching rule wins and a ticket runs the union over
+its changed paths. A path no rule names runs everything (the map ends in `*  all`), so a new
+directory is tested in full until someone writes a rule for it. Rules say what a path *cannot*
+affect, so write one only when you can name that, e.g. a UI change cannot affect the VEN cargo tier
+or the openleadr-rs tests, but it does reach E2E (the stack builds both UIs and drives them in a
+browser). The audits and the CI mechanism's own tests (`ci/test_*.sh`) always run.
+
+`result.md` and the CI board show, per ticket, the suites run, the suites skipped and the paths that
+decided it. A `--tiers quick` ticket that selected `e2e`, `resilience` or `rust-vtn` is `green`, not
+merged: a suite the change needs did not run. Because a wrong skip would pass unnoticed, the
+`full-suite-main` job in `jobs.json` runs the full suite on `main` every 7 days.
+`run_all_tests.sh` prints the seconds each suite took on its verdict line; read them from `full.log`
+to see what a skipped suite would have cost. Behaviour is pinned by `ci/test_board.sh` (map and
+selection), `ci/test_runner.sh` (runner and `result.md`) and `ci/test_web.py` (board).
+
 ### Picking the result up
 
 ```bash
@@ -297,9 +316,9 @@ Every build and test run costs minutes to hours on shared hardware, so start non
 - Look for warm caches and volumes before any build that would start cold. A new compose project
   or a renamed volume starts empty: the first runner ticket compiled every dependency twice for
   that reason.
-- A change the suites cannot see (docs, wiki, openspec, `.claude/`, `ci/`) needs no Rust or
-  E2E run; the runner takes it in minutes (audits plus the CI mechanism tests,
-  `board_docs_only` in `ci/board.sh`).
+- A change the suites cannot see needs only the suites it can reach: the runner reads the changed
+  paths against `ci/suites.map` (see "Suite selection" below). Docs, wiki, openspec, `.claude/` and
+  `ci/` need no Rust or E2E run; the runner takes them in minutes.
 - The board is one lane: a run that will not merge (A/B, experiment) goes to Node2 by hand, not
   onto the board (`test-host-preference`).
 - While working run the narrowest test that proves the change; the full gate belongs to the runner.

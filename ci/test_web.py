@@ -19,8 +19,15 @@ RESULT = """# CI result: T
 
 - verdict: **red** — cargo test failed
 - branch: fix/x   requested: aaaa   tested: bbbb
-- tiers: quick,full   kind: merge   docs-only: no   attempt: 1
+- tiers: quick,full   kind: merge   attempt: 1
 - finished: 2026-10-17T07:10:00Z
+
+## Suites
+
+- run: cargo e2e
+- skipped: resilience rust-vtn
+- decided by:
+  - VEN/src/a.rs -> cargo e2e resilience
 
 | step | exit | seconds |
 |---|---|---|
@@ -80,6 +87,16 @@ class WebApi(unittest.TestCase):
              {"name": "cargo test", "exit": 101, "seconds": 124}],
             r["steps"],
         )
+
+    def test_suites_run_and_skipped_are_read(self):
+        r = ci_web.parse_result(RESULT)
+        self.assertEqual(["cargo", "e2e"], r["suites_run"])
+        self.assertEqual(["resilience", "rust-vtn"], r["suites_skipped"])
+
+    def test_no_suites_block_means_unknown_and_none_means_empty(self):
+        self.assertIsNone(ci_web.parse_result("# x\n")["suites_run"])
+        r = ci_web.parse_result("- run: (none)\n- skipped: cargo e2e\n")
+        self.assertEqual([], r["suites_run"])
 
     def test_finished_ticket_has_duration(self):
         name = "20261017T0700Z_09fb9c63_fix-x"

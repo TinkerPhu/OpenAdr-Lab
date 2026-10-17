@@ -16123,3 +16123,19 @@ was only visible through `ci-next.sh --all`.
 **Learnings.** The CI cannot test its own move: the installed runner is the previous version and calls the old
 audit paths, so the cutover is a manual merge plus `install.sh` with an empty queue. `board_docs_only` had to keep
 `ci/audits/` and `ci/locks/` as code: the suites and the gates use them, unlike the runner scripts.
+
+## CI suite selection (refactor/ci-suite-selection, openspec ci-suite-selection)
+
+**What.** The runner no longer runs every suite for every ticket. `ci/suites.map` names, per path pattern, the
+suites a change can affect (`cargo`, `rust-vtn`, `e2e`, `resilience`); `board_suites` in `ci/board.sh` is the one
+function that reads it (it replaced `board_docs_only`, and the `DOCS_ONLY` flag in the runner is now the
+empty set). `quick_tier` and `full_tier` take the set; `result.md` has a `## Suites` block and the CI board shows
+chips per ticket. `run_all_tests.sh` prints the seconds each suite took. A `full-suite-main` job (7 days) audits
+the skips. Tests: `ci/test_board.sh`, new `ci/test_runner.sh`, `ci/test_web.py`.
+
+**Why.** A VEN-only change cannot affect the openleadr-rs tests; a UI-only change cannot affect the VEN cargo
+tier or resilience. Everything else ran anyway, at about 67 minutes a ticket.
+
+**Learnings.** The planning premise "a UI change skips E2E" was wrong: E2E builds both UIs and drives them with
+browser steps. The saving is the suites that are independent, not the UI. The runner has never run the UI unit
+tests (R-126). The old `full.log` files had no per-suite timing, so the measured baseline starts with this change.
