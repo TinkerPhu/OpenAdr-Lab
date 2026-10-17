@@ -269,7 +269,7 @@ def _cleanup_vtn_resources(context):
     """Delete all VTN events and programs created during this scenario.
 
     Prevents capacity-limit events (and other persistent events) from leaking
-    across scenarios and poisoning parse_capacity_state's global-minimum logic.
+    across scenarios and poisoning the capacity schedule every VEN reads.
     Also deletes programs so UI scenarios can re-run without 409 conflicts.
     """
     try:

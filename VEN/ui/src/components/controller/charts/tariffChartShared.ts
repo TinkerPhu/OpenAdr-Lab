@@ -19,6 +19,8 @@ export function toRow(p: TariffTimePoint): TimestampedRow {
       gridPowerKw: p.gridPowerKw,
       importLimitKw: p.importLimitKw,
       exportLimitKw: p.exportLimitKw,
+      importAllowanceKw: p.importAllowanceKw,
+      exportAllowanceKw: p.exportAllowanceKw,
     },
   };
 }

@@ -2,6 +2,7 @@
 //! lives in `detect.rs` (split out under R-64 to stay under the `tasks/`
 //! 200-production-line cap); this file is the impure I/O loop that drives it.
 
+mod capacity_picture;
 mod detect;
 
 use chrono::Utc;
@@ -114,7 +115,7 @@ pub(crate) fn spawn_event_poll(
 
                     // Read before the trace_events vec is consumed by the for loop.
                     let plan_trigger = changes.plan_trigger();
-                    let next_capacity = changes.capacity_picture();
+                    let next_capacity = changes.capacity_picture(now);
                     // Same reason, same place: which events moved, so a replan
                     // can be attributed to them rather than to "something
                     // changed around then" (§6.3). The trace entries already
@@ -143,9 +144,8 @@ pub(crate) fn spawn_event_poll(
                     prev_tariff_count = changes.rates.len();
 
                     state.set_planned_tariffs(changes.rates).await;
-                    state.set_capacity_state(changes.capacity).await;
                     state
-                        .set_planned_capacity_limits(changes.capacity_schedule)
+                        .set_planned_capacity_limits(changes.capacity_schedule, now)
                         .await;
 
                     // WP3.1/3.2/3.4: apply alert/SIMPLE/dispatch/charge-state

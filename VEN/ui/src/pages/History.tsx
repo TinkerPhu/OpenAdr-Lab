@@ -177,6 +177,8 @@ export function HistoryPage() {
         gridPowerKw: row.import_kw - row.export_kw,
         importLimitKw: row.import_limit_kw,
         exportLimitKw: row.export_limit_kw,
+        importAllowanceKw: null,
+        exportAllowanceKw: null,
       })),
     [grid]
   );

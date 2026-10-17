@@ -3,10 +3,13 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::entities::capacity_curve::CommitmentDirection;
 use lab_core::time_window::TimeWindow;
 
-/// Capacity state in force now, derived from the listed OpenADR events
-/// (`controller::openadr_interface::parse_capacity_state`, GB-48).
+/// The capacity state in force at one moment — the API view (`GET /capacity`, `GET /signals`) of the
+/// capacity schedule, built by `OadrCapacityState::at` when asked and never stored (GB-48): every
+/// value is the schedule read at that moment's own time, so it changes at its interval boundary and
+/// not at the next event poll.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, TS)]
 pub struct OadrCapacityState {
     /// Import limit in force at the last poll (kW); None = no limit now. A
@@ -32,129 +35,63 @@ pub struct OadrCapacityState {
 }
 
 impl OadrCapacityState {
-    /// This state with the sim-injected grid limits standing in where no VTN
-    /// event supplies one — a manual limit substitutes for a VTN directive,
-    /// it never overrides one.
-    ///
-    /// Composing two entity values is the domain's own business; this lived
-    /// in `tasks/sim_tick/helpers.rs` only because the tick was the first
-    /// caller to need it.
-    pub fn with_sim_injected_limits(
-        &self,
+    /// The capacity state in force at `now`, read from `schedule`: the limits through
+    /// `effective_capacity_limit` (a VTN limit, else a sim-injected stand-in), the subscription
+    /// and reservation of the segment covering `now`. `last_updated` is the last event poll that
+    /// listed capacity payloads — a fact about the poll, which the schedule does not carry.
+    pub fn at(
+        schedule: &[CapacitySnapshot],
         inject: &crate::entities::sim_inject::SimInjectState,
+        now: DateTime<Utc>,
+        last_updated: Option<DateTime<Utc>>,
     ) -> Self {
-        let mut out = self.clone();
-        if out.import_limit_event_id.is_none() {
-            if let Some(kw) = inject.grid_import_limit_kw {
-                out.import_limit_kw = Some(kw);
-            }
-        }
-        if out.export_limit_event_id.is_none() {
-            if let Some(kw) = inject.grid_export_limit_kw {
-                out.export_limit_kw = Some(kw);
-            }
-        }
-        out
-    }
-
-    /// The contracted import allowance (kW), or `INFINITY` when the VTN has
-    /// declared neither a subscription nor a reservation.
-    ///
-    /// WP3.3 (§8.10): subscription + reservation form one contracted allowance
-    /// that binds when tighter than the event limit / physical bound and is
-    /// inactive when looser. Either one counts alone. `INFINITY` is the honest
-    /// "uncapped" value here, not a sentinel: it makes the `.min(allowance)` at
-    /// the planner's slot cap and the "is anything binding?" question below
-    /// both come out right without either caller special-casing `None`.
-    ///
-    /// Lives on the entity because two rings now ask it — the planner's slot
-    /// cap (`controller::milp_planner::inputs`) and the reservation request the
-    /// VEN reports back (`entities::reservation_request`). It was a closure
-    /// inside `build_milp_inputs` while the planner was the only caller.
-    pub fn import_allowance_kw(&self) -> f64 {
-        Self::allowance(self.import_subscription_kw, self.import_reservation_kw)
-    }
-
-    /// The contracted export allowance (kW). See `import_allowance_kw`.
-    pub fn export_allowance_kw(&self) -> f64 {
-        Self::allowance(self.export_subscription_kw, self.export_reservation_kw)
-    }
-
-    fn allowance(subscription_kw: Option<f64>, reservation_kw: Option<f64>) -> f64 {
-        match (subscription_kw, reservation_kw) {
-            (None, None) => f64::INFINITY,
-            (s, r) => s.unwrap_or(0.0) + r.unwrap_or(0.0),
-        }
-    }
-}
-
-#[cfg(test)]
-mod injected_limit_tests {
-    use super::*;
-    use crate::entities::sim_inject::SimInjectState;
-
-    fn inject(import_kw: Option<f64>, export_kw: Option<f64>) -> SimInjectState {
-        SimInjectState {
-            grid_import_limit_kw: import_kw,
-            grid_export_limit_kw: export_kw,
-            ..SimInjectState::default()
-        }
-    }
-
-    #[test]
-    fn an_injected_limit_stands_in_when_no_vtn_event_supplies_one() {
-        let state = OadrCapacityState::default();
-        let out = state.with_sim_injected_limits(&inject(Some(7.0), Some(3.0)));
-        assert_eq!(out.import_limit_kw, Some(7.0));
-        assert_eq!(out.export_limit_kw, Some(3.0));
-    }
-
-    #[test]
-    fn a_vtn_limit_is_never_overridden_by_an_injected_one() {
-        let state = OadrCapacityState {
-            import_limit_kw: Some(5.0),
-            import_limit_event_id: Some("evt-1".into()),
-            ..OadrCapacityState::default()
+        let limit = |direction| effective_capacity_limit(schedule, inject, direction, now, now);
+        let at_now = |value: fn(&CapacitySnapshot) -> Option<f64>| {
+            tightest_over(schedule, now, now, |s| {
+                value(s).map(|limit_kw| CapacityLimit {
+                    limit_kw,
+                    event_id: None,
+                })
+            })
+            .map(|l| l.limit_kw)
         };
-        let out = state.with_sim_injected_limits(&inject(Some(7.0), None));
-        assert_eq!(
-            out.import_limit_kw,
-            Some(5.0),
-            "a manual limit substitutes for a VTN directive, never overrides one"
+        let (import, export) = (
+            limit(CommitmentDirection::Import),
+            limit(CommitmentDirection::Export),
         );
-    }
-
-    #[test]
-    fn each_direction_is_decided_on_its_own_event_id() {
-        // An import event in force must not stop an injected *export* limit.
-        let state = OadrCapacityState {
-            import_limit_kw: Some(5.0),
-            import_limit_event_id: Some("evt-1".into()),
-            ..OadrCapacityState::default()
-        };
-        let out = state.with_sim_injected_limits(&inject(Some(7.0), Some(3.0)));
-        assert_eq!(out.import_limit_kw, Some(5.0));
-        assert_eq!(out.export_limit_kw, Some(3.0));
-    }
-
-    #[test]
-    fn no_injection_changes_nothing() {
-        let state = OadrCapacityState {
-            import_limit_kw: Some(5.0),
-            ..OadrCapacityState::default()
-        };
-        let out = state.with_sim_injected_limits(&inject(None, None));
-        assert_eq!(out.import_limit_kw, Some(5.0));
-        assert_eq!(out.export_limit_kw, None);
+        Self {
+            import_limit_kw: import.as_ref().map(|l| l.limit_kw),
+            export_limit_kw: export.as_ref().map(|l| l.limit_kw),
+            import_subscription_kw: at_now(|s| s.import_subscription_kw),
+            import_reservation_kw: at_now(|s| s.import_reservation_kw),
+            export_subscription_kw: at_now(|s| s.export_subscription_kw),
+            export_reservation_kw: at_now(|s| s.export_reservation_kw),
+            import_limit_event_id: import.and_then(|l| l.event_id),
+            export_limit_event_id: export.and_then(|l| l.event_id),
+            last_updated,
+        }
     }
 }
 
-/// One segment of the capacity-limit schedule, mirroring `TariffSnapshot`'s
-/// shape. Parsed from IMPORT_CAPACITY_LIMIT/EXPORT_CAPACITY_LIMIT event
-/// payloads (the OpenADR 3.1 "Dynamic Operating Envelope", User Guide §8.10.1),
-/// priority-resolved and non-overlapping. The schedule is the single source
-/// for which limit applies when — read it through `tightest_capacity_limit`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+/// The six capacity payload types the schedule carries, declared once: the
+/// parser collects exactly these, and nothing else lists them
+/// (`controller::rate_schedule::parse_capacity_schedule`).
+pub const CAPACITY_PAYLOAD_TYPES: [&str; 6] = [
+    "IMPORT_CAPACITY_LIMIT",
+    "EXPORT_CAPACITY_LIMIT",
+    "IMPORT_CAPACITY_SUBSCRIPTION",
+    "EXPORT_CAPACITY_SUBSCRIPTION",
+    "IMPORT_CAPACITY_RESERVATION",
+    "EXPORT_CAPACITY_RESERVATION",
+];
+
+/// One segment of the capacity schedule, mirroring `TariffSnapshot`'s shape.
+/// Parsed from the `*_CAPACITY_LIMIT` / `*_SUBSCRIPTION` / `*_RESERVATION` event
+/// payloads (the OpenADR 3.1 "Dynamic Operating Envelope" and capacity
+/// management, User Guide §8.10), priority-resolved and non-overlapping. The
+/// schedule is the single source for which capacity value applies when — read it
+/// through `tightest_capacity_limit` / `contracted_allowance_kw`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 pub struct CapacitySnapshot {
     pub interval_start: DateTime<Utc>,
     #[serde(skip_serializing)]
@@ -166,41 +103,129 @@ pub struct CapacitySnapshot {
     pub import_limit_event_id: Option<String>,
     #[serde(default)]
     pub export_limit_event_id: Option<String>,
+    /// Subscribed capacity (kW) committed to the grid for this segment.
+    #[serde(default)]
+    pub import_subscription_kw: Option<f64>,
+    #[serde(default)]
+    pub export_subscription_kw: Option<f64>,
+    /// Capacity reservation granted by the VTN for this segment (kW).
+    #[serde(default)]
+    pub import_reservation_kw: Option<f64>,
+    #[serde(default)]
+    pub export_reservation_kw: Option<f64>,
 }
 
-/// A capacity limit and the event it came from.
+impl CapacitySnapshot {
+    /// This segment's limit in `direction` and the event it came from.
+    fn limit(&self, direction: CommitmentDirection) -> Option<CapacityLimit> {
+        let (limit_kw, event_id) = match direction {
+            CommitmentDirection::Import => (self.import_limit_kw?, &self.import_limit_event_id),
+            CommitmentDirection::Export => (self.export_limit_kw?, &self.export_limit_event_id),
+        };
+        Some(CapacityLimit {
+            limit_kw,
+            event_id: event_id.clone(),
+        })
+    }
+
+    /// This segment's contracted allowance in `direction`: subscription plus
+    /// reservation, either alone counting (WP3.3, User Guide §8.10.2 — a
+    /// reservation raises the allowance above the subscription); `None` when the
+    /// segment declares neither.
+    fn allowance(&self, direction: CommitmentDirection) -> Option<CapacityLimit> {
+        let (subscription_kw, reservation_kw) = match direction {
+            CommitmentDirection::Import => {
+                (self.import_subscription_kw, self.import_reservation_kw)
+            }
+            CommitmentDirection::Export => {
+                (self.export_subscription_kw, self.export_reservation_kw)
+            }
+        };
+        (subscription_kw.is_some() || reservation_kw.is_some()).then(|| CapacityLimit {
+            limit_kw: subscription_kw.unwrap_or(0.0) + reservation_kw.unwrap_or(0.0),
+            event_id: None,
+        })
+    }
+}
+
+/// A capacity value and the event it came from (`None` for an allowance, which
+/// combines two events' payloads, and for a sim-injected stand-in).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapacityLimit {
     pub limit_kw: f64,
     pub event_id: Option<String>,
 }
 
-/// Which capacity limit applies (GB-48) — the one answer for the planner's
-/// slot caps, the limit in force now (`OadrCapacityState`), the history
-/// sampler and the arbiter's limit pass: the tightest `direction` limit among
-/// `schedule` segments overlapping `[from, to)`. For `from == to` it is the
-/// instant `from`, covered by segments with `start ≤ from < end`.
-pub fn tightest_capacity_limit(
+/// The one primitive behind every "which capacity value applies" question: the
+/// tightest value `pick` reads among `schedule` segments overlapping `[from, to)`.
+/// For `from == to` it is the instant `from`, covered by segments with
+/// `start ≤ from < end`. Limits and the contracted allowance are two `pick`s.
+fn tightest_over(
     schedule: &[CapacitySnapshot],
-    direction: crate::entities::capacity_curve::CommitmentDirection,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
+    pick: impl Fn(&CapacitySnapshot) -> Option<CapacityLimit>,
 ) -> Option<CapacityLimit> {
-    use crate::entities::capacity_curve::CommitmentDirection::{Export, Import};
     schedule
         .iter()
         .filter(|s| s.overlaps(from, to))
-        .filter_map(|s| {
-            let (limit_kw, event_id) = match direction {
-                Import => (s.import_limit_kw?, &s.import_limit_event_id),
-                Export => (s.export_limit_kw?, &s.export_limit_event_id),
-            };
-            Some(CapacityLimit {
-                limit_kw,
-                event_id: event_id.clone(),
-            })
-        })
+        .filter_map(pick)
         .min_by(|a, b| a.limit_kw.total_cmp(&b.limit_kw))
+}
+
+/// Which capacity limit applies (GB-48) — the one answer for the planner's
+/// slot caps, the grid asset, the PV generation-limit resolver, the history
+/// sampler, the arbiter's limit pass and `GET /capacity`: the tightest
+/// `direction` limit among `schedule` segments overlapping `[from, to)`.
+pub fn tightest_capacity_limit(
+    schedule: &[CapacitySnapshot],
+    direction: CommitmentDirection,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> Option<CapacityLimit> {
+    tightest_over(schedule, from, to, |s| s.limit(direction))
+}
+
+/// The contracted allowance (kW) over `[from, to)`: the tightest per-segment
+/// subscription + reservation among overlapping segments, or `INFINITY` when no
+/// segment declares one.
+///
+/// `INFINITY` is the honest "uncapped" value, not a sentinel: it makes the
+/// `.min(allowance)` at the planner's slot cap and the "is anything binding?"
+/// question in `ReservationRequest` both come out right without either caller
+/// special-casing `None`. Where no limit covers a slot but a subscription does,
+/// this is what caps it — the spec's default for an exhausted limit schedule
+/// (User Guide §8.10.1).
+pub fn contracted_allowance_kw(
+    schedule: &[CapacitySnapshot],
+    direction: CommitmentDirection,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> f64 {
+    tightest_over(schedule, from, to, |s| s.allowance(direction))
+        .map_or(f64::INFINITY, |a| a.limit_kw)
+}
+
+/// The limit to enforce over `[from, to)`: the schedule's VTN limit, else the
+/// sim-injected one. A manual limit substitutes for a VTN directive where none
+/// applies and never overrides one — the only home of that rule.
+pub fn effective_capacity_limit(
+    schedule: &[CapacitySnapshot],
+    inject: &crate::entities::sim_inject::SimInjectState,
+    direction: CommitmentDirection,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> Option<CapacityLimit> {
+    tightest_capacity_limit(schedule, direction, from, to).or_else(|| {
+        let limit_kw = match direction {
+            CommitmentDirection::Import => inject.grid_import_limit_kw,
+            CommitmentDirection::Export => inject.grid_export_limit_kw,
+        }?;
+        Some(CapacityLimit {
+            limit_kw,
+            event_id: None,
+        })
+    })
 }
 
 /// WP3.1 (BL-04) — an active grid-alert window parsed from an
@@ -400,6 +425,22 @@ mod capacity_limit_tests {
             export_limit_kw: exp,
             import_limit_event_id: imp.map(|_| format!("imp-{}", from.format("%H%M"))),
             export_limit_event_id: exp.map(|_| format!("exp-{}", from.format("%H%M"))),
+            ..CapacitySnapshot::default()
+        }
+    }
+
+    fn allowance_seg(
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        subscription_kw: Option<f64>,
+        reservation_kw: Option<f64>,
+    ) -> CapacitySnapshot {
+        CapacitySnapshot {
+            interval_start: from,
+            interval_end: to,
+            import_subscription_kw: subscription_kw,
+            import_reservation_kw: reservation_kw,
+            ..CapacitySnapshot::default()
         }
     }
 
@@ -478,5 +519,179 @@ mod capacity_limit_tests {
         let schedule = [seg(at(10, 0), at(11, 0), Some(3.0), None)];
         assert!(tightest_capacity_limit(&schedule, Import, at(12, 0), at(13, 0)).is_none());
         assert!(tightest_capacity_limit(&[], Import, at(10, 0), at(11, 0)).is_none());
+    }
+
+    #[test]
+    fn contracted_allowance_sums_subscription_and_reservation_per_segment() {
+        let schedule = [allowance_seg(at(10, 0), at(11, 0), Some(5.0), Some(3.0))];
+        assert_eq!(
+            contracted_allowance_kw(&schedule, Import, at(10, 0), at(11, 0)),
+            8.0
+        );
+        // Either one counts alone.
+        let sub_only = [allowance_seg(at(10, 0), at(11, 0), Some(5.0), None)];
+        assert_eq!(
+            contracted_allowance_kw(&sub_only, Import, at(10, 0), at(11, 0)),
+            5.0
+        );
+        let res_only = [allowance_seg(at(10, 0), at(11, 0), None, Some(3.0))];
+        assert_eq!(
+            contracted_allowance_kw(&res_only, Import, at(10, 0), at(11, 0)),
+            3.0
+        );
+    }
+
+    #[test]
+    fn contracted_allowance_is_uncapped_where_no_segment_declares_one() {
+        let schedule = [allowance_seg(at(10, 0), at(11, 0), Some(5.0), None)];
+        assert_eq!(
+            contracted_allowance_kw(&schedule, Import, at(12, 0), at(13, 0)),
+            f64::INFINITY
+        );
+        // A segment carrying only a limit declares no allowance.
+        let limit_only = [seg(at(10, 0), at(11, 0), Some(3.0), None)];
+        assert_eq!(
+            contracted_allowance_kw(&limit_only, Import, at(10, 0), at(11, 0)),
+            f64::INFINITY
+        );
+        assert_eq!(
+            contracted_allowance_kw(&[], Export, at(10, 0), at(11, 0)),
+            f64::INFINITY
+        );
+    }
+
+    #[test]
+    fn a_future_reservation_does_not_touch_an_earlier_span() {
+        let schedule = [
+            allowance_seg(at(0, 0), at(12, 0), Some(5.0), None),
+            allowance_seg(at(12, 0), at(14, 0), Some(5.0), Some(3.0)),
+        ];
+        assert_eq!(
+            contracted_allowance_kw(&schedule, Import, at(10, 0), at(11, 0)),
+            5.0
+        );
+        assert_eq!(
+            contracted_allowance_kw(&schedule, Import, at(12, 0), at(13, 0)),
+            8.0
+        );
+        // A span straddling the start takes the tightest overlap, like a limit.
+        assert_eq!(
+            contracted_allowance_kw(&schedule, Import, at(11, 30), at(12, 30)),
+            5.0
+        );
+    }
+
+    #[test]
+    fn contracted_allowance_reads_the_requested_direction() {
+        let schedule = [CapacitySnapshot {
+            interval_start: at(10, 0),
+            interval_end: at(11, 0),
+            export_subscription_kw: Some(4.0),
+            export_reservation_kw: Some(2.0),
+            ..CapacitySnapshot::default()
+        }];
+        assert_eq!(
+            contracted_allowance_kw(&schedule, Export, at(10, 0), at(11, 0)),
+            6.0
+        );
+        assert_eq!(
+            contracted_allowance_kw(&schedule, Import, at(10, 0), at(11, 0)),
+            f64::INFINITY
+        );
+    }
+
+    fn inject(
+        import_kw: Option<f64>,
+        export_kw: Option<f64>,
+    ) -> crate::entities::sim_inject::SimInjectState {
+        crate::entities::sim_inject::SimInjectState {
+            grid_import_limit_kw: import_kw,
+            grid_export_limit_kw: export_kw,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_injected_limit_stands_in_where_no_vtn_limit_applies() {
+        let now = at(10, 0);
+        let out = effective_capacity_limit(&[], &inject(Some(7.0), Some(3.0)), Import, now, now);
+        assert_eq!(out.map(|l| l.limit_kw), Some(7.0));
+        let out = effective_capacity_limit(&[], &inject(Some(7.0), Some(3.0)), Export, now, now);
+        assert_eq!(out.map(|l| l.limit_kw), Some(3.0));
+    }
+
+    #[test]
+    fn a_vtn_limit_is_never_overridden_by_an_injected_one() {
+        let now = at(10, 0);
+        let schedule = [seg(at(9, 0), at(11, 0), Some(5.0), None)];
+        let out = effective_capacity_limit(&schedule, &inject(Some(7.0), None), Import, now, now);
+        let out = out.unwrap();
+        assert_eq!(
+            (out.limit_kw, out.event_id.as_deref()),
+            (5.0, Some("imp-0900"))
+        );
+    }
+
+    #[test]
+    fn each_direction_is_decided_on_its_own() {
+        // An import limit in force must not stop an injected *export* limit.
+        let now = at(10, 0);
+        let schedule = [seg(at(9, 0), at(11, 0), Some(5.0), None)];
+        let inj = inject(Some(7.0), Some(3.0));
+        assert_eq!(
+            effective_capacity_limit(&schedule, &inj, Import, now, now).map(|l| l.limit_kw),
+            Some(5.0)
+        );
+        assert_eq!(
+            effective_capacity_limit(&schedule, &inj, Export, now, now).map(|l| l.limit_kw),
+            Some(3.0)
+        );
+    }
+
+    #[test]
+    fn no_injection_and_no_vtn_limit_means_no_limit() {
+        let now = at(10, 0);
+        assert!(effective_capacity_limit(&[], &inject(None, None), Import, now, now).is_none());
+    }
+
+    #[test]
+    fn the_view_reads_every_quantity_at_its_own_time() {
+        let schedule = [
+            CapacitySnapshot {
+                import_limit_kw: Some(4.0),
+                import_limit_event_id: Some("lim".into()),
+                import_subscription_kw: Some(5.0),
+                import_reservation_kw: Some(3.0),
+                export_subscription_kw: Some(2.0),
+                ..seg(at(10, 0), at(11, 0), None, None)
+            },
+            seg(at(11, 0), at(12, 0), Some(1.0), None),
+        ];
+        let inject = crate::entities::sim_inject::SimInjectState::default();
+        let view = |t| OadrCapacityState::at(&schedule, &inject, t, None);
+        let first = view(at(10, 30));
+        assert_eq!(first.import_limit_kw, Some(4.0));
+        assert_eq!(first.import_limit_event_id.as_deref(), Some("lim"));
+        assert_eq!(first.import_subscription_kw, Some(5.0));
+        assert_eq!(first.import_reservation_kw, Some(3.0));
+        assert_eq!(first.export_subscription_kw, Some(2.0));
+        assert_eq!(first.export_limit_kw, None);
+        // The next interval: its own limit, and no subscription or reservation.
+        let second = view(at(11, 0));
+        assert_eq!(second.import_limit_kw, Some(1.0));
+        assert_eq!(second.import_subscription_kw, None);
+        assert_eq!(second.import_reservation_kw, None);
+        // Before and after the schedule: nothing is in force.
+        assert_eq!(view(at(9, 59)).import_limit_kw, None);
+        assert_eq!(view(at(12, 0)).import_limit_kw, None);
+    }
+
+    #[test]
+    fn the_view_shows_an_injected_limit_without_an_event_id_where_no_vtn_limit_applies() {
+        let inject = inject(Some(7.0), None);
+        let view = OadrCapacityState::at(&[], &inject, at(10, 0), Some(at(9, 0)));
+        assert_eq!(view.import_limit_kw, Some(7.0));
+        assert_eq!(view.import_limit_event_id, None);
+        assert_eq!(view.last_updated, Some(at(9, 0)));
     }
 }

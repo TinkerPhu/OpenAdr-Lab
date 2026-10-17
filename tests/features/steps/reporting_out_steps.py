@@ -74,7 +74,7 @@ def step_create_capacity_granting_event_with_descriptor(context, kw, ptype, secs
 
     `IMPORT_CAPACITY_SUBSCRIPTION` is the inbound half of the reservation
     mechanism -- the contracted allowance the VEN plans against
-    (`controller::openadr_interface::parse_capacity_state`, WP3.3 Section 8.10).
+    (`entities::capacity::contracted_allowance_kw`, WP3.3 Section 8.10).
     Granting one far below the profile's physical rating is what makes the
     outbound `IMPORT_RESERVATION_CAPACITY` report non-zero: with no allowance
     declared at all nothing binds, so the honest request is 0 and the scenario

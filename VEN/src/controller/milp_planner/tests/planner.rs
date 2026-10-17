@@ -879,8 +879,7 @@ fn reservation_allowance_binds_when_tighter_and_is_inactive_when_looser() {
     let ctxs = build_asset_contexts(&profile, &sim, now, None, None, &tariffs);
 
     // Reservation alone (no subscription), tighter than the 25 kW limit → binds.
-    let mut cap = no_capacity();
-    cap.import_reservation_kw = Some(3.0);
+    let cap = allowance_schedule((None, Some(3.0)), (None, None));
     let inputs = bmi(&profile, &sim, &tariffs, &cap, now, None, None);
     assert!(inputs
         .p_imp_max_cont_kw
@@ -890,9 +889,7 @@ fn reservation_allowance_binds_when_tighter_and_is_inactive_when_looser() {
 
     // Subscription 20 + reservation 10 = 30 kW allowance, looser than the
     // 25 kW physical bound → inactive.
-    let mut cap = no_capacity();
-    cap.import_subscription_kw = Some(20.0);
-    cap.import_reservation_kw = Some(10.0);
+    let cap = allowance_schedule((Some(20.0), Some(10.0)), (None, None));
     let inputs = bmi(&profile, &sim, &tariffs, &cap, now, None, None);
     assert!(inputs
         .p_imp_max_cont_kw
@@ -900,8 +897,7 @@ fn reservation_allowance_binds_when_tighter_and_is_inactive_when_looser() {
         .all(|&v| (v - 25.0).abs() < 1e-9));
 
     // Export side: subscription 4 kW binds against the 10 kW physical bound.
-    let mut cap = no_capacity();
-    cap.export_subscription_kw = Some(4.0);
+    let cap = allowance_schedule((None, None), (Some(4.0), None));
     let inputs = bmi(&profile, &sim, &tariffs, &cap, now, None, None);
     assert!(inputs
         .p_exp_max_cont_kw

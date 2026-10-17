@@ -16006,3 +16006,30 @@ passwords.
 is on none of Node1, Node2, Node3 or the laptop, the running fleet never reads it, and the generator and 
 this test were its only readers. Verified live against the Node1 broker: red (exit 2) before, all four 
 checks OK after.
+
+## Time-aware capacity schedule (GB-48 B′ + C, branch 052-time-aware-capacity-schedule)
+
+**What.** The capacity schedule now carries all six quantities (import/export limit, subscription,
+reservation) per priority-resolved segment, and nothing "in force now" is stored. One primitive
+(`tightest_over`) behind `tightest_capacity_limit` and `contracted_allowance_kw`, plus
+`effective_capacity_limit` for the sim-inject stand-in. The planner's allowance is per slot, so a
+reservation binds only its window and the subscription governs once the limits run out (§8.10.1, pinned
+by tests, no new branch). `OadrCapacityState` is now the API view, built by `OadrCapacityState::at`;
+`parse_capacity_state`, `with_sim_injected_limits`, `GridSignals.capacity` and the stored state are gone.
+The reservation request is measured against the allowance at the report's time. The Rate chart draws
+the allowance next to the limits.
+
+**Why.** The folded limit was a second copy of the schedule's answer, up to one 30 s poll stale at an
+interval boundary, and subscription/reservation were a `min` over all listed events, so a reservation
+for tomorrow bound today.
+
+**Issues.**
+- The `import_and_export_slack` goldens (plans, model) changed for that one scenario only: its squeeze
+  had been set on the folded state the planner stopped reading with GB-48, so it squeezed nothing. The
+  fixture now uses the schedule and the scenario does what its name says (KEY_LEARNINGS).
+- Behaviour change, deliberate: the grid asset now records an injected limit where no VTN limit applies;
+  before it recorded the raw VTN fold and omitted what the arbiter enforced.
+- Test change: `test_parse_capacity_state_*` became `capacity_state_at` tests over the schedule; the
+  `last_updated` assertion went (the parser no longer derives it, the poll stores it) and the
+  subscription+reservation test reads inside the event's window, since the state is now read at a moment.
+- Not done: §8.10.1's grid-power-outage rule (needs an outage signal).

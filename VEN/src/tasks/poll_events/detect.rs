@@ -11,6 +11,8 @@ use crate::controller;
 use crate::controller::vtn_port::{EventTypeName, OadrEvent};
 use crate::entities;
 use crate::tasks::poll_signals;
+
+pub(crate) use super::capacity_picture::CapacityPicture;
 use lab_core::wire_contract::{PayloadReader, WireAudit};
 
 /// Output of `detect_event_changes` — all side-effect-free results of one poll tick.
@@ -21,9 +23,8 @@ pub(crate) struct EventChanges {
     pub current_ids: std::collections::HashSet<String>,
     /// Parsed tariff snapshots for this tick.
     pub rates: Vec<entities::tariff_snapshot::TariffSnapshot>,
-    /// Parsed capacity state for this tick.
-    pub capacity: entities::capacity::OadrCapacityState,
-    /// Parsed capacity-limit schedule (Dynamic Operating Envelope) for this tick.
+    /// Parsed capacity schedule (limits, subscriptions, reservations) for this tick — the one
+    /// thing kept of the poll's capacity events; every reader asks it at its own time.
     pub capacity_schedule: Vec<entities::capacity::CapacitySnapshot>,
     /// Parsed grid signals for this tick: alerts (WP3.1), SIMPLE levels
     /// (WP3.2), dispatch + charge-state setpoints (WP3.4).
@@ -35,34 +36,10 @@ pub(crate) struct EventChanges {
     pub wire_audit: WireAudit,
 }
 
-/// What this VEN reads about capacity after one poll: the limits, reservations and
-/// subscriptions in force, and the limit schedule. Two polls with equal pictures
-/// leave the planner's capacity inputs unchanged. The poll's own timestamp is left
-/// out, or every poll would differ.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct CapacityPicture {
-    state: entities::capacity::OadrCapacityState,
-    schedule: Vec<entities::capacity::CapacitySnapshot>,
-}
-
-impl CapacityPicture {
-    fn of(
-        state: &entities::capacity::OadrCapacityState,
-        schedule: &[entities::capacity::CapacitySnapshot],
-    ) -> Self {
-        let mut state = state.clone();
-        state.last_updated = None;
-        Self {
-            state,
-            schedule: schedule.to_vec(),
-        }
-    }
-}
-
 impl EventChanges {
     /// This poll's capacity picture, the `prev_capacity` of the next poll.
-    pub fn capacity_picture(&self) -> CapacityPicture {
-        CapacityPicture::of(&self.capacity, &self.capacity_schedule)
+    pub fn capacity_picture(&self, now: DateTime<Utc>) -> CapacityPicture {
+        CapacityPicture::at(&self.capacity_schedule, now)
     }
 
     /// The replan this poll asks for, if anything changed. A capacity change wins:
@@ -111,8 +88,8 @@ pub(crate) fn detect_event_changes(
     now: DateTime<Utc>,
 ) -> EventChanges {
     let rates = controller::openadr_interface::parse_rate_snapshots(events, reader);
-    let capacity = controller::openadr_interface::parse_capacity_state(events, reader, now);
     let capacity_schedule = controller::openadr_interface::parse_capacity_schedule(events, reader);
+    let capacity = CapacityPicture::at(&capacity_schedule, now);
     let signals = poll_signals::ParsedSignals::parse(events, reader);
 
     let current_ids: std::collections::HashSet<String> =
@@ -190,11 +167,12 @@ pub(crate) fn detect_event_changes(
     }
 
     // CapacityChange — a limit, reservation or subscription appeared, moved or lifted
-    if CapacityPicture::of(&capacity, &capacity_schedule) != *prev_capacity {
+    if capacity != *prev_capacity {
+        let (import_limit_kw, export_limit_kw) = capacity.limits_kw();
         trace_events.push(controller::trace::ControllerEvent::CapacityChange {
             ts: now,
-            import_limit_kw: capacity.import_limit_kw,
-            export_limit_kw: capacity.export_limit_kw,
+            import_limit_kw,
+            export_limit_kw,
         });
     }
 
@@ -202,7 +180,6 @@ pub(crate) fn detect_event_changes(
         trace_events,
         current_ids,
         rates,
-        capacity,
         capacity_schedule,
         signals,
         event_records,
@@ -484,7 +461,7 @@ mod event_poll_tests {
             &prev_capacity,
             ts(),
         );
-        if changes.capacity_picture() != prev_capacity {
+        if changes.capacity_picture(ts()) != prev_capacity {
             let cap_changes: Vec<_> = changes
                 .trace_events
                 .iter()
@@ -687,7 +664,10 @@ mod event_poll_tests {
         assert_eq!(changes.wire_audit.refusals[0].event_id, "ev-usd");
         assert!(changes.rates.is_empty(), "the USD price is not used");
         assert_eq!(
-            changes.capacity.import_limit_kw,
+            changes
+                .capacity_schedule
+                .first()
+                .and_then(|s| s.import_limit_kw),
             Some(4.0),
             "the undeclared limit still applies"
         );
@@ -736,9 +716,88 @@ mod plan_trigger_tests {
             &reader,
             &first.current_ids,
             first.rates.len(),
-            &first.capacity_picture(),
+            &first.capacity_picture(now()),
             now(),
         )
+    }
+
+    /// Two polls of the same event list, `first_at` and `second_at`: the capacity-change trace
+    /// events the second one emits.
+    fn capacity_changes_between(
+        events: &[OadrEvent],
+        first_at: DateTime<Utc>,
+        second_at: DateTime<Utc>,
+    ) -> Vec<controller::trace::ControllerEvent> {
+        let reader = PayloadReader::default();
+        let first = detect_event_changes(
+            events,
+            &reader,
+            &std::collections::HashSet::new(),
+            0,
+            &CapacityPicture::default(),
+            first_at,
+        );
+        detect_event_changes(
+            events,
+            &reader,
+            &first.current_ids,
+            first.rates.len(),
+            &first.capacity_picture(first_at),
+            second_at,
+        )
+        .trace_events
+        .into_iter()
+        .filter(|e| matches!(e, controller::trace::ControllerEvent::CapacityChange { .. }))
+        .collect()
+    }
+
+    // GB-48 B': nothing "in force now" is stored, yet a limit that starts (or ends) between
+    // two polls of an unchanged event list is still reported as a capacity change.
+    #[test]
+    fn a_limit_that_starts_between_two_polls_is_a_capacity_change() {
+        let limit = [event(
+            "lim",
+            "IMPORT_CAPACITY_LIMIT",
+            2.0,
+            "2026-03-21T12:00:00Z",
+        )];
+        let before = Utc.with_ymd_and_hms(2026, 3, 21, 11, 59, 30).unwrap();
+        let after = Utc.with_ymd_and_hms(2026, 3, 21, 12, 0, 0).unwrap();
+        let changes = capacity_changes_between(&limit, before, after);
+        assert_eq!(changes.len(), 1, "the limit came into force: {changes:?}");
+        assert!(matches!(
+            changes[0],
+            controller::trace::ControllerEvent::CapacityChange {
+                import_limit_kw: Some(kw),
+                ..
+            } if kw == 2.0
+        ));
+    }
+
+    #[test]
+    fn a_limit_that_ends_between_two_polls_is_a_capacity_change() {
+        let limit = [event(
+            "lim",
+            "IMPORT_CAPACITY_LIMIT",
+            2.0,
+            "2026-03-21T12:00:00Z",
+        )];
+        let during = Utc.with_ymd_and_hms(2026, 3, 21, 12, 59, 30).unwrap();
+        let after = Utc.with_ymd_and_hms(2026, 3, 21, 13, 0, 0).unwrap();
+        assert_eq!(capacity_changes_between(&limit, during, after).len(), 1);
+    }
+
+    #[test]
+    fn two_polls_inside_the_same_interval_are_not_a_capacity_change() {
+        let limit = [event(
+            "lim",
+            "IMPORT_CAPACITY_LIMIT",
+            2.0,
+            "2026-03-21T12:00:00Z",
+        )];
+        let first = Utc.with_ymd_and_hms(2026, 3, 21, 12, 10, 0).unwrap();
+        let second = Utc.with_ymd_and_hms(2026, 3, 21, 12, 10, 30).unwrap();
+        assert!(capacity_changes_between(&limit, first, second).is_empty());
     }
 
     #[test]

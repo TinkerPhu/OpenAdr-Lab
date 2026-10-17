@@ -20,7 +20,6 @@ const GOLDEN: &str = include_str!("golden/milp_inputs.txt");
 /// Everything one call of the builder takes beyond the profile; `Default` is the plain call.
 #[derive(Default)]
 struct Case {
-    capacity: Option<OadrCapacityState>,
     schedule: Vec<CapacitySnapshot>,
     alerts: Vec<AlertWindow>,
     simple: Vec<SimpleWindow>,
@@ -41,16 +40,14 @@ fn build(profile: &Profile, case: &Case) -> MilpInputs {
         .tariffs
         .clone()
         .unwrap_or_else(|| make_tariffs(0.25, 0.08, 300.0));
-    let capacity = case.capacity.clone().unwrap_or_else(no_capacity);
     let mut ctxs =
         build_asset_contexts(profile, &sim, now, case.ev_session.as_ref(), None, &tariffs);
     push_shiftable_load_contexts(&mut ctxs, &case.shiftables, profile, now);
     super::super::inputs::build_milp_inputs(
         &GridSignals {
-            capacity_schedule: case.schedule.clone(),
             alert_windows: case.alerts.clone(),
             simple_windows: case.simple.clone(),
-            ..test_grid(&tariffs, &capacity)
+            ..test_grid(&tariffs, &case.schedule)
         },
         &profile.planner,
         &SiteInputs {
@@ -97,6 +94,7 @@ fn limit(from_min: i64, to_min: i64, imp: Option<f64>, exp: Option<f64>) -> Capa
         export_limit_kw: exp,
         import_limit_event_id: imp.map(|_| "cap".to_string()),
         export_limit_event_id: exp.map(|_| "cap".to_string()),
+        ..CapacitySnapshot::default()
     }
 }
 
@@ -171,23 +169,18 @@ fn scenarios() -> Vec<(&'static str, MilpInputs)> {
     let mut out = vec![("plain", build(&all, &Case::default()))];
 
     // Subscription + reservation allowance, and a schedule tighter than it on some slots.
-    let capacity = OadrCapacityState {
-        import_subscription_kw: Some(12.0),
-        import_reservation_kw: Some(3.0),
-        export_subscription_kw: Some(6.0),
-        ..no_capacity()
-    };
+    let mut schedule = allowance_schedule((Some(12.0), Some(3.0)), (Some(6.0), None));
+    schedule.extend([
+        limit(10, 30, Some(8.0), None),
+        limit(20, 45, Some(20.0), Some(4.0)),
+        limit(60, 90, None, Some(2.0)),
+    ]);
     out.push((
         "capacity_allowance_and_schedule",
         build(
             &all,
             &Case {
-                capacity: Some(capacity),
-                schedule: vec![
-                    limit(10, 30, Some(8.0), None),
-                    limit(20, 45, Some(20.0), Some(4.0)),
-                    limit(60, 90, None, Some(2.0)),
-                ],
+                schedule,
                 ..Default::default()
             },
         ),

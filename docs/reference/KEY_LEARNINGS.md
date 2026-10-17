@@ -3504,3 +3504,17 @@ right for keeping an x86 plan identical to the last bit; it is no longer needed 
   exports `BOARD_NO_MAIN=1`. A script that drives another script must not depend on the caller's
   environment: unset what the runner sets, and reproduce a new CI step with the runner's exports
   (`BOARD_NO_MAIN=1 bash scripts/ci/<test>.sh`) before installing it.
+
+## A fixture that sets a value the code no longer reads tests nothing (2026-10-17)
+
+- The `import_and_export_slack` plan and model goldens were meant to exercise the solver's slack
+  variables with a 1 kW import / 0.5 kW export squeeze. Since GB-48 the planner reads limits from the
+  schedule, but the fixture still set them on the folded `OadrCapacityState`, so for weeks the scenario
+  squeezed nothing and the goldens recorded an ordinary plan. Moving the fixture onto the schedule
+  changed that one scenario (and only it) in both goldens, as it should. When a read moves, move every
+  fixture that feeds it in the same change, and make a test fail if one is missed: here the planner
+  now has no such field, so a stale fixture no longer compiles.
+- "In force now" stored at the last poll is a second copy of an answer the schedule already gives.
+  Each reader now asks the schedule at its own time, so a boundary is crossed on the next tick, not
+  the next poll; deleting the stored copy was what exposed the third stand-in implementation (the
+  grid asset recorded no injected limit while the arbiter enforced it).

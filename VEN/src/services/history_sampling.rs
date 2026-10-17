@@ -363,8 +363,7 @@ mod tests {
             interval_end,
             import_limit_kw,
             export_limit_kw,
-            import_limit_event_id: None,
-            export_limit_event_id: None,
+            ..CapacitySnapshot::default()
         }
     }
 

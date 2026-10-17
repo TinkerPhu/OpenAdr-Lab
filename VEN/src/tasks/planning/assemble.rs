@@ -91,7 +91,6 @@ pub(super) async fn assemble_solve_request(a: SolveAssembly<'_>, st: CycleState)
     // because `tariffs` is the stale-rate-processed series it just returned.
     let grid = GridSignals {
         tariffs: tariff_ts,
-        capacity: a.state.capacity_state().await,
         capacity_schedule: a.state.planned_capacity_limits().await,
         alert_windows: a.state.alert_windows().await,
         simple_windows: a.state.simple_windows().await,

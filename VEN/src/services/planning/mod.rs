@@ -470,9 +470,6 @@ pub fn evaluate_acceptance_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Test-only here since `build_solve_request` stopped naming it:
-    // the five grid signals travel as one `GridSignals` now.
-    use crate::entities::capacity::OadrCapacityState;
     use chrono::{Duration, TimeZone};
     use uuid::Uuid;
 
@@ -485,7 +482,6 @@ mod tests {
             asset_contexts: vec![],
             grid: GridSignals {
                 tariffs: TariffTimeSeries::from_snapshots(&[]),
-                capacity: OadrCapacityState::default(),
                 capacity_schedule: vec![],
                 alert_windows: vec![],
                 simple_windows: vec![],

@@ -5,7 +5,6 @@
 /// The plan is the sole authority.
 use crate::controller::SimSnapshot;
 use crate::entities::asset_params::PvCurtailmentSource;
-use crate::entities::capacity::OadrCapacityState;
 use crate::entities::plan::Plan;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -79,9 +78,10 @@ pub struct ResolvedPvGenerationLimit {
 
 /// Resolve the effective PV generation limit applied to `PvInverter.generation_limit_kw` every
 /// tick, as the more restrictive of:
-/// - the live capacity state's `export_limit_kw` (VTN `EXPORT_CAPACITY_LIMIT` or sim-inject,
-///   stored as a positive magnitude — this is the site-level grid export cap, used here as an
-///   input, not the same quantity as the PV-level limit being resolved),
+/// - the export capacity limit in force at `now` (`export_capacity_limit_kw`: VTN
+///   `EXPORT_CAPACITY_LIMIT` or sim-inject, read by the caller from the capacity schedule at
+///   its own time as a positive magnitude — this is the site-level grid export cap, used here
+///   as an input, not the same quantity as the PV-level limit being resolved),
 /// - the current plan slot's curtailment target (`pv_used_kw < pv_forecast_kw`),
 /// - `arbiter_tighten_kw` (§5.4, `controller::arbiter`'s PV-curtailment backstop lever —
 ///   a positive kW magnitude, or `None` when the arbiter isn't offering it this tick), and
@@ -98,13 +98,13 @@ pub struct ResolvedPvGenerationLimit {
 /// both, and manual — the most deliberate/explicit source — wins ties over all three).
 pub fn resolve_pv_generation_limit_kw(
     plan: Option<&Plan>,
-    capacity: &OadrCapacityState,
+    export_capacity_limit_kw: Option<f64>,
     now: DateTime<Utc>,
     arbiter_tighten_kw: Option<f64>,
     manual_limit_kw: Option<f64>,
     comms_loss_limit_kw: Option<f64>,
 ) -> ResolvedPvGenerationLimit {
-    let capacity_limit = capacity.export_limit_kw.map(|v| -v.abs());
+    let capacity_limit = export_capacity_limit_kw.map(|v| -v.abs());
     let plan_limit = plan.and_then(|p| {
         p.current_slot(now).and_then(|slot| {
             if slot.pv_used_kw + 1e-6 < slot.pv_forecast_kw {
@@ -649,22 +649,16 @@ mod tests {
         }
     }
 
-    fn capacity_with_export_limit_kw(
-        limit_kw: f64,
-    ) -> crate::entities::capacity::OadrCapacityState {
-        crate::entities::capacity::OadrCapacityState {
-            export_limit_kw: Some(limit_kw),
-            ..Default::default()
-        }
+    fn capacity_with_export_limit_kw(limit_kw: f64) -> Option<f64> {
+        Some(limit_kw)
     }
 
     #[test]
     fn resolve_pv_generation_limit_no_active_limit_is_none() {
         let now = Utc::now();
         let plan = make_pv_plan(5.0, 5.0, now); // no plan-side curtailment
-        let capacity = crate::entities::capacity::OadrCapacityState::default();
-        let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, None, None);
+        let capacity: Option<f64> = None;
+        let resolved = resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, None, None);
         assert_eq!(resolved.limit_kw, None);
         assert_eq!(resolved.source, PvCurtailmentSource::None);
     }
@@ -673,9 +667,8 @@ mod tests {
     fn resolve_pv_generation_limit_plan_curtailment_alone() {
         let now = Utc::now();
         let plan = make_pv_plan(5.0, 3.0, now); // plan curtails 2 kW
-        let capacity = crate::entities::capacity::OadrCapacityState::default();
-        let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, None, None);
+        let capacity: Option<f64> = None;
+        let resolved = resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, None, None);
         assert!(
             (resolved.limit_kw.unwrap() - (-3.0)).abs() < 1e-9,
             "plan-driven limit should be -pv_used_kw, got {resolved:?}"
@@ -688,8 +681,7 @@ mod tests {
         let now = Utc::now();
         let plan = make_pv_plan(5.0, 5.0, now); // no plan-side curtailment
         let capacity = capacity_with_export_limit_kw(2.0);
-        let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, None, None);
+        let resolved = resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, None, None);
         assert!(
             (resolved.limit_kw.unwrap() - (-2.0)).abs() < 1e-9,
             "capacity-driven limit should be -export_limit_kw, got {resolved:?}"
@@ -703,8 +695,7 @@ mod tests {
         // Plan wants to curtail to 3 kW; capacity separately caps at 2 kW (tighter).
         let plan = make_pv_plan(5.0, 3.0, now);
         let capacity = capacity_with_export_limit_kw(2.0);
-        let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, None, None);
+        let resolved = resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, None, None);
         assert!(
             (resolved.limit_kw.unwrap() - (-2.0)).abs() < 1e-9,
             "tighter (capacity) limit must win, got {resolved:?}"
@@ -714,7 +705,7 @@ mod tests {
         // Now capacity is looser (4 kW) than the plan's 3 kW target — plan wins.
         let capacity_loose = capacity_with_export_limit_kw(4.0);
         let resolved2 =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity_loose, now, None, None, None);
+            resolve_pv_generation_limit_kw(Some(&plan), capacity_loose, now, None, None, None);
         assert!(
             (resolved2.limit_kw.unwrap() - (-3.0)).abs() < 1e-9,
             "tighter (plan) limit must win, got {resolved2:?}"
@@ -728,8 +719,7 @@ mod tests {
         // Plan curtails to 3 kW; capacity independently also caps at 3 kW — a tie.
         let plan = make_pv_plan(5.0, 3.0, now);
         let capacity = capacity_with_export_limit_kw(3.0);
-        let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, None, None);
+        let resolved = resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, None, None);
         assert!(
             (resolved.limit_kw.unwrap() - (-3.0)).abs() < 1e-9,
             "got {resolved:?}"
@@ -745,7 +735,7 @@ mod tests {
     fn resolve_pv_generation_limit_no_plan_falls_back_to_capacity_only() {
         let now = Utc::now();
         let capacity = capacity_with_export_limit_kw(1.5);
-        let resolved = resolve_pv_generation_limit_kw(None, &capacity, now, None, None, None);
+        let resolved = resolve_pv_generation_limit_kw(None, capacity, now, None, None, None);
         assert!(
             (resolved.limit_kw.unwrap() - (-1.5)).abs() < 1e-9,
             "with no plan, capacity limit alone applies, got {resolved:?}"
@@ -757,9 +747,9 @@ mod tests {
     fn resolve_pv_generation_limit_manual_only() {
         let now = Utc::now();
         let plan = make_pv_plan(5.0, 5.0, now); // no plan-side curtailment
-        let capacity = crate::entities::capacity::OadrCapacityState::default();
+        let capacity: Option<f64> = None;
         let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, Some(2.0), None);
+            resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, Some(2.0), None);
         assert!(
             (resolved.limit_kw.unwrap() - (-2.0)).abs() < 1e-9,
             "manual-only limit should be -pv_generation_limit_kw, got {resolved:?}"
@@ -773,7 +763,7 @@ mod tests {
         let plan = make_pv_plan(5.0, 5.0, now);
         let capacity = capacity_with_export_limit_kw(5.0); // looser than manual
         let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, Some(2.0), None);
+            resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, Some(2.0), None);
         assert!(
             (resolved.limit_kw.unwrap() - (-2.0)).abs() < 1e-9,
             "tighter (manual) limit must win, got {resolved:?}"
@@ -787,7 +777,7 @@ mod tests {
         let plan = make_pv_plan(5.0, 5.0, now);
         let capacity = capacity_with_export_limit_kw(1.0); // tighter than manual
         let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, Some(3.0), None);
+            resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, Some(3.0), None);
         assert!(
             (resolved.limit_kw.unwrap() - (-1.0)).abs() < 1e-9,
             "tighter (capacity) limit must win over a looser manual override, got {resolved:?}"
@@ -802,7 +792,7 @@ mod tests {
         // Capacity and manual independently resolve to the exact same limit.
         let capacity = capacity_with_export_limit_kw(2.0);
         let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, Some(2.0), None);
+            resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, Some(2.0), None);
         assert!(
             (resolved.limit_kw.unwrap() - (-2.0)).abs() < 1e-9,
             "got {resolved:?}"
@@ -820,9 +810,9 @@ mod tests {
     fn resolve_pv_generation_limit_kw_applies_comms_loss_limit_when_no_other_source_active() {
         let now = Utc::now();
         let plan = make_pv_plan(5.0, 5.0, now); // no plan-side curtailment
-        let capacity = crate::entities::capacity::OadrCapacityState::default();
+        let capacity: Option<f64> = None;
         let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, None, Some(3.5));
+            resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, None, Some(3.5));
         assert!(
             (resolved.limit_kw.unwrap() - (-3.5)).abs() < 1e-9,
             "got {resolved:?}"
@@ -836,7 +826,7 @@ mod tests {
         let plan = make_pv_plan(5.0, 5.0, now);
         let capacity = capacity_with_export_limit_kw(1.0); // tighter than comms-loss
         let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, None, Some(3.5));
+            resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, None, Some(3.5));
         assert!(
             (resolved.limit_kw.unwrap() - (-1.0)).abs() < 1e-9,
             "tighter capacity limit must win over a looser comms-loss limit, got {resolved:?}"
@@ -848,9 +838,9 @@ mod tests {
     fn resolve_pv_generation_limit_kw_comms_loss_wins_exact_tie_over_manual() {
         let now = Utc::now();
         let plan = make_pv_plan(5.0, 5.0, now);
-        let capacity = crate::entities::capacity::OadrCapacityState::default();
+        let capacity: Option<f64> = None;
         let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, Some(2.0), Some(2.0));
+            resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, Some(2.0), Some(2.0));
         assert!(
             (resolved.limit_kw.unwrap() - (-2.0)).abs() < 1e-9,
             "got {resolved:?}"
@@ -866,9 +856,8 @@ mod tests {
     fn resolve_pv_generation_limit_kw_comms_loss_none_when_input_is_none() {
         let now = Utc::now();
         let plan = make_pv_plan(5.0, 5.0, now);
-        let capacity = crate::entities::capacity::OadrCapacityState::default();
-        let resolved =
-            resolve_pv_generation_limit_kw(Some(&plan), &capacity, now, None, None, None);
+        let capacity: Option<f64> = None;
+        let resolved = resolve_pv_generation_limit_kw(Some(&plan), capacity, now, None, None, None);
         assert_eq!(resolved.limit_kw, None);
         assert_eq!(resolved.source, PvCurtailmentSource::None);
     }

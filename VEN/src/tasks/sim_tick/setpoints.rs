@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use crate::controller;
 use crate::controller::SimSnapshot;
-use crate::entities::capacity::tightest_capacity_limit;
+use crate::entities::capacity::effective_capacity_limit;
 
 use super::context::TickContext;
 use super::dispatch_override::{
@@ -58,9 +58,9 @@ pub(crate) fn build_tick_setpoints(
     let alert_active = lab_core::time_window::any_covering(&ctx.alert_windows, now);
     // A sim-injected import limit stands in only while no VTN limit is in force.
     use crate::entities::capacity_curve::CommitmentDirection::Import;
-    let capacity_limit_kw = tightest_capacity_limit(&ctx.capacity_schedule, Import, now, now)
-        .map(|l| l.limit_kw)
-        .or(ctx.inject.grid_import_limit_kw);
+    let capacity_limit_kw =
+        effective_capacity_limit(&ctx.capacity_schedule, &ctx.inject, Import, now, now)
+            .map(|l| l.limit_kw);
     let hard_limit_kw = limit::hard_import_limit_kw(capacity_limit_kw, alert_active)
         .filter(|_| ctx.limit_enforcement_enabled);
     let ev_overlay =

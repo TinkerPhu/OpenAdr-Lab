@@ -55,14 +55,14 @@ pub async fn get_tariffs(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.planned_tariffs().await)
 }
 
-/// GET /capacity — returns the current OadrCapacityState (Stage 2).
+/// GET /capacity — the capacity state in force now, read from the schedule (GB-48).
 pub async fn get_capacity(State(state): State<AppState>) -> impl IntoResponse {
-    Json(state.capacity_state().await)
+    Json(state.capacity_state_at(chrono::Utc::now()).await)
 }
 
-/// GET /capacity/schedule — returns the Dynamic Operating Envelope schedule
-/// (per-interval import/export capacity limits parsed from active events),
-/// the timeline `GET /capacity` collapses into a single current-value scalar.
+/// GET /capacity/schedule — returns the capacity schedule (per-interval import/export
+/// limits, subscriptions and reservations parsed from active events), the timeline
+/// `GET /capacity` reads at the current moment.
 pub async fn get_capacity_schedule(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.planned_capacity_limits().await)
 }
@@ -109,11 +109,12 @@ pub async fn get_signals(State(state): State<AppState>) -> impl IntoResponse {
     // granted it. `ui-transparency` — this goes out on the wire as
     // `*_RESERVATION_CAPACITY`, so it must be readable here too; the strip
     // shows it next to the subscription and reservation it is measured against.
-    let capacity = state.capacity_state().await;
+    let capacity = state.capacity_state_at(now).await;
+    let capacity_schedule = state.planned_capacity_limits().await;
     let reservation_request = state
         .site_headroom()
         .await
-        .map(|env| ReservationRequest::from_headroom(&env, &capacity));
+        .map(|env| ReservationRequest::from_headroom(&env, &capacity_schedule, now));
     Json(SignalsState {
         alerts,
         simple,

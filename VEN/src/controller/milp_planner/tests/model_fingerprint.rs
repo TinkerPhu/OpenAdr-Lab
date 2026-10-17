@@ -79,7 +79,7 @@ fn assemble(
     name: &'static str,
     profile: &Profile,
     tariffs: &TariffTimeSeries,
-    cap: &OadrCapacityState,
+    cap: &[CapacitySnapshot],
     ev: Option<&EvSession>,
     shiftables: &[ShiftableLoad],
     pv_override: Option<f64>,
@@ -102,7 +102,7 @@ pub(super) fn assemble_with(
     name: &'static str,
     profile: &Profile,
     tariffs: &TariffTimeSeries,
-    cap: &OadrCapacityState,
+    cap: &[CapacitySnapshot],
     ev: Option<&EvSession>,
     heater_target: Option<&HeaterTarget>,
     shiftables: &[ShiftableLoad],
@@ -238,11 +238,13 @@ pub(super) fn scenarios() -> Vec<Fixture> {
     }];
     out.push(penalised);
 
-    let squeezed = OadrCapacityState {
+    let squeezed = vec![CapacitySnapshot {
+        interval_start: fixed_now() - Duration::hours(1),
+        interval_end: fixed_now() + Duration::hours(48),
         import_limit_kw: Some(1.0),
         export_limit_kw: Some(0.5),
-        ..no_capacity()
-    };
+        ..CapacitySnapshot::default()
+    }];
     out.push(assemble(
         "import_and_export_slack",
         &make_profile(),

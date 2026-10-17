@@ -3,8 +3,7 @@ use crate::controller::vtn_port::{OadrEvent, OadrProgram, OadrReport};
 use crate::controller::SimSnapshot;
 use crate::entities::asset_ledger::AssetLedgerEntry;
 use crate::entities::capacity::{
-    AlertWindow, CapacitySnapshot, DispatchWindow, OadrCapacityState, OadrReportObligation,
-    SimpleWindow,
+    AlertWindow, CapacitySnapshot, DispatchWindow, OadrReportObligation, SimpleWindow,
 };
 use crate::entities::capacity_curve::CapacityCurve;
 use crate::entities::design_vocabulary::{AssetForecast, AssetHeuristics};
@@ -92,10 +91,12 @@ pub struct HemsState {
     /// Each heater's anchor end, by heater id (`services::planning::heater_block_ends`).
     pub anchor_until: BTreeMap<String, DateTime<Utc>>,
     pub planned_tariffs: Vec<TariffSnapshot>,
-    pub capacity_state: OadrCapacityState,
-    /// The Dynamic Operating Envelope schedule (per-interval import/export capacity
-    /// limits) — the timeline `capacity_state` collapses into a current-value scalar.
+    /// The capacity schedule: per-interval import/export limits, subscriptions and
+    /// reservations (the Dynamic Operating Envelope and capacity management). The one
+    /// place capacity values live — readers ask it at their own time (GB-48).
     pub planned_capacity_limits: Vec<CapacitySnapshot>,
+    /// The last event poll that listed any capacity payload (the Dashboard's "Updated").
+    pub capacity_updated_at: Option<DateTime<Utc>>,
     /// WP3.1 (BL-04): active grid-alert windows parsed from ALERT_* events.
     pub alert_windows: Vec<AlertWindow>,
     /// WP3.2: active SIMPLE load-shed windows (levels 1–3).

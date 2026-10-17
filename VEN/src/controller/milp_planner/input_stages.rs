@@ -12,7 +12,7 @@ use chrono::{DateTime, Duration, Utc};
 use super::inputs::{SiteInputs, StaleRateRefs};
 use super::stale_rates::apply_stale_rate_policy;
 use crate::controller::milp_planner::{AssetMilpContext, ForecastRole, Participation};
-use crate::entities::capacity::tightest_capacity_limit;
+use crate::entities::capacity::{contracted_allowance_kw, tightest_capacity_limit};
 use crate::entities::capacity_curve::CommitmentDirection;
 use crate::entities::device_session::BaselineOverride;
 use crate::entities::grid_signals::GridSignals;
@@ -144,31 +144,25 @@ pub(super) fn capacity_limits(
     load_kw: &[f64],
 ) -> CapacityLimits {
     let (phys_imp, phys_exp) = (site.grid_max_import_kw, site.grid_max_export_kw);
-    // WP3.3 (§8.10): subscription + reservation form one contracted allowance
-    // — the rule itself lives on `OadrCapacityState`, since the reservation
-    // request the VEN reports back asks the same question (R-76).
-    let imp_allowance = grid.capacity.import_allowance_kw();
-    let exp_allowance = grid.capacity.export_allowance_kw();
     // GB-48: a slot's contractual cap is the tightest scheduled limit
     // overlapping it (never planning through the capped part of a coarse
     // slot, like alerts/SIMPLE), else the physical bound, and never above the
-    // allowance. The folded `capacity.import/export_limit_kw` ("in force now")
-    // is not a planner input.
-    let slot_cap = |direction: CommitmentDirection, from, to, phys: f64, allowance: f64| {
+    // contracted allowance over that slot. WP3.3 (§8.10): subscription +
+    // reservation form one allowance, a schedule like the limits — so a
+    // reservation binds only the slots it covers, and once no limit covers a
+    // slot the subscription governs it (User Guide §8.10.1). Both come from the
+    // one schedule (`entities::capacity`), the same place the reservation request
+    // the VEN reports back reads (R-76).
+    let slot_cap = |direction: CommitmentDirection, from, to, phys: f64| {
+        let allowance_kw = contracted_allowance_kw(&grid.capacity_schedule, direction, from, to);
         tightest_capacity_limit(&grid.capacity_schedule, direction, from, to)
             .map_or(phys, |l| l.limit_kw)
-            .min(allowance)
+            .min(allowance_kw)
     };
     let mut p_imp_max_cont_kw = Vec::with_capacity(bounds.len());
     let mut p_exp_max_cont_kw = Vec::with_capacity(bounds.len());
     for (&(slot_t, slot_end), &base_kw_t) in bounds.iter().zip(load_kw) {
-        let cont_imp = slot_cap(
-            CommitmentDirection::Import,
-            slot_t,
-            slot_end,
-            phys_imp,
-            imp_allowance,
-        );
+        let cont_imp = slot_cap(CommitmentDirection::Import, slot_t, slot_end, phys_imp);
         // WP3.2: SIMPLE levels clamp the import cap per slot — level 1 to a
         // configurable fraction of the contractual limit, level 2 to the
         // baseline forecast (defer all flexible draw), level 3 to 0. Highest
@@ -205,7 +199,6 @@ pub(super) fn capacity_limits(
             slot_t,
             slot_end,
             phys_exp,
-            exp_allowance,
         ));
     }
     CapacityLimits {

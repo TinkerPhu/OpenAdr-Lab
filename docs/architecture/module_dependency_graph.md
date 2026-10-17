@@ -66,7 +66,7 @@ graph TB
               C_PORT_MILP["≪trait≫\nAssetMilpContext\ndeclare() → DeclaredAsset\nread() → AssetSolution"]
               C_DISPATCH["dispatcher.rs\nbuild_setpoints()"]
               C_COMMSLOSS["comms_loss.rs\nCommsLossState\npv_generation_limit()"]
-              C_OAADR["openadr_interface.rs\nparse_rate_snapshots()\nparse_capacity_state()"]
+              C_OAADR["openadr_interface.rs\nparse_rate_snapshots()\nparse_capacity_schedule()"]
               C_PORT_TELEM["≪trait≫\nTelemetryPort\npublish()\nsample_due(now)"]
               C_ACCUM["report_accumulator.rs\nappend + bounded trim"]
               C_REPORTER["reporter.rs\nbuild_telemetry_usage_report()\nbuild_status_report()"]
