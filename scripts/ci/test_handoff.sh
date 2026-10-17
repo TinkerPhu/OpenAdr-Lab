@@ -18,6 +18,9 @@ printf '#!/usr/bin/env bash\nshift\neval "$*"\n' > "$TMP/bin/ssh"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/claude.args"\npwd > "%s/claude.pwd"\n' "$TMP" "$TMP" > "$TMP/bin/claude"
 chmod +x "$TMP/bin/ssh" "$TMP/bin/claude"
 export PATH="$TMP/bin:$PATH"
+# The runner runs this under BOARD_NO_MAIN=1 (it sources board.sh as a library); inherited, that
+# turns board.sh into a no-op for the real hand-off below and no ticket is ever written.
+unset BOARD_NO_MAIN
 export BOARD_DIR="$TMP/board" CLAUDE_CODE_SESSION_ID=2e1cc119-0311-412f-8f25-d0f49ff0deb2
 mkdir -p "$BOARD_DIR"
 

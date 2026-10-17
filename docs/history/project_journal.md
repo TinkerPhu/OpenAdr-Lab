@@ -15983,3 +15983,13 @@ dropped a stale mention of `asset_max_power`, the endpoint function that was rem
 series open; the vision is a standing document), `strategic_roadmap.md` and `roadmap/README.md` (live
 indexes), `refactoring_backlog.md` (standing, empty). `opportunistic-objective-fleet-forecast.md` is
 already replaced by the 051 openspec change on its branch.
+
+## CI self-tests run under the runner's environment (fix/ci-selftests-runner-env)
+
+**What.** The first ticket through the new `ci/test_handoff` quick step went red: 20 failures, no ticket
+written. The runner exports `BOARD_NO_MAIN=1` (it sources `board.sh` as a library); the self-test inherited it
+and `board.sh` then did nothing for the hand-off the test makes. `test_handoff.sh` now unsets it.
+
+**Why it was missed.** The test passed in an interactive shell on the laptop and on Node3; only the runner's
+environment differs. Verified red first with `BOARD_NO_MAIN=1 bash scripts/ci/test_handoff.sh` (20 failures),
+green after, and green in a plain shell.
