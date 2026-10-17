@@ -16186,3 +16186,28 @@ applies it; planning mode would change recorded decisions (tick golden `plan_imp
 the same release), which this change keeps identical, so that is R-145 for the user. `cycle.rs`
 was at the 200-line cap, so the guard moved to `tasks/planning/plan_for.rs`; `results.rs` (488)
 got its third caller of the new per-slot skeleton (7.1) through a new file.
+
+**Group 8 (the fleet side).** The BFF keeps each VEN's `objective` and `plan` leaves verbatim and
+the fleet's own retained command, and says per VEN whether a command is still pending. It
+commands one VEN or all through a `CommandPublisher` port, validated against the objectives each
+VEN itself declares, a fleet switch all or nothing and one VEN every `FLEET_OBJECTIVE_SPACING_S`.
+`GET /api/fleet/forecast` sums the online VENs' newest `USAGE_FORECAST` reports from the recorder
+table, converted with the unit each declares (`lab_core::units::mean_power_kw`), with the
+objectives behind each slot, and a `before` sum from each changed VEN's newest report before its
+objective changed. The seeded fleet-monitoring event asks for the forecast (frequency 0, profile
+v3). The VTN UI's Fleet page shows and commands the objectives, opens a VEN's plan, and draws the
+forecast dashed ahead of now with the pre-change sum fainter; both Fleet charts share one
+look-ahead.
+
+**Group 9 (BDD, docs, debts).** `ven_opportunistic_objective.feature` (UC-19) and
+`fleet_objective_control.feature`; `/plan/objective` is a declared scenario-cleanup family and
+every fleet command a scenario sends is released. UC-19, SYSTEM-USE-CASES §13, the architecture
+sections and fleet-monitor §6.2 describe the result; R-146..R-149 record what is left.
+
+**Issues.** D11 had the BFF capture a report id when a VEN's objective changes; holding only the
+moment and asking the recorder for the newest report before it needs no ingest-time database
+access and gives the same report. Summing only the changed VENs' old forecasts would not compare
+with the current total, so `before` keeps every other VEN's current forecast. Writing the fleet
+scenario showed that an ad hoc forecast obligation was first due 15 minutes after it was learned,
+so a new VEN reported no forecast for that long; it is now due at once. The BFF has no route-test
+harness (R-149), so its rules are pure functions with unit tests and the routes are E2E's.
