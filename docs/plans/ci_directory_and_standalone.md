@@ -105,6 +105,8 @@ Therefore: (1) `ci-next.sh --all` shows no queued/running ticket, (2) `systemctl
 (3) merge by hand (rebase + fast-forward), (4) on Node3 `git pull` the checkout and `bash ci/install.sh`
 (swaps `/srv/ci/bin/ci` whole, installs `ci-web.service`), (5) `systemctl start ci-runner.timer`,
 (6) open `http://Node3:8480`. Rollback: `/srv/ci/bin/ci.old` is the previous tree.
+Sparse checkouts (Node1, Node2, Node3) do not receive a new top-level directory on a pull: run
+`git sparse-checkout add ci` there once (install.sh does it on the CI host; found on Node2, 2026-10-17).
 
 ## Out of scope
 
