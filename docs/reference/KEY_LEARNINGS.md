@@ -3497,3 +3497,10 @@ right for keeping an x86 plan identical to the last bit; it is no longer needed 
 - One branch needed five full suite runs in 10 hours; only one failure was real. The other four
   were `main` moving under a tested branch. A runner that rebases first, tests that commit and is
   the only thing moving `main` makes the number of runs per branch one, at the price of queueing.
+
+## A check that runs inside a runner is tested inside the runner's environment (2026-10-17)
+
+- `ci/test_handoff` passed in two interactive shells and failed on its first run under the runner, which
+  exports `BOARD_NO_MAIN=1`. A script that drives another script must not depend on the caller's
+  environment: unset what the runner sets, and reproduce a new CI step with the runner's exports
+  (`BOARD_NO_MAIN=1 bash scripts/ci/<test>.sh`) before installing it.
