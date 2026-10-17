@@ -128,6 +128,7 @@ fn a_scheduled_import_limit_holds_once_the_first_command_lands() {
         export_limit_kw: None,
         import_limit_event_id: Some("evt-limit".into()),
         export_limit_event_id: None,
+        ..Default::default()
     }];
     let start_now = |_: DateTime<Utc>| SlotRequests {
         requests: OpportunisticRequests {

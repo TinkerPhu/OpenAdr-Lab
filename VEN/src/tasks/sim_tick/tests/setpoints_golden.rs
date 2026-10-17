@@ -205,7 +205,6 @@ pub(super) fn context(s: &Scenario, sim: &SimState) -> TickContext {
         grid_max_import_kw: 100.0,
         grid_max_export_kw: 100.0,
         plan_snap: s.plan.clone(),
-        capacity_snap: Default::default(),
         capacity_schedule: s
             .import_limit_kw
             .map(|kw| CapacitySnapshot {
@@ -215,6 +214,7 @@ pub(super) fn context(s: &Scenario, sim: &SimState) -> TickContext {
                 export_limit_kw: None,
                 import_limit_event_id: Some("evt-limit".into()),
                 export_limit_event_id: None,
+                ..Default::default()
             })
             .into_iter()
             .collect(),
