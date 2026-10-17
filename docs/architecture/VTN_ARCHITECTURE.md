@@ -304,6 +304,12 @@ an aggregate `MQTT_FLEET_PW_VEN_<n>` file the broker's start-up loop turns into
 accounts, and one file per VEN holding the generic `FLEET_MQTT_PASSWORD` the
 VEN itself reads. Both are git-ignored and regenerated rather than copied.
 
+**Who needs the root.** Only whoever generates or rotates passwords: adding a VEN, rotating one, or
+re-deriving the files after a loss. The running fleet never reads it, the hosts do not hold it, and
+`scripts/test_fleet_acl.sh` does not need it either (it reads each VEN's own password file). Losing it
+stops nothing; it means a new root, every file regenerated, and the broker and all VENs redeployed
+together. Keep it outside the repo and the hosts, for example in a password manager.
+
 The password file is written at container start from that environment, so no
 credential — hashed or otherwise — is committed to this public repository. The
 ACL file *is* committed: it contains usernames only.

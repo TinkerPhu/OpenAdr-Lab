@@ -17,32 +17,34 @@
 # password as a working ACL. The only honest question is whether the message
 # arrived.
 #
-# Usage:  MQTT_FLEET_ROOT_SECRET=... bash scripts/test_fleet_acl.sh [Node1]
+# Usage:  bash scripts/test_fleet_acl.sh [Node1]
+#
+# It needs no root secret. A VEN's password is read from the file that VEN
+# itself starts with (VEN/.env.fleet.ven-N on the host, written by
+# gen_fleet_mqtt_secrets.py --per-ven-dir), which is the password the broker
+# holds for it. The root secret is deliberately kept off the hosts and is only
+# needed to generate or rotate passwords, never to verify them.
 set -uo pipefail
 HOST="${1:-Node1}"
 BROKER="${BROKER_CONTAINER:-vtn-lab-mqtt-1}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VEN_DIR="${VEN_DIR:-/srv/docker/openadr_lab/VEN}"
 
-if [[ -z "${MQTT_FLEET_ROOT_SECRET:-}" ]]; then
-  echo "MQTT_FLEET_ROOT_SECRET is not set — cannot derive a VEN's password." >&2
-  exit 2
-fi
+# One VEN's broker password, from its own env file on $HOST. An absent file or
+# an empty value is a setup problem, not an ACL result: say so and stop rather
+# than let every check below fail on a blank password.
+ven_password() { # ven-name
+  local pw
+  pw=$(ssh "$HOST" "sed -n 's/^FLEET_MQTT_PASSWORD=//p' '$VEN_DIR/.env.fleet.$1'" 2>/dev/null)
+  if [[ -z "$pw" ]]; then
+    echo "No FLEET_MQTT_PASSWORD for $1 in $VEN_DIR/.env.fleet.$1 on $HOST." >&2
+    echo "Generate it with scripts/gen_fleet_mqtt_secrets.py --per-ven-dir (needs the root secret)." >&2
+    exit 2
+  fi
+  printf '%s' "$pw"
+}
 
-# `python3` is not the interpreter's name everywhere this script is run from
-# (Windows ships `python`), and a missing interpreter here would surface as
-# every check failing rather than as the real problem — the same trap the jobs
-# runner hit. Resolve it once, loudly.
-PY=""
-for candidate in python3 python; do
-  command -v "$candidate" >/dev/null 2>&1 && { PY="$candidate"; break; }
-done
-if [[ -z "$PY" ]]; then
-  echo "No python interpreter found (tried python3, python)." >&2
-  exit 2
-fi
-
-PW1=$($PY "$SCRIPT_DIR/gen_fleet_mqtt_secrets.py" --show ven-1)
-PW2=$($PY "$SCRIPT_DIR/gen_fleet_mqtt_secrets.py" --show ven-2)
+PW1=$(ven_password ven-1) || exit 2
+PW2=$(ven_password ven-2) || exit 2
 BFF_U="${MQTT_BFF_USERNAME:-openadr-bff}"
 BFF_P="${MQTT_BFF_PASSWORD:-openadr-bff}"
 fail=0
