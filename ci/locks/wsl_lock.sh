@@ -15,13 +15,13 @@
 # that host.
 #
 # Usage:
-#   bash scripts/wsl_lock.sh acquire -m "cargo check on 033-task-status"   # 20-min lease
-#   bash scripts/wsl_lock.sh acquire -m "full cargo test" -l 60            # 60-min lease
-#   bash scripts/wsl_lock.sh release
-#   bash scripts/wsl_lock.sh refresh [-l MIN]   # extend the lease (from now)
-#   bash scripts/wsl_lock.sh status
+#   bash ci/locks/wsl_lock.sh acquire -m "cargo check on 033-task-status"   # 20-min lease
+#   bash ci/locks/wsl_lock.sh acquire -m "full cargo test" -l 60            # 60-min lease
+#   bash ci/locks/wsl_lock.sh release
+#   bash ci/locks/wsl_lock.sh refresh [-l MIN]   # extend the lease (from now)
+#   bash ci/locks/wsl_lock.sh status
 #
-# Semantics: scripts/lib/lease_lock_core.sh, shared with docker_host_lock.sh —
+# Semantics: ci/locks/lib/lease_lock_core.sh, shared with docker_host_lock.sh —
 # self-declared lease, re-entrant per owner, dead locks are stolen with a
 # warning, acquire waits up to MAX_WAIT_SEC then exits 2 ("rerun to keep
 # waiting"). Owner identity = user@host:<worktree path>#session-<id>, so

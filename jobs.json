@@ -47,11 +47,11 @@
     {
       "id": "architecture-invariants",
       "description": "Do the VEN's hexagonal dependency rules still hold, and does the module diagram still describe the code?",
-      "command": "{python} scripts/audit_ven_architecture.py && {python} scripts/audit_module_graph.py",
+      "command": "{python} ci/audits/audit_ven_architecture.py && {python} scripts/audit_module_graph.py",
       "interval_days": 90,
       "last_run": "2026-09-23T09:43:54Z",
       "last_status": "done by hand",
-      "notes": "Five dependency rules are scripted (scripts/audit_ven_architecture.py) and run automatically; the fifth -- no crate::assets or crate::simulator anywhere in controller/ -- was added 2026-10-03 after two modules had been violating the rule for months in the one directory the first four did not cover. scripts/audit_module_graph.py now also checks that every edge in the Mermaid diagram names a node it defines: the 2026-10-03 pass removed a node and left an edge pointing at it, and Mermaid renders that as a blank box rather than an error. Since R-35 (2026-10-13) the same audit fails when a tasks/ loop (fn spawn*) or a top-level VEN/src directory is missing from the hand-drawn diagram, and when the generated module import graph below it is stale (scripts/gen_module_graph.py rewrites it). Its first run found history_store/, profile/, services/ and spawn_base_load_window missing. What still needs a human pass is whether the hand-drawn nodes' *descriptions* are still true -- the controller ports, boot/, and anything new under infra. The first content check (2026-09-23) found six task loops and the whole fleet-telemetry path behind."
+      "notes": "Five dependency rules are scripted (ci/audits/audit_ven_architecture.py) and run automatically; the fifth -- no crate::assets or crate::simulator anywhere in controller/ -- was added 2026-10-03 after two modules had been violating the rule for months in the one directory the first four did not cover. scripts/audit_module_graph.py now also checks that every edge in the Mermaid diagram names a node it defines: the 2026-10-03 pass removed a node and left an edge pointing at it, and Mermaid renders that as a blank box rather than an error. Since R-35 (2026-10-13) the same audit fails when a tasks/ loop (fn spawn*) or a top-level VEN/src directory is missing from the hand-drawn diagram, and when the generated module import graph below it is stale (scripts/gen_module_graph.py rewrites it). Its first run found history_store/, profile/, services/ and spawn_base_load_window missing. What still needs a human pass is whether the hand-drawn nodes' *descriptions* are still true -- the controller ports, boot/, and anything new under infra. The first content check (2026-09-23) found six task loops and the whole fleet-telemetry path behind."
     },
     {
       "id": "docs-drift",
@@ -65,7 +65,7 @@
     {
       "id": "step-definitions",
       "description": "Does every sentence in tests/features/ still resolve to exactly one step?",
-      "command": "{python} scripts/audit_step_definitions.py",
+      "command": "{python} ci/audits/audit_step_definitions.py",
       "interval_days": 7,
       "last_run": "2026-10-04T12:50:07Z",
       "last_status": "ok",

@@ -41,7 +41,7 @@ asset-specific methods that only apply to a subset of variants (`plan_trajectory
 no uniform signature to generalize. The macro alone didn't clear `assets/mod.rs`'s
 500-line production cap, so the `Asset` trait/`AssetHandle` and the history ring buffer
 moved to `assets/asset_trait.rs` and `assets/history.rs` respectively; `assets/mod.rs` is
-no longer on `scripts/audit_file_sizes.py`'s allowlist.
+no longer on `ci/audits/audit_file_sizes.py`'s allowlist.
 
 A virtual **Grid asset** (`assets/grid.rs`, held as `SimState.grid_asset`) tracks net
 site power plus the VTN capacity limits each tick and keeps its own history; it is

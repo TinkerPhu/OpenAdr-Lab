@@ -1,33 +1,40 @@
 #!/usr/bin/env bash
 # install.sh — install or update the CI runner on this machine (Node3).
 #
-# Run from a checkout of main on the CI host:  bash scripts/ci/install.sh
+# Run from a checkout of main on the CI host:  bash ci/install.sh
 # Copies the runner and what it needs into /srv/ci/bin (so a ticket that changes these scripts
 # is tested by the previous version), installs the systemd timer that starts the runner every
 # minute, warms the quick tier's unit-test image, and prepares the key the runner pushes to
 # origin/main with. Safe to run again.
 #
 # Layout:  /srv/ci/board/     tickets (board.sh)        /srv/ci/archive/   old tickets
-#          /srv/ci/bin/       ci/{runner,board}.sh, docker_host_lock.sh, lib/
+#          /srv/ci/bin/ci/    a copy of the repository's ci/ (runner, board, locks/, audits/, web/)
 #          /srv/ci/deploy_key push key (write access to this repository only)
 #          ~/.ssh/ci_deploy_ed25519 + Host Node1/Node2 entries: the key deploy tickets ship with
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CI_ROOT="${CI_ROOT:-/srv/ci}"
 CI_REPO="${CI_REPO:-/srv/docker/openadr_lab}"
 GITHUB_REPO="${GITHUB_REPO:-git@github.com:TinkerPhu/OpenAdr-Lab.git}"
 ME="$(id -un)"
 
-sudo install -d -o "$ME" -g "$(id -gn)" "$CI_ROOT" "$CI_ROOT/board" "$CI_ROOT/archive" "$CI_ROOT/bin" "$CI_ROOT/bin/ci" "$CI_ROOT/bin/lib"
-install -m 0755 "$ROOT/scripts/ci/runner.sh" "$ROOT/scripts/ci/board.sh" "$CI_ROOT/bin/ci/"
-install -m 0755 "$ROOT/scripts/docker_host_lock.sh" "$CI_ROOT/bin/"
-install -m 0644 "$ROOT/scripts/lib/lease_lock_core.sh" "$ROOT/scripts/lib/lease_lock_cli.sh" "$CI_ROOT/bin/lib/"
+sudo install -d -o "$ME" -g "$(id -gn)" "$CI_ROOT" "$CI_ROOT/board" "$CI_ROOT/archive" "$CI_ROOT/bin"
+# The installed tree mirrors the repository's ci/ directory (runner.sh finds locks/ beside itself).
+# Written to a sibling and swapped in, so a runner or board started meanwhile sees a whole tree.
+rm -rf "$CI_ROOT/bin/ci.new" && mkdir -p "$CI_ROOT/bin/ci.new"
+cp -r "$ROOT/ci/." "$CI_ROOT/bin/ci.new/"
+find "$CI_ROOT/bin/ci.new" -name __pycache__ -prune -exec rm -rf {} +
+rm -rf "$CI_ROOT/bin/ci.old" && { [ ! -d "$CI_ROOT/bin/ci" ] || mv "$CI_ROOT/bin/ci" "$CI_ROOT/bin/ci.old"; }
+mv "$CI_ROOT/bin/ci.new" "$CI_ROOT/bin/ci"
 
-sed "s/@USER@/$ME/" "$ROOT/scripts/ci/systemd/ci-runner.service" | sudo tee /etc/systemd/system/ci-runner.service >/dev/null
-sudo install -m 0644 "$ROOT/scripts/ci/systemd/ci-runner.timer" /etc/systemd/system/ci-runner.timer
+for unit in ci-runner.service ci-web.service; do
+    sed "s/@USER@/$ME/" "$ROOT/ci/systemd/$unit" | sudo tee "/etc/systemd/system/$unit" >/dev/null
+done
+sudo install -m 0644 "$ROOT/ci/systemd/ci-runner.timer" /etc/systemd/system/ci-runner.timer
 sudo systemctl daemon-reload
-sudo systemctl enable --now ci-runner.timer
+sudo systemctl enable --now ci-runner.timer ci-web.service
+sudo systemctl restart ci-web.service
 
 # The step-definition audit dry-runs behave, which the host's python does not have.
 [ -x "$CI_ROOT/venv/bin/python3" ] || python3 -m venv "$CI_ROOT/venv"
@@ -40,7 +47,7 @@ if [ ! -f "$CI_ROOT/deploy_key" ]; then
 fi
 git -C "$CI_REPO" config remote.origin.pushurl "$GITHUB_REPO"
 git -C "$CI_REPO" config core.sshCommand "ssh -i $CI_ROOT/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-# Deploy tickets (scripts/ci/deploy.sh) ship images to the production hosts over ssh. The runner
+# Deploy tickets (ci/deploy.sh) ship images to the production hosts over ssh. The runner
 # user gets its own key and an ssh alias per target; the key is never in the repository.
 NODE1_ADDR="${NODE1_ADDR:-192.168.1.103}"; NODE2_ADDR="${NODE2_ADDR:-192.168.1.104}"
 DEPLOY_SSH_KEY="$HOME/.ssh/ci_deploy_ed25519"

@@ -5,7 +5,7 @@
 # failed scenario is run once more on its own. Returns 0 when the pass failed and every
 # scenario passed on the retry (the pass is then not failed); 1 otherwise (nothing to
 # retry, or a scenario failed again: red). A scenario that passed on retry is named in a
-# `FLAKY_SCENARIO: <location>` line, which scripts/ci/runner.sh lists in result.md.
+# `FLAKY_SCENARIO: <location>` line, which ci/runner.sh lists in result.md.
 retry_failed_scenarios() {
   local pass="$1" rc="$2" file="$3" location still_failing=0
   shift 3

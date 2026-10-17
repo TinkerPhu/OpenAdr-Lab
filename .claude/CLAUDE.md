@@ -24,6 +24,9 @@ bugs.
     docs/reference/TECHNICAL_DEBTS.md immediately.
 Small code is the goal: fewer places that know a rule means fewer places that can get it wrong.
 
+env: the repo needs no lab host (fresh clone = local docker). This lab sets `OPENADR_LAB_HOST=Node2` (or Node1) and
+CI_HOST=Node3 in the shell; `ci-handoff.sh`/`ci-next.sh` refuse to run without CI_HOST. All CI/CD lives in `ci/` (README there).
+
 docker: docker runs on ssh Node1 (primary — VTN, its DB, BFF, VTN UI, and the main VEN
 docker-compose stack) or ssh Node2 (secondary — ven-4 + build/test offload, see
 VEN/scale_out/node2/). Run tasks with docker on the intended host via ssh in
@@ -32,9 +35,9 @@ directory /srv/docker/openadr_lab (same path on both hosts).
 node1-lock: Node1 is shared between multiple parallel sessions/worktrees. Before ANY
 docker build or test run on Node1, acquire the lease lock and hold it for the
 whole sequence:
-  bash scripts/docker_host_lock.sh acquire -m "<branch>: <what you are doing>" [-l MIN]
+  bash ci/locks/docker_host_lock.sh acquire -m "<branch>: <what you are doing>" [-l MIN]
   ... all ssh Node1 docker commands ...
-  bash scripts/docker_host_lock.sh release
+  bash ci/locks/docker_host_lock.sh release
 The acquirer declares its own lease end (-l minutes, default 60) which is stored in
 the lock as UTC time; once that time passes the lock counts as dead and the next
 acquirer steals it. Pick -l honestly for the expected runtime; `refresh [-l MIN]`
@@ -49,7 +52,7 @@ off Node1. It shares the same lock script and mechanism as Node1 (docker_host_lo
 Node1-specific despite the name — the lock is one fixed path on the target host itself, so
 each machine gets its own independent lock and every SSH alias of a machine reaches the same
 one; the owner is the AI session (CLAUDE_CODE_SESSION_ID), not just the checkout, so two
-sessions in one checkout exclude each other — scripts/test_lease_lock.sh pins both). Set
+sessions in one checkout exclude each other — ci/locks/test_lease_lock.sh pins both). Set
 LOCK_HOST=Node2 to target it
 directly, or run `DOCKER_HOST=Node2 bash run_all_tests.sh ...`, which sets this
 automatically. Node1 and Node2 can be used concurrently by different sessions without
@@ -65,9 +68,9 @@ submodule and lock mechanism (LOCK_HOST=Node3, `DOCKER_HOST=Node3 bash run_all_t
 ci-handoff: Node3 also runs the CI runner, which tests branches and is the only thing that merges
 to main. When your work is done and the quick local checks are green (cargo check, the tests you
 touched, the python audits): commit the journal and KEY_LEARNINGS entries WITH the code, push
-(`git push -f origin HEAD:<branch>`), run `bash scripts/ci/ci-handoff.sh`, and stop. Do not run
+(`git push -f origin HEAD:<branch>`), run `bash ci/ci-handoff.sh`, and stop. Do not run
 the full suite yourself, do not merge to main, do not wait for the result. The user brings you the
-result with `scripts/ci/ci-next.sh`: merged means delete the branch and worktree and finish the
+result with `ci/ci-next.sh`: merged means delete the branch and worktree and finish the
 task; red, conflict or stale means fix and hand off again. A run that must not merge (A/B, experiment,
 milestone) goes to Node2 by hand under test-host-preference, not onto the board: Node3 is one lane and
 every full run holds it for an hour. `--kind check` is for when the user wants Node3's verdict. Stop only after handing off finished work: a `--kind check` hand-off of work in progress
@@ -129,9 +132,9 @@ wsl-lock: the WSL instance on this laptop is shared between multiple parallel
 sessions/worktrees, same as Node1. Before ANY `wsl cargo build/check/test/clippy` (or
 other large-memory WSL command), acquire the lease lock and hold it for the whole
 sequence:
-  bash scripts/wsl_lock.sh acquire -m "<branch>: <what you are doing>" [-l MIN]
+  bash ci/locks/wsl_lock.sh acquire -m "<branch>: <what you are doing>" [-l MIN]
   ... all wsl cargo commands ...
-  bash scripts/wsl_lock.sh release
+  bash ci/locks/wsl_lock.sh release
 Same semantics as node1-lock (self-declared lease stored as UTC epoch, re-entrant per
 owner, dead locks are stolen with a warning): `-l` sets the lease in minutes (default
 20 — override for long test runs), `refresh [-l MIN]` extends from now if a run
@@ -211,11 +214,11 @@ Fix branches: fix/<slug>. All those branches target main. Never force-push to ma
 Commits are signed off (-s); do not add co-author footers (see rule above).
 Merge only after all of these pass (the Node3 runner runs them when you hand off a branch; by
 hand otherwise): cargo fmt, cargo clippy --all-targets --all-features -- -D warnings, cargo audit,
-file-size audit (scripts/audit_file_sizes.py — tasks/ ≤ 200, VEN/src/ ≤ 500 production
-lines), duplication ratchet (`python scripts/audit_duplication.py` — fails when a branch adds or
+file-size audit (ci/audits/audit_file_sizes.py — tasks/ ≤ 200, VEN/src/ ≤ 500 production
+lines), duplication ratchet (`python ci/audits/audit_duplication.py` — fails when a branch adds or
 grows a duplicated cluster or a Rust function over 100 lines; `--update` only after reducing debt),
 and E2E tests green on Node1.
-Touched anything under tests/features/? Run `python scripts/audit_step_definitions.py`
+Touched anything under tests/features/? Run `python ci/audits/audit_step_definitions.py`
 BEFORE queuing a remote suite. `tests/entrypoint.sh` aborts the whole E2E run if any step
 is undefined or ambiguous, so one sentence/pattern mismatch costs the full ~20-minute
 round trip to discover; this finds it in a second and also catches a new step pattern that
@@ -321,7 +324,7 @@ never hand-set.
   - A branch's final report states issues filed, fixed and deferred, so intake and output
     stay visible.
 The Small/Trivial rule is a gate, not advice: before merging a branch run
-`python scripts/audit_debt_gate.py`. It lists every open Small/Trivial row whose
+`python ci/audits/audit_debt_gate.py`. It lists every open Small/Trivial row whose
 `Affected files` this branch touched and fails until each is either fixed (row deleted from
 the register in the branch) or deferred with a commit-message line
 `Debt-deferred: R-NN: <why not now>`. Write `Affected files` as backticked repo-relative
@@ -411,14 +414,14 @@ ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency ru
   File size: no VEN/src/ file > 500 production lines; tasks/ files must stay < 200
   production lines. "Production lines" = non-blank lines excluding #[cfg(test)] blocks
   and whole test-only files/directories (e.g. controller/milp_planner/tests/) — this is
-  exactly what scripts/audit_file_sizes.py measures; run it to check compliance.
+  exactly what ci/audits/audit_file_sizes.py measures; run it to check compliance.
   The script's ALLOWLIST is empty and should stay that way. It once held
   assets/mod.rs pending the enum→trait refactor; that refactor landed (AssetConfig
   is gone) and the file is now 192/500 production lines, so the exception was
   removed. Add an entry only for genuinely cohesive code a split would make worse,
   and justify it in docs/plans/refactoring_backlog.md at the same time.
 
-  Verifiable invariants — run `python scripts/audit_ven_architecture.py` before any
+  Verifiable invariants — run `python ci/audits/audit_ven_architecture.py` before any
   VEN PR. It applies these rules to production code only (comments and
   #[cfg(test)] stripped), which the raw greps below cannot do:
     no `use crate::profile` in entities/, controller/, routes/

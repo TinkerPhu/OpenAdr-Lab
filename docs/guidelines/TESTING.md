@@ -37,7 +37,7 @@ docker compose -f $C run --rm ven-unit-test cargo clippy --all-targets --all-fea
 ```
 
 The named cache volumes make everything after the first run incremental. Remember the host
-lock (`LOCK_HOST=Node2 bash scripts/docker_host_lock.sh acquire -m "..."`) — this is a build
+lock (`LOCK_HOST=Node2 bash ci/locks/docker_host_lock.sh acquire -m "..."`) — this is a build
 on a shared host like any other.
 
 ### Coverage (opt-in)
@@ -224,6 +224,10 @@ resumes the session with the result
 
 ### Handing a branch over
 
+`ci-handoff.sh` and `ci-next.sh` need `CI_HOST` (the CI host's ssh name; our lab: `export CI_HOST=Node3`) and refuse
+to run without it, so a fresh clone never dials a host that does not exist. The suites use `OPENADR_LAB_HOST`
+(unset means the local docker). See `ci/README.md`.
+
 Commit everything first, **including the journal and key-learnings entries** (they are tested and
 merged with the code), push, then hand off. Finished work: stop until the result arrives. A
 `--kind check` hand-off of an unfinished branch's milestone: keep working on new commits (the ticket
@@ -231,21 +235,28 @@ tests the commit it recorded) and do not hand off again while it is in flight:
 
 ```bash
 git push -f origin HEAD:<branch>
-bash scripts/ci/ci-handoff.sh                    # test everything, merge if green
-bash scripts/ci/ci-handoff.sh --kind check       # test only, never merge (A/B runs, experiments)
-bash scripts/ci/ci-handoff.sh --tiers quick      # audits, fmt, clippy, cargo test only; never merges code
+bash ci/ci-handoff.sh                    # test everything, merge if green
+bash ci/ci-handoff.sh --kind check       # test only, never merge (A/B runs, experiments)
+bash ci/ci-handoff.sh --tiers quick      # audits, fmt, clippy, cargo test only; never merges code
 ```
 
 The ticket records the session id and the directory the session was started in. The session can
 be closed: nothing waits for it, and the result stays on the board. Keeping a session open does
 not keep its prompt cache warm (the cache is server-side and expires on its own), and costs RAM.
 
+### Watching the queue
+
+The CI host serves a read-only board on port 8480 (`ci/web/`, `ci-web.service`): queue, running ticket and step,
+timeline, step durations, log tails, and an estimated finish time per ticket (median of finished tickets of the
+same class, chained through the queue). The same data is at `/api/summary` and `/api/tickets`; the routes are in
+`ci/README.md`, the behaviour is pinned by `ci/test_web.py`.
+
 ### Picking the result up
 
 ```bash
-bash scripts/ci/ci-next.sh            # finished tickets; resumes the session of the one you choose
-bash scripts/ci/ci-next.sh --list     # only list         --all    every ticket and its status
-bash scripts/ci/ci-next.sh --new      # a fresh session in the ticket's worktree (cheaper than
+bash ci/ci-next.sh            # finished tickets; resumes the session of the one you choose
+bash ci/ci-next.sh --list     # only list         --all    every ticket and its status
+bash ci/ci-next.sh --new      # a fresh session in the ticket's worktree (cheaper than
                                       # waking a long session just to say "merged")
 ```
 
@@ -286,9 +297,9 @@ Every build and test run costs minutes to hours on shared hardware, so start non
 - Look for warm caches and volumes before any build that would start cold. A new compose project
   or a renamed volume starts empty: the first runner ticket compiled every dependency twice for
   that reason.
-- A change the suites cannot see (docs, wiki, openspec, `.claude/`, `scripts/ci/`) needs no Rust or
+- A change the suites cannot see (docs, wiki, openspec, `.claude/`, `ci/`) needs no Rust or
   E2E run; the runner takes it in minutes (audits plus the CI mechanism tests,
-  `board_docs_only` in `scripts/ci/board.sh`).
+  `board_docs_only` in `ci/board.sh`).
 - The board is one lane: a run that will not merge (A/B, experiment) goes to Node2 by hand, not
   onto the board (`test-host-preference`).
 - While working run the narrowest test that proves the change; the full gate belongs to the runner.
@@ -304,18 +315,18 @@ never pulls. `LOCK_HELD_BY_CALLER=1` skips the lock for a caller that holds it a
 
 ### Operating it
 
-`bash scripts/ci/install.sh` on Node3 (from a checkout of `main`) installs the runner into
+`bash ci/install.sh` on Node3 (from a checkout of `main`) installs the runner into
 `/srv/ci/bin`, the `ci-runner.timer`, and warms the unit-test image. The runner is a snapshot:
-changes to `scripts/ci/` take effect after the next install, and a ticket that changes them is
+changes to `ci/` take effect after the next install, and a ticket that changes them is
 tested by the previous version.
 
 - Board and logs: `/srv/ci/board/<ticket>/{request.env,status,result.md,run.log,quick.log,full.log}`.
 - Pause: `sudo systemctl stop ci-runner.timer` (a running ticket finishes). Is it alive:
   `systemctl is-active ci-runner.timer`; timer log: `journalctl -u ci-runner`.
 - Push access: `/srv/ci/deploy_key` is a write-enabled deploy key for this repository only.
-- Tests of the mechanism: `scripts/ci/test_board.sh`, `scripts/ci/test_handoff.sh`, `scripts/ci/test_deploy.sh`,
+- Tests of the mechanism: `ci/test_board.sh`, `ci/test_handoff.sh`, `ci/test_deploy.sh`,
   `tests/test_retry_failed.sh`,
-  `scripts/test_lease_lock.sh`.
+  `ci/locks/test_lease_lock.sh`.
 
 Flaky versus red: `tests/entrypoint.sh` re-runs each failed scenario once on its own
 (`tests/retry_failed.sh`, pinned by `tests/test_retry_failed.sh`). A scenario that passes on the
@@ -327,18 +338,18 @@ under "Flaky" in `result.md`, and the ticket still merges. One that fails again 
 Only after the user said so, a session hands off a deploy instead of a branch:
 
 ```bash
-bash scripts/ci/ci-handoff.sh --deploy Node1 VEN "ven-2 ven-3"     # add --rollback to go back
+bash ci/ci-handoff.sh --deploy Node1 VEN "ven-2 ven-3"     # add --rollback to go back
 ```
 
 The runner builds release images of `origin/main` (what E2E tested was the `ci` profile) on Node3,
 ships them to the target (same CPU architecture on all three hosts), takes the target's lock, keeps
 the running image as `:previous`, and switches the services over with `up -d --no-build`
-(`scripts/ci/deploy.sh`; allowlisted targets Node1/Node2 and stacks VEN, VTN,
-VEN/scale_out/node2; pinned by `scripts/ci/test_deploy.sh`). Status `deployed` or `red`. Needs an SSH key
-of the runner user on Node3 that Node1 and Node2 accept: `scripts/ci/install.sh` creates
+(`ci/deploy.sh`; allowlisted targets Node1/Node2 and stacks VEN, VTN,
+VEN/scale_out/node2; pinned by `ci/test_deploy.sh`). Status `deployed` or `red`. Needs an SSH key
+of the runner user on Node3 that Node1 and Node2 accept: `ci/install.sh` creates
 `~/.ssh/ci_deploy_ed25519` and the `Node1`/`Node2` ssh aliases and prints the public key, which
 must be added to `authorized_keys` on both hosts (never commit the key). Rebuilding Node3 means
-`scripts/ci/install.sh` plus registering the printed GitHub deploy key and these two host keys. This
+`ci/install.sh` plus registering the printed GitHub deploy key and these two host keys. This
 replaces the scp-based `deploy-node1` skill for tested builds; that skill stays for trying
 uncommitted edits.
 
