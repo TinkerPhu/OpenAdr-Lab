@@ -40,6 +40,8 @@ tbody tr:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
 .s-error { background: var(--error); } .s-queued { background: var(--queued); } .s-running { background: var(--running); }
 .s-unknown { background: var(--unknown); }
 .muted { color: var(--muted); }
+.chip { display: inline-block; padding: 0 6px; margin-right: 3px; border: 1px solid var(--line); border-radius: 8px; font-size: 11px; }
+.chip.skip { color: var(--muted); text-decoration: line-through; }
 .over { color: var(--conflict); }
 svg text { fill: var(--text); font: 11px system-ui, sans-serif; }
 svg .axis { stroke: var(--line); }
@@ -92,6 +94,9 @@ const hm = s => { const d = dt(s); return d ? d.toLocaleString([], {month:"short
 const dur = s => { if (s == null) return "-"; s = Math.round(s); const h = Math.floor(s/3600), m = Math.floor(s%3600/60);
   return h ? `${h}h ${m}m` : m ? `${m}m ${s%60}s` : `${s}s`; };
 const colorVar = st => `var(--${["merged","deployed","green","red","conflict","stale","error","queued","running"].includes(st) ? st : "unknown"})`;
+const suiteChips = t => t.suites_run == null ? "" :
+  t.suites_run.map(x => `<span class="chip" title="run">${esc(x)}</span>`).join("") +
+  t.suites_skipped.map(x => `<span class="chip skip" title="skipped: the change cannot affect it">${esc(x)}</span>`).join("");
 const badge = st => `<span class="badge s-${esc(st)}">${esc(st)}</span>`;
 
 function etaCell(t) {
@@ -122,7 +127,7 @@ function renderRows() {
       <td>${badge(t.status)}</td><td>${esc(t.branch)}</td><td>${hm(t.created)}</td>
       <td>${hm(t.started)}</td><td>${t.status === "running" && t.started ? dur((Date.now() - dt(t.started)) / 1000) + " so far" : dur(t.duration_s)}</td>
       <td>${etaCell(t)}</td>
-      <td>${esc(t.status === "running" ? t.current_step || "starting" : t.note || "")}</td>
+      <td>${esc(t.status === "running" ? t.current_step || "starting" : t.note || "")} ${suiteChips(t)}</td>
       <td>${t.acked ? "yes" : (["queued", "running"].includes(t.status) ? "" : "no")}</td></tr>`).join("");
   document.querySelectorAll("#rows tr").forEach(r => r.onclick = () => select(r.dataset.n));
 }
@@ -191,6 +196,7 @@ function select(name) {
   $("detail").hidden = false;
   $("dtitle").innerHTML = `${esc(t.branch)} ${badge(t.status)}`;
   $("dmeta").textContent = `${t.name} - sha ${(t.sha || "").slice(0, 8)} - ${t.kind}, tiers ${t.tiers}, attempt ${t.attempt}`;
+  if (t.suites_run != null) $("dmeta").innerHTML += `<br>suites: ${suiteChips(t)}`;
   renderSteps(t);
   loadLog();
 }

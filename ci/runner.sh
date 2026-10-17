@@ -74,16 +74,16 @@ checkout_rebased() {
     git submodule update -q --init --recursive
 }
 
-quick_tier() { # $1 = docs-only (yes|no)
+quick_tier() { # $1 = the selected suites (board_suites); the audits and self-tests always run
     local s
     for s in audit_file_sizes audit_duplication audit_debt_gate audit_ven_architecture audit_step_definitions; do
         run_step "$s" "$PY" "ci/audits/$s.py" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     done
     # The CI mechanism has no other test: a change to it skips the suites, so these always run.
-    for s in test_board test_handoff test_deploy test_web; do
+    for s in test_board test_runner test_handoff test_deploy test_web; do
         run_step "ci/$s" bash "ci/$s.sh" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     done
-    [ "$1" = yes ] && return 0
+    [[ " $1 " == *" cargo "* ]] || return 0
     # The harness copies VEN/ and lab-core/ into its image, so the image is rebuilt from this commit;
     # the cargo registry and target are volumes, so a run compiles only what changed.
     run_step "unit-test image" $UNIT_TEST build ven-unit-test >>"$TICKET_DIR/quick.log" 2>&1 || return 1
@@ -94,10 +94,20 @@ quick_tier() { # $1 = docs-only (yes|no)
     run_step "cargo audit (BFF)" $UNIT_TEST run --rm -v "$CI_REPO/VTN/bff:/bff:ro" -w /bff ven-unit-test cargo audit >>"$TICKET_DIR/quick.log" 2>&1 || return 1
 }
 
-full_tier() {
-    run_step "run_all_tests.sh --rust --e2e --resilience" \
+# suite_flags <suites> - the run_all_tests.sh flags of the full-tier suites among them (cargo is the quick tier's)
+suite_flags() {
+    local s
+    for s in $1; do
+        case "$s" in rust-vtn) echo "--rust" ;; e2e|resilience) echo "--$s" ;; esac
+    done
+}
+
+full_tier() { # $1 = the selected suites
+    local flags; flags="$(suite_flags "$1" | tr '\n' ' ')"
+    [ -n "$flags" ] || return 0
+    run_step "run_all_tests.sh ${flags% }" \
         env -u DOCKER_HOST OPENADR_LAB_HOST=localhost LOCK_HELD_BY_CALLER=1 \
-        bash run_all_tests.sh --rust --e2e --resilience >"$TICKET_DIR/full.log" 2>&1
+        bash run_all_tests.sh $flags >"$TICKET_DIR/full.log" 2>&1
 }
 
 # After a run, leave no test containers behind and the checkout on main, as the lock rules ask.
@@ -124,10 +134,17 @@ write_result() { # $1 = ticket
         echo
         echo "- verdict: **$VERDICT**${NOTE:+ — $NOTE}"
         echo "- branch: $BRANCH   requested: $SHA   tested: ${TESTED_SHA:-(not reached)}"
-        echo "- tiers: $TIERS   kind: $KIND   docs-only: ${DOCS_ONLY:-?}   attempt: $(cat "$TICKET_DIR/attempt" 2>/dev/null)"
+        echo "- tiers: $TIERS   kind: $KIND   attempt: $(cat "$TICKET_DIR/attempt" 2>/dev/null)"
         echo "- finished: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         [ "$VERDICT" = merged ] && echo "- origin/main is now at: $TESTED_SHA (the rebased commit; the branch's own sha differs if main moved)"
         echo
+        if [ -n "${CHANGED_WHY+x}" ]; then
+            echo "## Suites"; echo
+            echo "- run: ${SUITES_RUN:-(none)}"
+            echo "- skipped: ${SUITES_SKIPPED:-(none)}"
+            echo "- decided by:"; printf '%s\n' "$CHANGED_WHY" | head -n 5 | sed 's/^/  - /'
+            echo
+        fi
         echo "| step | exit | seconds |"
         echo "|---|---|---|"
         for s in "${STEPS[@]:-}"; do
@@ -173,17 +190,36 @@ test_and_merge() {
     elif [ $rc -ne 0 ]; then VERDICT=error
     else
         TESTED_SHA="$(git -C "$CI_REPO" rev-parse HEAD)"
-        if git -C "$CI_REPO" diff --name-only "origin/main..$TESTED_SHA" | board_docs_only; then DOCS_ONLY=yes; else DOCS_ONLY=no; fi
-        if ! quick_tier "$DOCS_ONLY"; then VERDICT=red
-        elif [ "$DOCS_ONLY" = no ] && [[ ",$TIERS," == *,full,* ]] && ! full_tier; then VERDICT=red
-        elif [ "$KIND" != merge ] || { [ "$DOCS_ONLY" = no ] && [[ ",$TIERS," != *,full,* ]]; }; then
-            VERDICT=green; NOTE="tested, not merged (kind $KIND, tiers $TIERS)"
+        select_suites
+        if ! quick_tier "$SUITES_RUN"; then VERDICT=red
+        elif [[ ",$TIERS," == *,full,* ]] && ! full_tier "$SUITES_RUN"; then VERDICT=red
+        elif [ "$KIND" != merge ] || [ -n "$SUITES_UNRUN" ]; then
+            VERDICT=green; NOTE="tested, not merged (kind $KIND, tiers $TIERS${SUITES_UNRUN:+, not run: $SUITES_UNRUN})"
         else
             push_main "$TESTED_SHA"; rc=$?
             if [ $rc -eq 0 ]; then VERDICT=merged
             elif [ $rc -eq 9 ]; then VERDICT=requeue; NOTE="origin/main moved while testing"
             else VERDICT=error; NOTE="push to origin/main failed (exit $rc)"; fi
         fi
+    fi
+}
+
+# select_suites - from the paths this ticket changes, set SUITES_RUN (to run), SUITES_SKIPPED (the map
+# says the change cannot affect them), SUITES_UNRUN (selected but outside the ticket's tiers, so
+# the commit may not merge) and CHANGED_WHY (path -> suites, for result.md).
+select_suites() {
+    local changed s
+    changed="$(git -C "$CI_REPO" diff --name-only "origin/main..$TESTED_SHA")"
+    CHANGED_WHY="$(board_suites_why <<<"$changed")"
+    SUITES_RUN="$(board_suites <<<"$changed" | tr '\n' ' ' | sed 's/ $//')"
+    SUITES_SKIPPED=""; SUITES_UNRUN=""
+    for s in $BOARD_ALL_SUITES; do
+        [[ " $SUITES_RUN " == *" $s "* ]] || SUITES_SKIPPED="${SUITES_SKIPPED:+$SUITES_SKIPPED }$s"
+    done
+    if [[ ",$TIERS," != *,full,* ]]; then
+        for s in $SUITES_RUN; do
+            case "$s" in cargo) ;; *) SUITES_UNRUN="${SUITES_UNRUN:+$SUITES_UNRUN }$s" ;; esac
+        done
     fi
 }
 
@@ -198,7 +234,7 @@ deploy_flow() { # $1 = ticket
 
 process_ticket() {
     local t="$1" attempt rc
-    TICKET_DIR="$BOARD_DIR/$t"; STEPS=(); FAILED_STEP=""; VERDICT=""; NOTE=""; TESTED_SHA=""; DOCS_ONLY=""
+    TICKET_DIR="$BOARD_DIR/$t"; STEPS=(); FAILED_STEP=""; VERDICT=""; NOTE=""; TESTED_SHA=""; unset CHANGED_WHY; SUITES_RUN=""; SUITES_SKIPPED=""; SUITES_UNRUN=""
     BRANCH="$(board_get "$t" BRANCH)"; SHA="$(board_get "$t" SHA)"
     TIERS="$(board_get "$t" TIERS)"; KIND="$(board_get "$t" KIND)"
     TIERS="${TIERS:-quick,full}"; KIND="${KIND:-merge}"

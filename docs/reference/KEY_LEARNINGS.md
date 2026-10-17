@@ -3511,3 +3511,11 @@ The runner installed on the CI host tests a branch with the previous version of 
 that version calls (here `scripts/audit_*.py` to `ci/audits/`) is red under it, and once merged it turns every
 later ticket red until the new runner is installed. Do the cutover by hand with an empty queue and the timer
 stopped: merge, install, start the timer; keep the previous installed tree (`ci.old`) for rollback.
+
+## A skip rule must name what a path cannot affect (2026-10-17)
+
+Suite selection fails safe only if every rule is "this path cannot reach that suite" and the last rule runs
+everything. The first draft of the goal ("UI-only skips E2E") was a rule about what a path *usually* affects,
+and the code said otherwise: E2E builds both UIs and drives them. Read the compose files and Dockerfiles
+(what each suite copies and builds) before writing a rule, and keep a scheduled full run of `main` to catch the
+rule that was wrong anyway.
