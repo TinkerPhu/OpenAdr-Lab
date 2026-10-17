@@ -155,7 +155,7 @@ fn sum_digit_units(s: &str, seconds_for: impl Fn(char) -> Option<i64>) -> i64 {
 /// and never populate them, matching the same approximation in
 /// `experiments/kpi.py`'s duration parser). Unknown shapes parse as 0
 /// seconds.
-fn parse_pt_duration_s(s: &str) -> i64 {
+pub(crate) fn parse_pt_duration_s(s: &str) -> i64 {
     let Some(rest) = s.strip_prefix('P') else {
         return 0;
     };

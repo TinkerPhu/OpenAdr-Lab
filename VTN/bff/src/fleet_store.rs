@@ -550,7 +550,7 @@ pub async fn power_series(
 ///
 /// Separate from the query so the shaping is testable without a database —
 /// the part that can be wrong in a way SQL cannot catch.
-fn group_and_resample(
+pub(crate) fn group_and_resample(
     rows: Vec<(String, DateTime<Utc>, Option<f64>)>,
     step: Duration,
 ) -> Vec<(String, TimeSeries)> {

@@ -188,7 +188,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 - [x] 8.4 `scripts/seed_vtn.py`: `USAGE_FORECAST` descriptor on the fleet-monitoring event and
       `PAYLOAD_CONTRACT["USAGE_FORECAST"] = {"units": "KWH"}`; `docs/reference/WIRE_PROFILE.md`
       row if missing (the lab-core table test checks it).
-- [ ] 8.5 `GET /api/fleet/forecast`: newest `USAGE_FORECAST` report per online VEN from the
+- [x] 8.5 `GET /api/fleet/forecast`: newest `USAGE_FORECAST` report per online VEN from the
       recorder table, converted with `lab_core::units::mean_power_kw` per its declared unit and
       interval, summed with `group_and_resample` / `sum_over_grid`, each slot with VEN count and
       objectives. Tests: kWh→kW conversion, offline VEN excluded, mixed objectives listed, report

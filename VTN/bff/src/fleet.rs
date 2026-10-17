@@ -43,6 +43,9 @@ pub struct VenLiveState {
     /// The objective the fleet commands this VEN, as the broker holds it on
     /// `command/objective` (the BFF reads its own retained commands back); `None` once released.
     pub command: Option<ObjectiveCommand<String>>,
+    /// When the objective this VEN reports last changed (not set by the first one seen): the
+    /// moment the fleet forecast's `before` series looks back from (`fleet_forecast`).
+    pub objective_changed_at: Option<DateTime<Utc>>,
 }
 
 impl VenLiveState {
@@ -54,6 +57,7 @@ impl VenLiveState {
             objective: None,
             plan: None,
             command: None,
+            objective_changed_at: None,
         }
     }
 
@@ -134,7 +138,14 @@ pub fn apply_message(
                 .as_ref()
                 .and_then(|v| v.get("state")?.as_str().map(str::to_string));
         }
-        leaf::OBJECTIVE => keep_readable(&mut entry.objective, payload, ven, leaf::OBJECTIVE),
+        leaf::OBJECTIVE => {
+            let before = objective_name(entry.objective.as_ref());
+            keep_readable(&mut entry.objective, payload, ven, leaf::OBJECTIVE);
+            let after = objective_name(entry.objective.as_ref());
+            if before.is_some() && before != after {
+                entry.objective_changed_at = Some(now);
+            }
+        }
         leaf::PLAN => keep_readable(&mut entry.plan, payload, ven, leaf::PLAN),
         // An empty retained message is how a command is withdrawn.
         leaf::COMMAND_OBJECTIVE if payload.is_empty() => entry.command = None,
@@ -147,6 +158,11 @@ pub fn apply_message(
         // of the design, just not of the live state.
         _ => {}
     }
+}
+
+/// The objective's name in a VEN's `objective` body.
+fn objective_name(body: Option<&serde_json::Value>) -> Option<String> {
+    Some(body?.get("objective")?.as_str()?.to_string())
 }
 
 /// Replace `slot` with the leaf's JSON body; keep the previous one when the body is unreadable,

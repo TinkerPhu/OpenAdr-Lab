@@ -4,6 +4,7 @@ mod db;
 mod error;
 mod fleet;
 mod fleet_command;
+mod fleet_forecast;
 mod fleet_reactions;
 mod fleet_signals;
 mod fleet_store;
@@ -205,6 +206,7 @@ async fn main() -> anyhow::Result<()> {
             "/api/fleet/objective",
             put(routes::fleet::put_fleet_objective),
         )
+        .route("/api/fleet/forecast", get(routes::fleet::fleet_forecast))
         .route(
             "/api/fleet/vens/:ven/objective",
             put(routes::fleet::put_ven_objective),

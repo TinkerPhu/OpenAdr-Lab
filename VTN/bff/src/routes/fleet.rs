@@ -407,3 +407,75 @@ pub async fn get_ven_plan(
         )),
     }
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForecastQuery {
+    /// Grid width in seconds; the VENs report every 15 minutes, so that is the default.
+    pub step_seconds: Option<i64>,
+}
+
+/// `GET /api/fleet/forecast` — what the online fleet says it will draw, slot by slot, with the
+/// objectives behind each slot, and the same sum from before the last objective change.
+pub async fn fleet_forecast(
+    State(ctx): State<AppCtx>,
+    Query(q): Query<ForecastQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use crate::fleet_forecast as ff;
+    let pool = ctx.fleet_store.read().await.clone();
+    let Some(pool) = pool else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "the report store is not connected"})),
+        ));
+    };
+    let failed = |e: anyhow::Error| {
+        tracing::warn!(error = %e, "fleet forecast query failed");
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": "fleet forecast query failed"})),
+        )
+    };
+    let step = Duration::seconds(q.step_seconds.unwrap_or(900).max(MIN_STEP_S));
+    let now = Utc::now();
+    let fleet = ctx.fleet.read().await.clone();
+
+    let current: Vec<ff::VenForecast> = ff::newest_reports(&pool, None)
+        .await
+        .map_err(failed)?
+        .iter()
+        .filter_map(|(ven, report)| ff::read_forecast(ven, report))
+        .collect();
+    let changes = ff::objective_changes(&fleet);
+    let mut pre_change = Vec::new();
+    for (ven, at) in &changes {
+        let earlier = ff::newest_reports(&pool, Some((ven, *at)))
+            .await
+            .map_err(failed)?;
+        pre_change.extend(earlier.iter().filter_map(|(v, r)| ff::read_forecast(v, r)));
+    }
+    let before = ff::before_forecasts(&current, &pre_change).map(|forecasts| {
+        let changed_at = changes
+            .iter()
+            .filter(|(ven, _)| pre_change.iter().any(|f| &f.ven == ven))
+            .map(|(_, at)| *at)
+            .min();
+        json!({
+            "changed_at": changed_at,
+            "slots": ff::sum_forecasts(&forecasts, &fleet, step, now),
+        })
+    });
+    let assumed: Vec<&str> = current
+        .iter()
+        .filter(|f| f.assumed_unit)
+        .map(|f| f.ven.as_str())
+        .collect();
+    Ok(Json(json!({
+        "stepSeconds": step.num_seconds(),
+        "slots": ff::sum_forecasts(&current, &fleet, step, now),
+        "before": before,
+        // VENs whose report declared no unit, read in the profile's KWH (`wire-contracts`:
+        // an assumption is shown, never silent).
+        "assumedUnitVens": assumed,
+    })))
+}
