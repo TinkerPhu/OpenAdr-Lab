@@ -3575,3 +3575,14 @@ right for keeping an x86 plan identical to the last bit; it is no longer needed 
 - It hides at 1 s ticks (one tick in two over the limit looks like noise) and shows at once in a
   forecast with 30-minute slots that runs the same decision. Stepping the live decision at a
   coarse step is a cheap test for any controller with a lagging actuator.
+
+## An MQTT client's packet limit is part of the channel's contract (2026-10-17)
+
+- rumqttc caps packets at 10 KiB in both directions by default. Telemetry fitted, so the limit
+  was invisible until a leaf carried a whole plan (hundreds of kB): the sender fails such a
+  publish inside its event loop and drops the connection, re-sends on reconnect and fails again,
+  and a receiver at the default drops the connection that carries every publisher. Nothing
+  reports it as "too big" anywhere a fleet view would show.
+- Size the limit to the largest leaf, set it on every client of the channel from one constant
+  (`lab_core::fleet_channel::MAX_PACKET_BYTES`), and pin it with a test that a realistic body
+  exceeds the library default.
