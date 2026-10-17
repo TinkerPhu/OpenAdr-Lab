@@ -110,7 +110,9 @@ def main() -> int:
     if not root:
         print(
             "No root secret. Pass --root or set MQTT_FLEET_ROOT_SECRET.\n"
-            "Create one with: python3 scripts/gen_fleet_mqtt_secrets.py --new-root",
+            "Create one with: python3 scripts/gen_fleet_mqtt_secrets.py --new-root\n"
+            "The root is only needed to generate or rotate passwords; a running fleet, and"
+            " scripts/test_fleet_acl.sh, work without it.",
             file=sys.stderr,
         )
         return 2

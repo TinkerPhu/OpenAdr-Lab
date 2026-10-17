@@ -15993,3 +15993,16 @@ and `board.sh` then did nothing for the hand-off the test makes. `test_handoff.s
 **Why it was missed.** The test passed in an interactive shell on the laptop and on Node3; only the runner's
 environment differs. Verified red first with `BOARD_NO_MAIN=1 bash scripts/ci/test_handoff.sh` (20 failures),
 green after, and green in a plain shell.
+## The fleet ACL test no longer asks for the root secret (fix/fleet-acl-test-no-root)
+
+**What.** `scripts/test_fleet_acl.sh` read a VEN's password by deriving it from `MQTT_FLEET_ROOT_SECRET`, 
+so a session wanting to verify the broker's ACL stopped, believing it could not continue without a 
+secret that is deliberately absent from every host. It now reads `FLEET_MQTT_PASSWORD` from the VEN's 
+own `VEN/.env.fleet.ven-N` on the host, the password the broker already holds for it. The generator's 
+error message and `VTN_ARCHITECTURE.md` now say who needs the root: only whoever generates or rotates 
+passwords.
+
+**Why.** A verifier should use what the system holds, not the generator's secret. Checked first: the root 
+is on none of Node1, Node2, Node3 or the laptop, the running fleet never reads it, and the generator and 
+this test were its only readers. Verified live against the Node1 broker: red (exit 2) before, all four 
+checks OK after.
