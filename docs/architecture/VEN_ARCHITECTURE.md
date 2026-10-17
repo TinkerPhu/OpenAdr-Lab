@@ -332,7 +332,29 @@ ceiling first (`temp_safety_max_c`, reachable only in `Absorb`), then the emerge
 `temp_min_c + delta`, and once the tank reaches `temp_max_c` the relay stays open until
 `temp_max_c - delta`, tracked by `HeaterState.ceiling_latched` alongside the existing
 `emergency_latched`. Both the arming and the release read the same `state.temperature_c` the
-forcing decision was made on, so the latch cannot disagree with it.
+forcing decision was made on, so the latch cannot disagree with it (`Heater::latches_after`, the
+one latch update the live tick and the planner's forecast share). The cut-out ceiling and its
+deadband follow the mode: in `Absorb` the latch arms at `temp_safety_max_c` and holds until a
+delta below it, so a tank heating up from below can be taken past `temp_max_c`.
+
+**The planner pins the latch the heater already has (R-94).** `HeaterMilpContext::from_state`
+asks the heater what its thermostat will force from now (`Heater::forced_kw_ahead`: the same
+rule replayed slot by slot in the MILP's own tank model, a constant `q_dem_kw`) and fixes those
+slots' stages before the solve (`assets/heater_pins.rs`), over the plan in force's anchor. So
+while a tank coasts down from its ceiling, or an emergency reheats it, the plan holds what the
+heater will do instead of proposing dispatch it refuses. This adds no variables; it removes free
+integers from the near zone. A latch the plan would cause later in the horizon is not modelled
+(that needs a latch binary per slot and would cost solve time on the slack-poor heater VENs,
+`R97_PLANNER_BENCHMARKS.md`); the next replan sees it within `replan_interval_s` and pins it.
+
+A heater session's deadline is a firm target with a shortfall slack (`s_short_kwh`, priced at
+`HEATER_SHORTFALL_PENALTY_EUR_KWH`), the shape R-93 gave the EV: a target the heater cannot
+reach in time — the latch holds it off, or power and time are too short — still solves, and the
+plan carries a `HEATER_TARGET_UNMET` warning read from the solved slack
+(`milp_planner/heater_diagnostics.rs`). Before, such a target made the whole site's solve
+infeasible. Tests: `heater.rs` (`forced_kw_ahead_*`, `absorb_keeps_heating_through_temp_max_from_below`),
+`heater_pins.rs`, `heater_milp.rs::from_state_pins_the_slots_a_ceiling_latch_holds_off`,
+`milp_planner/tests/heater.rs` (the R-94 block).
 
 Before this existed the floor had a hysteresis and the ceiling had none, so a tank pinned at
 `temp_max_c` re-closed its relay the moment it lost a hundredth of a degree. Because

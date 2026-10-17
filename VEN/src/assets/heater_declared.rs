@@ -14,6 +14,10 @@ use crate::controller::milp_planner::{
     AllocationBasis, AssetMilpContext, AssetSolution, AssetSolutionDetail, DeclareMode,
     DeclaredAsset, FlexibilityWindow, ObjectivePart,
 };
+use crate::entities::plan::{PlanWarning, WarningKind, WarningSeverity};
+
+/// Below this the shortfall is solver tolerance, not a missed target [kWh].
+const SHORTFALL_TOLERANCE_KWH: f64 = 1e-3;
 
 /// One heater's variables in one solve.
 struct DeclaredHeater<'a> {
@@ -27,6 +31,22 @@ fn own_readback(own: &AssetSolution) -> &HeaterSolOutput {
         AssetSolutionDetail::Heater(sol) => sol,
         other => unreachable!("a heater reads its own solution, got {other:?}"),
     }
+}
+
+/// The heater's "your target will not be reached in time" warning, read off the solved
+/// deadline slack so it cannot disagree with the plan. Typical causes: the thermostat latch
+/// holds the heater off for part of the window (R-94), or the window is too short for the
+/// heater's power.
+fn target_unmet(sol: &HeaterSolOutput) -> Option<PlanWarning> {
+    let short_kwh = sol.shortfall_kwh;
+    (short_kwh > SHORTFALL_TOLERANCE_KWH).then(|| PlanWarning {
+        severity: WarningSeverity::Warning,
+        kind: WarningKind::HeaterTargetUnmet,
+        message: format!(
+            "Heater target not reachable by its ready-by time: {short_kwh:.2} kWh short"
+        ),
+        suggested_action: Some("allow more time or lower the target temperature".to_string()),
+    })
 }
 
 impl DeclaredAsset for DeclaredHeater<'_> {
@@ -85,6 +105,8 @@ impl DeclaredAsset for DeclaredHeater<'_> {
             iv.push((v.sw[t], (y - y_prev).abs()));
         }
         iv.push((v.z_heat_ready, p1.z_heat_ready));
+        // The solved shortfall, so the start satisfies the deadline row exactly.
+        iv.push((v.s_short_kwh, p1.shortfall_kwh));
         iv
     }
 
@@ -102,7 +124,7 @@ impl DeclaredAsset for DeclaredHeater<'_> {
             net_power_kw: sol.y_heat.iter().map(|&y| y * self.ctx.p_step_kw).collect(),
             planned_state,
             storage: None,
-            warnings: Vec::new(),
+            warnings: target_unmet(&sol).into_iter().collect(),
             detail: AssetSolutionDetail::Heater(sol),
         }
     }

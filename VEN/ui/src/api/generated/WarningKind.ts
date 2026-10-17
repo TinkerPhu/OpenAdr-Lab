@@ -3,10 +3,10 @@
 /**
  * Stable, machine-readable classification of a `PlanWarning` (GB-25).
  *
- * Covers exactly the 6 real construction sites in
- * `controller::milp_planner::results` today, plus `Other` as a catch-all for
+ * One variant per real construction site in `controller::milp_planner` (`results`
+ * and its diagnostics), plus `Other` as a catch-all for
  * any future warning that hasn't earned its own variant yet. `services::notify`
  * dedups new-vs-carried-over warnings on `kind` (not `message`, which can
  * carry per-cycle interpolated numbers).
  */
-export type WarningKind = "SOLVER_INFEASIBLE" | "STALE_RATE_ESTIMATE" | "BUDGET_SHORTFALL" | "CAPACITY_VIOLATION" | "PEAK_PENALTY_EXCEEDED" | "EV_CORE_ENERGY_UNMET" | "TARGET_ABOVE_LIMIT" | "OTHER";
+export type WarningKind = "SOLVER_INFEASIBLE" | "STALE_RATE_ESTIMATE" | "BUDGET_SHORTFALL" | "CAPACITY_VIOLATION" | "PEAK_PENALTY_EXCEEDED" | "EV_CORE_ENERGY_UNMET" | "TARGET_ABOVE_LIMIT" | "HEATER_TARGET_UNMET" | "OTHER";

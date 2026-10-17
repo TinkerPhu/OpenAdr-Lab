@@ -492,8 +492,8 @@ def step_session_states_no_estimate(context):
 # Heater requests (R-112/R-113): a stated target, or the heater's declared default
 # ---------------------------------------------------------------------------
 
-def _post_heater_request(context, energy_kwh, target_temp_c):
-    latest_end = (datetime.now(timezone.utc) + timedelta(hours=4)).strftime(
+def _post_heater_request(context, energy_kwh, target_temp_c, ready_in_min=240):
+    latest_end = (datetime.now(timezone.utc) + timedelta(minutes=ready_in_min)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
     payload = {
@@ -522,6 +522,32 @@ def step_post_heater_request_with_target(context, energy, temp):
 @when("I POST a heater user request for {energy:g} kWh without a target temperature")
 def step_post_heater_request_without_target(context, energy):
     _post_heater_request(context, energy, None)
+
+
+@when("I POST a heater user request with target_temp_c {temp:g} ready in {minutes:d} minutes")
+def step_post_heater_request_ready_in(context, temp, minutes):
+    _post_heater_request(context, 3.0, temp, ready_in_min=minutes)
+
+
+@then("the VEN plan reports the heater target unmet within {seconds:d} seconds")
+def step_plan_reports_heater_target_unmet(context, seconds):
+    """R-94: a target the heater cannot reach in time is a plan warning, not a silent miss."""
+
+    def fetch():
+        r = ven_get("/plan")
+        return r.json() if r.ok else None
+
+    def unmet(plan):
+        kinds = [w.get("kind") for w in (plan or {}).get("warnings", [])]
+        return "HEATER_TARGET_UNMET" in kinds
+
+    poll_until(
+        fetch,
+        unmet,
+        timeout=seconds,
+        interval=5,
+        description="VEN /plan warns HEATER_TARGET_UNMET",
+    )
 
 
 @when("I POST the VEN UI's heater request with target_temp_c {temp:g}")

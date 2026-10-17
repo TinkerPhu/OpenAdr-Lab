@@ -42,6 +42,15 @@ pub fn slot_count(zones: &[PlanZone]) -> usize {
     zones.iter().map(|z| z.slots).sum()
 }
 
+/// Each slot's duration [h] on a `cum_s` grid (`n + 1` slot boundaries in seconds): what
+/// `TimeGrid::dt_h` holds, for code handed only the boundaries.
+pub fn slot_hours(cum_s: &[i64]) -> Vec<f64> {
+    cum_s
+        .windows(2)
+        .map(|w| dt_h_from_s((w[1] - w[0]) as f64))
+        .collect()
+}
+
 /// The slot that holds the instant `offset_s` seconds after the plan's start: the latest slot
 /// whose start is at or before it. An instant before the start is slot 0; one at or past the end
 /// is the last slot.
@@ -78,6 +87,12 @@ mod tests {
             grid.dt_h,
             vec![300.0 / 3600.0, 300.0 / 3600.0, 300.0 / 3600.0, 0.5, 0.5]
         );
+    }
+
+    #[test]
+    fn slot_hours_agrees_with_the_grid_it_came_from() {
+        let grid = TimeGrid::from_zones(&zones());
+        assert_eq!(slot_hours(&grid.cum_s), grid.dt_h);
     }
 
     #[test]

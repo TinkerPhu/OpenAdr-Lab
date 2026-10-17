@@ -5,53 +5,12 @@
 use chrono::{DateTime, Utc};
 use good_lp::{constraint, variable, Constraint, Expression, ProblemVariables, Solution};
 
+use super::heater_pins::{fixed_stage_kw, initial_stage, kw_to_stage};
 use super::Heater;
 use crate::controller::milp_planner::asset_port::{
     pinned_binary, HeaterMilpContext, HeaterMilpMode, HeaterMilpVars, HeaterSolOutput,
+    HEATER_SHORTFALL_PENALTY_EUR_KWH,
 };
-use crate::entities::units::dt_h_from_s;
-
-/// The anchor (the plan in force's heater block) up to the last slot the tank can hold:
-/// replayed from a tank that gained heat since, a block that filled it exactly overflows,
-/// and a pinned stage under a hard ceiling fails the whole site's solve at presolve. The
-/// anchor is a stability preference, never physics. `(floor_kwh, ceiling_kwh)`: tank bounds.
-fn anchor_the_tank_can_hold(
-    mut anchored_kw: Vec<Option<f64>>,
-    e_init_kwh: f64,
-    (floor_kwh, ceiling_kwh): (f64, f64),
-    q_dem_kw: f64,
-    cum_s: &[i64],
-) -> Vec<Option<f64>> {
-    let mut e_kwh = e_init_kwh;
-    for t in 0..anchored_kw.len() {
-        let Some(kw) = anchored_kw[t] else { break };
-        let dt_h = match (cum_s.get(t), cum_s.get(t + 1)) {
-            (Some(&start_s), Some(&end_s)) => dt_h_from_s((end_s - start_s) as f64),
-            _ => 0.0,
-        };
-        e_kwh += (kw - q_dem_kw) * dt_h;
-        if e_kwh > ceiling_kwh + 1e-9 || e_kwh < floor_kwh - 1e-9 {
-            anchored_kw[t..].iter_mut().for_each(|a| *a = None);
-            break;
-        }
-    }
-    anchored_kw
-}
-
-/// Map a planned heater power [kW] to a stage index.
-/// Returns `Some(k)` when `kw` is within 0.1 kW of `k × p_step_kw` for some
-/// reachable stage, or `None` when it matches no stage (anchor left free).
-fn kw_to_stage(kw: f64, p_step_kw: f64, n_stages: f64) -> Option<f64> {
-    const TOL: f64 = 0.1;
-    if p_step_kw <= 0.0 {
-        return if kw.abs() < TOL { Some(0.0) } else { None };
-    }
-    let k = (kw / p_step_kw).round();
-    if !(0.0..=n_stages).contains(&k) {
-        return None;
-    }
-    ((kw - k * p_step_kw).abs() < TOL).then_some(k)
-}
 
 impl HeaterMilpContext {
     /// What the plan may fill the tank to [kWh above T_min]: its maximum, or where it
@@ -60,6 +19,11 @@ impl HeaterMilpContext {
     /// starts from — that would contradict the pinned start and fail the whole site solve.
     fn ceiling_kwh(&self) -> f64 {
         self.e_max_kwh.max(self.e_init_kwh)
+    }
+
+    /// Does C6 hold a hard `MustRun` target at a deadline?
+    fn binds_must_run_deadline(&self) -> bool {
+        self.mode == HeaterMilpMode::MustRun && self.t_dead_step.is_some()
     }
 
     /// Declare all LP variables for this heater.
@@ -148,12 +112,20 @@ impl HeaterMilpContext {
         // t=0 measures the switch relative to the last observed hardware stage (initial_y).
         let sw = (0..n).map(|_| vars.add(variable().min(0.0))).collect();
 
+        // s_short: deadline shortfall slack, free only where C6 binds a MustRun target.
+        let s_short_kwh = if self.binds_must_run_deadline() {
+            vars.add(variable().min(0.0))
+        } else {
+            vars.add(variable().min(0.0).max(0.0))
+        };
+
         HeaterMilpVars {
             y_heat,
             z_heat_ready,
             e_tank,
             s_low,
             sw,
+            s_short_kwh,
             p_step_kw: self.p_step_kw,
         }
     }
@@ -218,7 +190,9 @@ impl HeaterMilpContext {
             let td = td.min(n.saturating_sub(1));
             match self.mode {
                 HeaterMilpMode::MustRun => {
-                    cs.push(constraint!(v.e_tank[td] >= self.e_target_kwh));
+                    cs.push(constraint!(
+                        v.e_tank[td] + v.s_short_kwh >= self.e_target_kwh
+                    ));
                 }
                 HeaterMilpMode::MayRun => {
                     // e_tank[td] ≥ e_target × z_heat_ready (linear: e_target is a scalar)
@@ -277,6 +251,11 @@ impl HeaterMilpContext {
         if m_low_eur_kwh > 0.0 && self.c_terminal_eur_kwh > 0.0 && n > 0 {
             obj += -self.c_terminal_eur_kwh * v.e_tank[n - 1];
         }
+        // Missed deadline (Phase 1 only, like the terminal reward): Phase 2's cost cap
+        // carries it, so friction smoothing cannot buy a shortfall.
+        if m_low_eur_kwh > 0.0 {
+            obj += HEATER_SHORTFALL_PENALTY_EUR_KWH * v.s_short_kwh;
+        }
         obj
     }
 
@@ -290,6 +269,7 @@ impl HeaterMilpContext {
             y_heat: (0..n).map(|t| sol.value(v.y_heat[t])).collect(),
             z_heat_ready: sol.value(v.z_heat_ready),
             e_tank_kwh: (0..n).map(|t| sol.value(v.e_tank[t])).collect(),
+            shortfall_kwh: sol.value(v.s_short_kwh),
         }
     }
 
@@ -326,30 +306,15 @@ impl HeaterMilpContext {
         )
         .max(0.0);
         let q_dem = cfg.forecast_demand_kw(cfg.ambient_temp_c);
-        let anchored_kw = anchor_the_tank_can_hold(
+        let anchored_kw = fixed_stage_kw(
+            cfg,
+            state,
             anchored_kw,
-            e_init,
+            (e_init, q_dem),
             (-e_max.max(1.0), e_max.max(e_init)),
-            q_dem,
             cum_s,
         );
-        // Initial mode detection from last observed hardware tier.
-        let actual_kw = if let super::AssetState::Heater(s) = state {
-            s.actual_power_kw
-        } else {
-            0.0
-        };
-        // Last observed hardware stage, rounded to the nearest reachable level.
-        let initial_y =
-            kw_to_stage(actual_kw, p_step_kw, cfg.power_stages as f64).unwrap_or_else(|| {
-                if p_step_kw > 0.0 {
-                    (actual_kw / p_step_kw)
-                        .round()
-                        .clamp(0.0, cfg.power_stages as f64)
-                } else {
-                    0.0
-                }
-            });
+        let initial_y = initial_stage(cfg, state);
         if let Some(target) = heater_target {
             let e_target = crate::entities::asset_params::heater_energy_above_min_kwh(
                 target.target_temp_c,
@@ -573,6 +538,7 @@ mod milp_context_trait_tests {
     use super::*;
     use crate::controller::milp_planner::AssetMilpContext;
     use crate::controller::milp_planner::{CostWeights, DeclareMode, ObjectivePart};
+    use crate::entities::units::dt_h_from_s;
     use crate::services::test_support::milp_pool::bound_range;
 
     /// Phase 1's cost part with no storage wear (a heater stores no energy for the site).
@@ -1331,6 +1297,7 @@ mod milp_context_trait_tests {
             y_heat: vec![0.0, 1.4, 1.6, top + 3.0],
             z_heat_ready: 0.0,
             e_tank_kwh: vec![],
+            shortfall_kwh: 0.0,
         };
         let shape = |pinned: bool| {
             let mut vars = variables!();
@@ -1353,5 +1320,55 @@ mod milp_context_trait_tests {
         };
         let range = bound_range(|vars| ctx.declare_vars(4, vars).y_heat);
         assert_eq!(range, vec![(0.0, 0.0); 4]);
+    }
+
+    /// R-94: a latch the heater already has is fixed for the slots it holds, over the
+    /// plan in force's anchor; with no latch the anchor is left as it was.
+    #[test]
+    fn from_state_pins_the_slots_a_ceiling_latch_holds_off() {
+        let cfg = super::Heater::from_params(&crate::entities::asset_params::HeaterParams {
+            default_target_temp_c: None,
+            id: "heater".into(),
+            max_kw: 3.0,
+            temp_initial_c: 22.9,
+            temp_min_c: 18.0,
+            temp_max_c: 23.0,
+            temp_safety_max_c: 23.0,
+            thermostat_delta_c: 3.0,
+            power_stages: 2,
+            thermal_mass_kwh_per_c: 2.0,
+            k_loss_kw_per_c: 0.1,
+            draw_kw: 0.0,
+            switching_penalty_eur: 0.0,
+            c_terminal_eur_kwh: None,
+        });
+        let at = |ceiling_latched| {
+            super::super::AssetState::Heater(super::super::HeaterState {
+                temperature_c: 22.9,
+                actual_power_kw: 0.0,
+                emergency_latched: false,
+                ceiling_latched,
+            })
+        };
+        let cum_s: Vec<i64> = (0..=12).map(|i| i * 300).collect();
+        let anchored = |state| {
+            HeaterMilpContext::from_state(
+                "heater",
+                &state,
+                &cfg,
+                12,
+                &cum_s,
+                chrono::Utc::now(),
+                None,
+                0.0,
+                0.0,
+                vec![Some(1.5); 2],
+                0.0,
+            )
+            .anchored_kw
+        };
+        // 1.05 kW loss on 2 kWh/°C cools 0.044 °C a slot: the latch outlasts the horizon.
+        assert_eq!(anchored(at(true)), vec![Some(0.0); 12]);
+        assert_eq!(anchored(at(false)), vec![Some(1.5); 2]);
     }
 }

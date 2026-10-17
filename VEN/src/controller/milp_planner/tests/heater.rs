@@ -768,3 +768,88 @@ fn planned_heater_kw_only_takes_reachable_stage_levels() {
         }
     }
 }
+
+// ── R-94: the thermostat latch the heater already has is pinned ─────────────
+
+fn plan_heater_with_target(
+    profile: &Profile,
+    target: &crate::entities::device_session::HeaterTarget,
+) -> crate::entities::plan::Plan {
+    let now = fixed_now();
+    let sim = make_snap_from_profile(profile);
+    let tariffs = make_tariffs(0.25, 0.08, 300.0);
+    run_planner(
+        build_asset_contexts(profile, &sim, now, None, Some(target), &tariffs),
+        &tariffs,
+        &no_capacity(),
+        profile,
+        now,
+        crate::entities::asset::PlanTrigger::UserRequest,
+        None,
+        None,
+    )
+}
+
+fn heater_target_unmet(plan: &crate::entities::plan::Plan) -> bool {
+    plan.warnings
+        .iter()
+        .any(|w| w.kind == crate::entities::plan::WarningKind::HeaterTargetUnmet)
+}
+
+#[test]
+fn a_heater_latched_at_its_ceiling_is_planned_off_and_its_target_reported_unmet() {
+    // Starts at temp_max_c, so the thermostat has cut out and holds the relay open
+    // until 20 °C: 3 °C x 2 kWh/°C at 1.05 kW loss is 5.7 h, past the 2 h horizon.
+    // A target of 23 °C in one hour would have the plan heat to hold the tank full;
+    // the heater refuses that, so the plan must not propose it — and must still
+    // solve, reporting the target it cannot reach.
+    let profile = make_heater_only_profile(None, 18.0, 23.0, 23.0);
+    let plan = plan_heater_with_target(
+        &profile,
+        &heater_target_at(fixed_now(), 23.0, fixed_now() + Duration::seconds(12 * 300)),
+    );
+    assert_ne!(
+        plan.solve_status,
+        crate::entities::plan::SolveStatus::Infeasible
+    );
+    for (t, slot) in plan.slots.iter().enumerate() {
+        let kw = slot
+            .planned_kw_by_asset
+            .get("heater")
+            .copied()
+            .unwrap_or(0.0);
+        assert!(
+            kw.abs() < 1e-6,
+            "slot {t}: planned {kw} kW while the latch holds the heater off"
+        );
+    }
+    assert!(heater_target_unmet(&plan), "warnings: {:?}", plan.warnings);
+}
+
+#[test]
+fn a_target_too_far_for_the_heaters_power_is_a_reported_gap_not_an_infeasible_solve() {
+    // 18 -> 23 °C is 10 kWh; two slots at 3 kW deliver 0.5 kWh.
+    let profile = make_heater_only_profile(None, 18.0, 23.0, 18.5);
+    let plan = plan_heater_with_target(
+        &profile,
+        &heater_target_at(fixed_now(), 23.0, fixed_now() + Duration::seconds(2 * 300)),
+    );
+    assert_ne!(
+        plan.solve_status,
+        crate::entities::plan::SolveStatus::Infeasible
+    );
+    assert!(heater_target_unmet(&plan), "warnings: {:?}", plan.warnings);
+}
+
+#[test]
+fn a_reachable_heater_target_raises_no_warning() {
+    let mut profile = make_heater_only_profile(None, 18.0, 23.0, 20.0);
+    if let Some(AssetParams::Heater(ref mut h)) = profile.assets.get_mut(0) {
+        h.k_loss_kw_per_c = 0.0;
+    }
+    let plan = plan_heater_with_target(
+        &profile,
+        &heater_target_at(fixed_now(), 21.0, fixed_now() + Duration::seconds(18 * 300)),
+    );
+    assert!(!heater_target_unmet(&plan), "warnings: {:?}", plan.warnings);
+}
