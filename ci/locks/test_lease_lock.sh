@@ -9,7 +9,7 @@
 #     the checkout path alone, so the second session's acquire was "re-entrant" and
 #     its release deleted the first session's lock.
 #
-# Usage:  bash scripts/test_lease_lock.sh
+# Usage:  bash ci/locks/test_lease_lock.sh
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d)"

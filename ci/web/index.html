@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CI Board</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #fff; --text: #1c2430; --muted: #66707e; --line: #dde1e7;
+  --merged: #2e7d4f; --deployed: #2e7d4f; --green: #5b9a3c; --red: #c0392b; --conflict: #b9770e;
+  --stale: #8a6d3b; --error: #8e44ad; --queued: #7a8594; --running: #1f6fd1; --unknown: #999;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161c; --panel: #1b212a; --text: #e6eaf0; --muted: #93a0b0; --line: #2c3541;
+    --merged: #4fb87a; --deployed: #4fb87a; --green: #8fcf6a; --red: #ef6b5b; --conflict: #e0a030;
+    --stale: #c7a36a; --error: #be84dc; --queued: #8c98a8; --running: #5aa2f5; --unknown: #888;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+h2 { font-size: 15px; margin: 0 0 8px; }
+.sub { color: var(--muted); margin-bottom: 16px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.card .v { font-size: 22px; font-weight: 600; }
+.card .k { color: var(--muted); font-size: 12px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.tablewrap { overflow-x: auto; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; color: #fff; font-size: 12px; }
+.s-merged, .s-deployed { background: var(--merged); } .s-green { background: var(--green); }
+.s-red { background: var(--red); } .s-conflict { background: var(--conflict); } .s-stale { background: var(--stale); }
+.s-error { background: var(--error); } .s-queued { background: var(--queued); } .s-running { background: var(--running); }
+.s-unknown { background: var(--unknown); }
+.muted { color: var(--muted); }
+.over { color: var(--conflict); }
+svg text { fill: var(--text); font: 11px system-ui, sans-serif; }
+svg .axis { stroke: var(--line); }
+svg .lbl { fill: var(--muted); }
+pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; overflow: auto; max-height: 360px; font-size: 12px; }
+button, select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; }
+#detail[hidden] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CI Board</h1>
+  <div class="sub" id="sub">loading...</div>
+  <div class="cards" id="cards"></div>
+
+  <div class="panel">
+    <h2>Timeline <span class="muted" id="range"></span></h2>
+    <div class="tablewrap"><svg id="timeline" width="100%" height="10" role="img" aria-label="Ticket timeline"></svg></div>
+  </div>
+
+  <div class="panel" id="detail" hidden>
+    <h2 id="dtitle"></h2>
+    <div id="dmeta" class="muted"></div>
+    <svg id="steps" width="100%" height="10" role="img" aria-label="Step durations"></svg>
+    <div>
+      Log: <select id="logsel"><option>run</option><option>quick</option><option>full</option></select>
+      <button id="logbtn">reload</button> <button id="close">close</button>
+    </div>
+    <pre id="log"></pre>
+  </div>
+
+  <div class="panel">
+    <h2>Tickets</h2>
+    <div class="tablewrap">
+    <table>
+      <thead><tr><th>Status</th><th>Branch</th><th>Queued (local)</th><th>Started</th><th>Duration</th><th>ETA finish</th><th>Step / note</th><th>Done</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    </div>
+  </div>
+</main>
+<script>
+"use strict";
+let tickets = [], selected = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const dt = s => s ? new Date(s) : null;
+// Times are shown in the viewer's local zone; the API speaks UTC.
+const hm = s => { const d = dt(s); return d ? d.toLocaleString([], {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"}) : "-"; };
+const dur = s => { if (s == null) return "-"; s = Math.round(s); const h = Math.floor(s/3600), m = Math.floor(s%3600/60);
+  return h ? `${h}h ${m}m` : m ? `${m}m ${s%60}s` : `${s}s`; };
+const colorVar = st => `var(--${["merged","deployed","green","red","conflict","stale","error","queued","running"].includes(st) ? st : "unknown"})`;
+const badge = st => `<span class="badge s-${esc(st)}">${esc(st)}</span>`;
+
+function etaCell(t) {
+  if (!t.eta) return t.status === "queued" || t.status === "running" ? '<span class="muted">no estimate yet</span>' : "";
+  const left = (dt(t.eta) - Date.now()) / 1000;
+  return `${hm(t.eta)} <span class="${t.overdue ? "over" : "muted"}">(${t.overdue ? "overdue, ~" : "in "}${dur(Math.max(left, 0))})</span>`;
+}
+
+function renderCards(s) {
+  const c = s.counts || {};
+  const run = tickets.find(t => t.status === "running");
+  const items = [
+    ["running", run ? esc(run.branch) : "idle", run && run.current_step ? esc(run.current_step) : ""],
+    ["queued", s.queued, ""],
+    ["queue empty at", s.queue_done_eta ? hm(s.queue_done_eta) : "-", s.queue_done_eta ? "estimate" : ""],
+    ["merged", c.merged || 0, ""], ["red", c.red || 0, ""],
+    ["awaiting pickup", s.unacked_finished.length, "finished, not yet ci-next"],
+    ["runner timer", s.runner_timer, ""],
+  ];
+  $("cards").innerHTML = items.map(([k, v, n]) => `<div class="card"><div class="v">${v}</div><div class="k">${esc(k)}${n ? " - " + n : ""}</div></div>`).join("");
+  const e = s.expected_s || {};
+  $("sub").textContent = `typical run: audits ${dur(e.audits)}, quick ${dur(e.quick)}, full ${dur(e.full)} (median of finished tickets) - refreshed ${new Date().toLocaleTimeString()}`;
+}
+
+function renderRows() {
+  $("rows").innerHTML = tickets.map(t => `
+    <tr data-n="${esc(t.name)}">
+      <td>${badge(t.status)}</td><td>${esc(t.branch)}</td><td>${hm(t.created)}</td>
+      <td>${hm(t.started)}</td><td>${t.status === "running" && t.started ? dur((Date.now() - dt(t.started)) / 1000) + " so far" : dur(t.duration_s)}</td>
+      <td>${etaCell(t)}</td>
+      <td>${esc(t.status === "running" ? t.current_step || "starting" : t.note || "")}</td>
+      <td>${t.acked ? "yes" : (["queued", "running"].includes(t.status) ? "" : "no")}</td></tr>`).join("");
+  document.querySelectorAll("#rows tr").forEach(r => r.onclick = () => select(r.dataset.n));
+}
+
+function renderTimeline() {
+  const svg = $("timeline"), W = Math.max(svg.parentElement.clientWidth, 600), rowH = 18, left = 190, top = 20;
+  const shown = tickets.filter(t => t.started || t.eta).slice(0, 24).reverse();
+  if (!shown.length) { svg.setAttribute("height", 30); svg.innerHTML = '<text x="4" y="18" class="lbl">no runs yet</text>'; return; }
+  const now = Date.now();
+  const ends = t => t.finished ? dt(t.finished) : (t.status === "running" ? new Date(now) : null);
+  const t0 = Math.min(...shown.map(t => dt(t.started || t.eta)));
+  const t1 = Math.max(now, ...shown.map(t => dt(t.eta) || 0));
+  const x = ms => left + (ms - t0) / (t1 - t0 || 1) * (W - left - 10);
+  let out = "";
+  for (let i = 0; i <= 5; i++) {
+    const ms = t0 + (t1 - t0) * i / 5, xx = x(ms);
+    out += `<line class="axis" x1="${xx}" x2="${xx}" y1="${top - 4}" y2="${top + shown.length * rowH}"/><text class="lbl" x="${xx + 2}" y="12">${new Date(ms).toLocaleString([], {day:"numeric", hour:"2-digit", minute:"2-digit"})}</text>`;
+  }
+  shown.forEach((t, i) => {
+    const y = top + i * rowH, s = t.started ? dt(t.started) : null, e = ends(t);
+    out += `<text x="4" y="${y + 12}">${esc((t.branch || t.name).slice(0, 28))}</text>`;
+    if (s && e) out += `<rect x="${x(s)}" y="${y + 2}" width="${Math.max(x(e) - x(s), 2)}" height="${rowH - 6}" rx="2" fill="${colorVar(t.status)}"><title>${esc(t.status)}: ${esc(t.name)} ${dur((e - s) / 1000)}</title></rect>`;
+    if (t.eta) {
+      const from = e || new Date(now);
+      out += `<rect x="${x(from)}" y="${y + 2}" width="${Math.max(x(dt(t.eta)) - x(from), 2)}" height="${rowH - 6}" rx="2" fill="none" stroke="${colorVar(t.status)}" stroke-dasharray="4 3"><title>estimated until ${hm(t.eta)}</title></rect>`;
+    }
+  });
+  const nx = x(now);
+  out += `<line x1="${nx}" x2="${nx}" y1="${top - 4}" y2="${top + shown.length * rowH}" stroke="var(--running)" stroke-width="1.5"/><text x="${nx + 3}" y="${top + shown.length * rowH + 12}">now</text>`;
+  svg.setAttribute("height", top + shown.length * rowH + 18);
+  svg.innerHTML = out;
+  $("range").textContent = "(solid = run, dashed = estimate, local time)";
+}
+
+function renderSteps(t) {
+  const svg = $("steps"), W = Math.max(svg.parentElement.clientWidth, 500), left = 230, rowH = 18;
+  if (!t.steps.length) { svg.setAttribute("height", 24); svg.innerHTML = `<text x="4" y="16" class="lbl">${t.status === "running" ? "steps appear when the run finishes; current: " + esc(t.current_step || "-") : "no steps recorded"}</text>`; return; }
+  const max = Math.max(...t.steps.map(s => s.seconds), 1);
+  svg.setAttribute("height", t.steps.length * rowH + 6);
+  svg.innerHTML = t.steps.map((s, i) => {
+    const w = Math.max(s.seconds / max * (W - left - 70), 2), y = i * rowH;
+    return `<text x="4" y="${y + 13}">${esc(s.name).slice(0, 36)}</text>
+      <rect x="${left}" y="${y + 3}" width="${w}" height="${rowH - 6}" rx="2" fill="${s.exit ? "var(--red)" : "var(--merged)"}"/>
+      <text x="${left + w + 4}" y="${y + 13}" class="lbl">${dur(s.seconds)}${s.exit ? " exit " + s.exit : ""}</text>`;
+  }).join("");
+}
+
+async function loadLog() {
+  if (!selected) return;
+  const r = await fetch(`api/tickets/${encodeURIComponent(selected)}/log/${$("logsel").value}?tail=300`);
+  const pre = $("log"), atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+  pre.textContent = r.ok ? await r.text() : "(no log)";
+  if (atEnd) pre.scrollTop = pre.scrollHeight;
+}
+
+function select(name) {
+  selected = name;
+  const t = tickets.find(x => x.name === name);
+  if (!t) return;
+  $("detail").hidden = false;
+  $("dtitle").innerHTML = `${esc(t.branch)} ${badge(t.status)}`;
+  $("dmeta").textContent = `${t.name} - sha ${(t.sha || "").slice(0, 8)} - ${t.kind}, tiers ${t.tiers}, attempt ${t.attempt}`;
+  renderSteps(t);
+  loadLog();
+}
+
+async function refresh() {
+  try {
+    const [s, ts] = await Promise.all([fetch("api/summary").then(r => r.json()), fetch("api/tickets?limit=200").then(r => r.json())]);
+    tickets = ts;
+    renderCards(s); renderRows(); renderTimeline();
+    if (selected) select(selected);
+  } catch (e) { $("sub").textContent = "API unreachable: " + e; }
+}
+$("logbtn").onclick = loadLog;
+$("logsel").onchange = loadLog;
+$("close").onclick = () => { selected = null; $("detail").hidden = true; };
+window.onresize = renderTimeline;
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@
 # arguments. Pins: a branch that is not pushed, dirty, or main is refused; the ticket carries
 # the session and the directory it must be resumed from; a finished ticket is handed over once.
 #
-# Usage:  bash scripts/ci/test_handoff.sh
+# Usage:  bash ci/test_handoff.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d)"
@@ -21,7 +21,7 @@ export PATH="$TMP/bin:$PATH"
 # The runner runs this under BOARD_NO_MAIN=1 (it sources board.sh as a library); inherited, that
 # turns board.sh into a no-op for the real hand-off below and no ticket is ever written.
 unset BOARD_NO_MAIN
-export BOARD_DIR="$TMP/board" CLAUDE_CODE_SESSION_ID=2e1cc119-0311-412f-8f25-d0f49ff0deb2
+export CI_HOST=Node3 BOARD_DIR="$TMP/board" CLAUDE_CODE_SESSION_ID=2e1cc119-0311-412f-8f25-d0f49ff0deb2
 mkdir -p "$BOARD_DIR"
 
 git init -q --bare -b main "$TMP/origin.git"
@@ -40,6 +40,8 @@ check() { # $1=name  $2=expected  $3=actual
 rc() { "$@" >/dev/null 2>&1; echo $?; }
 
 echo "ci-handoff.sh"
+check "no CI_HOST is refused with a hint"   1 "$(env -u CI_HOST bash "$HERE/ci-handoff.sh" 2>&1 | grep -c "set CI_HOST")"
+check "ci-next without CI_HOST is refused" 1 "$(env -u CI_HOST bash "$HERE/ci-next.sh" 2>&1 | grep -c "set CI_HOST")"
 check "an unpushed branch is refused"       1 "$(rc bash "$HERE/ci-handoff.sh")"
 git push -q origin fix/example
 echo dirty >> b.txt

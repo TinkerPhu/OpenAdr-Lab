@@ -11,7 +11,7 @@ row and fails unless each hit is, in this branch, either
 
 Debt first filed on this very branch is never gated against itself.
 
-Usage:  python scripts/audit_debt_gate.py [--base REF] [--warn]
+Usage:  python ci/audits/audit_debt_gate.py [--base REF] [--warn]
   --base REF  compare against REF (default: origin/main, else main)
   --warn      print the findings but exit 0 (for introducing the gate)
 """

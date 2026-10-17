@@ -485,7 +485,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
   permanent annotation.
 
 - **When adding a new config type to an existing profile file, check
-  `scripts/audit_file_sizes.py` before, not after, deciding where it goes.**
+  `ci/audits/audit_file_sizes.py` before, not after, deciding where it goes.**
   ~55 lines pushed `profile/schema.rs` over its 500-line cap; every other
   asset in this codebase already keeps its config-struct-to-domain-struct
   mapping (`BatteryConfig`→`BatteryParams` etc.) in one place, but nothing
@@ -914,7 +914,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
   new tests to `simulator/tests.rs`'s `base_load_noise_tests` module pushed that *file*
   (518 non-blank production lines pre-change, cap 500) over the top — even though
   `simulator/mod.rs` itself (the file design.md's own Risk section flagged as the one to
-  watch) stayed comfortably under. `scripts/audit_file_sizes.py` only exempts by *path*
+  watch) stayed comfortably under. `ci/audits/audit_file_sizes.py` only exempts by *path*
   (any directory component literally named `tests`, e.g. `simulator/tests/*.rs`) — a
   sibling file merely named `tests.rs` next to `mod.rs` doesn't qualify. Fix followed the
   file's own established precedent (`peek_pv_kw_tests.rs`, `peek_base_load_kw_tests.rs`):
@@ -1155,13 +1155,13 @@ outes/sim.rs causes a T1+T2 double-solve race:
   production-code fn whose only intended callers are `#[cfg(test)]`-gated helpers, gate the fn
   the same way — otherwise it silently fails clippy on every future PR touching that file, with
   a confusing "dead code" message that doesn't mention the test-support wiring.
-- **`scripts/audit_file_sizes.py` was clean earlier in a branch's life but failed at final
+- **`ci/audits/audit_file_sizes.py` was clean earlier in a branch's life but failed at final
   merge-verification time** (`report-obligation-lifecycle`, 2026-08-12): an early implementation
   pass (`d439d0c`) threaded `HistoryPort` through `main.rs`, tripped the 500-line cap there, and
   fixed it by extracting `domain_params.rs` — but a later small fix (`R-43`'s history-port
   threading through `tasks/sim_tick/tick.rs`, +3 lines) pushed a *different* file
   (`tick.rs`, tasks/ cap 200) 3 lines over, and the audit wasn't rerun after that commit before
-  the branch was merged. **Always rerun `python scripts/audit_file_sizes.py` as the very last
+  the branch was merged. **Always rerun `python ci/audits/audit_file_sizes.py` as the very last
   step before merging** (not just after the commit that seemed most likely to trip it) — any
   commit that touches a file already near its cap can be the one that tips it over, and the
   audit is cheap enough to run every time. Fixed post-merge by extracting the PHASE 6+7
@@ -1296,7 +1296,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
   (`awk 'END{print c}'` with an explicit counter, a sentinel that cannot collide with the
   tool's own vocabulary), and check the real exit code separately.
 - **Generalised (2026-10-02): this is a pipe problem, not a cargo problem.** The same failure
-  recurred on an unrelated command — `bash scripts/wsl_lock.sh acquire ... | tail -5` reported
+  recurred on an unrelated command — `bash ci/locks/wsl_lock.sh acquire ... | tail -5` reported
   success while the script had correctly exited 2 with "Still held after 540s", because a
   pipeline's exit status is the *last* command's. The consequence was nearly material: two
   sessions one command away from concurrent cargo builds on a 12 GB laptop, which is exactly what
@@ -1379,7 +1379,7 @@ outes/sim.rs causes a T1+T2 double-solve race:
 - **File-size-cap fixes via import consolidation ("import golfing") are fragile — `cargo fmt`
   owns import formatting and will re-expand anything that doesn't fit its line-width rules,
   silently undoing the size win.** Tried combining several multi-line grouped imports into
-  single lines to claw back a few lines under `scripts/audit_file_sizes.py`'s cap; `cargo fmt`
+  single lines to claw back a few lines under `ci/audits/audit_file_sizes.py`'s cap; `cargo fmt`
   reformatted several of them straight back to multi-line. The durable fix is always a real
   structural extraction (a genuinely reusable function moved to its own file, or two near-
   duplicate call sites merged into one shared one) — verify by running `cargo fmt` FIRST, then
@@ -1509,7 +1509,7 @@ the diff baseline without touching the working tree. `git apply --3way --index` 
 onto a fresh branch off the confirmed-current tip, then a full fmt/clippy/test pass before
 committing, avoided silently reintroducing already-refactored-away code.
 
-**A lease lock stored inside the WSL VM is not a lock.** `scripts/wsl_lock.sh` keeps its state at
+**A lease lock stored inside the WSL VM is not a lock.** `ci/locks/wsl_lock.sh` keeps its state at
 `/tmp/openadr_wsl.lock`; WSL2 idle-shutdown wipes `/tmp`. A later `acquire` from another worktree
 then sees *no* lock rather than an expired one and succeeds immediately — mutual exclusion stops
 holding while both sessions report owning the lease (R-67). The general rule: lock state must
@@ -2612,7 +2612,7 @@ next decision built on that mechanism would not have survived.
 ## A rule enforced by prose is not enforced (2026-10-03)
 
 `.claude/CLAUDE.md` lists the VEN's hexagonal dependency rules, and
-`scripts/audit_ven_architecture.py` scripts them. The script checked
+`ci/audits/audit_ven_architecture.py` scripts them. The script checked
 `use crate::assets::` inside `controller/milp_planner/` and inside `entities/` — two
 rooms of the domain ring — and never mentioned `crate::simulator` at all. Both
 `controller/capacity_headroom.rs` and `controller/site_headroom.rs` had been taking
@@ -2719,10 +2719,10 @@ code belongs.
 
 Workflow rule 5 says to remove a merged worktree as soon as the merge is confirmed. A
 detached `run_all_tests.sh` launched *from* that worktree releases the host lock at the
-end by calling `scripts/docker_host_lock.sh` — resolved relative to the directory it was
+end by calling `ci/locks/docker_host_lock.sh` — resolved relative to the directory it was
 started in. Remove the worktree before that release runs and it fails with
 
-    bash: .../worktrees/<gone>/scripts/docker_host_lock.sh: No such file or directory
+    bash: .../worktrees/<gone>/ci/locks/docker_host_lock.sh: No such file or directory
 
 The suite itself had already passed; only the release was lost. The lock then sat on Node2
 for the rest of its 180-minute lease, with an owner string naming a path that no longer
@@ -3279,7 +3279,7 @@ Rules:
 
 ## An audit rule that has never failed has not been tested (2026-10-11)
 
-- `scripts/audit_ven_architecture.py` carried a backspace byte (0x08) in two regexes where the
+- `ci/audits/audit_ven_architecture.py` carried a backspace byte (0x08) in two regexes where the
   two characters `\b` were meant. A raw string does not help: the byte was in the file. The
   patterns matched nothing, so rule 13 and half of rule 12 reported OK from the day they were
   added, whatever the code did.
@@ -3356,8 +3356,8 @@ in four languages, plus helpers, an audit pattern and comments explaining the ex
   its release would have deleted the first session's lock. The owner now carries
   `CLAUDE_CODE_SESSION_ID`.
 - Two scripts implementing one lock had already drifted (the WSL copy lacked the atomic owner
-  write and the unreadable-owner grace period). One core (`scripts/lib/lease_lock_core.sh`),
-  one test that drives both entry points (`scripts/test_lease_lock.sh`).
+  write and the unreadable-owner grace period). One core (`ci/locks/lib/lease_lock_core.sh`),
+  one test that drives both entry points (`ci/locks/test_lease_lock.sh`).
 
 ## A behaviour-preserving refactor is proven by goldens at two levels, recorded first (2026-10-14)
 
@@ -3439,7 +3439,7 @@ right for keeping an x86 plan identical to the last bit; it is no longer needed 
 
 ## A lock acquire guards only what `&&` chains to it (2026-10-15)
 
-- `bash scripts/wsl_lock.sh acquire ...; wsl cargo ...` runs the build whether or not the acquire
+- `bash ci/locks/wsl_lock.sh acquire ...; wsl cargo ...` runs the build whether or not the acquire
   succeeded: `acquire` gives up after ~9 minutes with exit 2, and `;` ignores it. Chain every
   locked command with `&&`, and re-check `status` before assuming a lock someone just released is
   still free (another session took it within the same minute).
@@ -3503,4 +3503,11 @@ right for keeping an x86 plan identical to the last bit; it is no longer needed 
 - `ci/test_handoff` passed in two interactive shells and failed on its first run under the runner, which
   exports `BOARD_NO_MAIN=1`. A script that drives another script must not depend on the caller's
   environment: unset what the runner sets, and reproduce a new CI step with the runner's exports
-  (`BOARD_NO_MAIN=1 bash scripts/ci/<test>.sh`) before installing it.
+  (`BOARD_NO_MAIN=1 bash ci/<test>.sh`) before installing it.
+
+## A CI that moves its own scripts needs a manual cutover (2026-10-17)
+
+The runner installed on the CI host tests a branch with the previous version of itself. A change that moves what
+that version calls (here `scripts/audit_*.py` to `ci/audits/`) is red under it, and once merged it turns every
+later ticket red until the new runner is installed. Do the cutover by hand with an empty queue and the timer
+stopped: merge, install, start the timer; keep the previous installed tree (`ci.old`) for rollback.

@@ -185,7 +185,7 @@ refuses the token (revoked, or the VTN restarted with a new signing key) for eve
 DELETE. Whatever the second attempt answers goes back to the caller, which maps a non-2xx status
 into its own error type. The VEN hooks `on_new_token` to read its granted scopes (GB-49). Tests:
 `lab-core/src/vtn_auth.rs`. No other code attaches a token to a request:
-`scripts/audit_ven_architecture.py` rule 15 refuses `bearer_auth(`, `basic_auth(`, an
+`ci/audits/audit_ven_architecture.py` rule 15 refuses `bearer_auth(`, `basic_auth(`, an
 `AUTHORIZATION` header and a `"Bearer ` string in the VEN, the BFF and the rest of `lab-core`.
 
 ### 4.6 Report Submission

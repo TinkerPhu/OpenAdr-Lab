@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for audit_duplication.py — run: python -m unittest scripts/test_audit_duplication.py"""
+"""Tests for audit_duplication.py — run: python -m unittest ci/audits/test_audit_duplication.py"""
 import os
 import sys
 import unittest

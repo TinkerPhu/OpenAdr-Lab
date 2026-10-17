@@ -17,7 +17,7 @@
 //!
 //! (Two services do hold concrete `SimState` today —
 //! `services::forecast` and `services::user_request` — which contradicts that
-//! rule. `scripts/audit_ven_architecture.py` now reports them instead of
+//! rule. `ci/audits/audit_ven_architecture.py` now reports them instead of
 //! leaving the gap in prose. Moving assembly inward would have added a third
 //! rather than settled the question.)
 

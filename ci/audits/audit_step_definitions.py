@@ -33,7 +33,7 @@ import pathlib
 import subprocess
 import sys
 
-REPO = pathlib.Path(__file__).resolve().parent.parent
+REPO = pathlib.Path(__file__).resolve().parents[2]
 TESTS = REPO / "tests"
 
 if not (TESTS / "features").is_dir():

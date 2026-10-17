@@ -4,7 +4,7 @@
 #   deploy.sh <Node1|Node2> <stack dir> <service>...     build, ship, switch over
 #   deploy.sh --rollback <Node1|Node2> <stack dir> <service>...   back to the :previous images
 #
-# Runs on Node3 inside the checkout the runner has put on the commit to deploy (scripts/ci/runner.sh,
+# Runs on Node3 inside the checkout the runner has put on the commit to deploy (ci/runner.sh,
 # ticket KIND=deploy). Node1, Node2 and Node3 share a CPU architecture, so the image built once
 # here is shipped (docker save | ssh docker load) and never rebuilt on a host that runs the lab.
 # The target keeps the image it ran before as <image>:previous. Compose project names follow the
@@ -35,7 +35,7 @@ for s in "${SERVICES[@]}"; do
 done
 
 COMPOSE="docker compose -f $STACK/docker-compose.yml"
-LOCK="bash scripts/docker_host_lock.sh"
+LOCK="bash ci/locks/docker_host_lock.sh"
 
 # Production hosts are shared: take the target's lock for the whole switch-over.
 export LOCK_HOST="$TARGET" LOCK_OWNER=ci-runner

@@ -93,7 +93,7 @@ pub struct StorageLegs {
 }
 
 /// One kind's own solution readback. A closed set next to `AssetState`: each variant is read by
-/// its own kind only (`scripts/audit_ven_architecture.py` keeps it that way).
+/// its own kind only (`ci/audits/audit_ven_architecture.py` keeps it that way).
 #[derive(Debug, Clone)]
 pub enum AssetSolutionDetail {
     Battery {

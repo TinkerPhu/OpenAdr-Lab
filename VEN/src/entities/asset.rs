@@ -7,7 +7,7 @@ use ts_rs::TS;
 ///
 /// For classification, routing and display only. What an asset can do (a state of charge, an
 /// arbiter lever, a request kind) stays a question asked of the asset, and the planner core
-/// knows no kind at all (`scripts/audit_ven_architecture.py`). Spelled lowercase on the wire
+/// knows no kind at all (`ci/audits/audit_ven_architecture.py`). Spelled lowercase on the wire
 /// (`"ev"`, `"base_load"`), as in a profile's `type:`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]

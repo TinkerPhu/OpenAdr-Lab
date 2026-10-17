@@ -30,7 +30,7 @@ The [[vtn-stack]] and the three VEN containers are separate compose stacks joine
 external network. Caution from `.claude/CLAUDE.md`: the Pi also hosts **productive
 containers unrelated to this project — never stop them**. The Pi is also shared
 between parallel dev sessions: any docker build or test run there must hold the
-[[docker-host-lease-lock]] first (`scripts/docker_host_lock.sh`, `.claude/CLAUDE.md` §node1-lock). This is also the reason
+[[docker-host-lease-lock]] first (`ci/locks/docker_host_lock.sh`, `.claude/CLAUDE.md` §node1-lock). This is also the reason
 [[fleet-tooling]]'s live verification deliberately stopped at N=3 rather than N=10 —
 the Pi already runs ~20 of those unrelated containers with limited headroom.
 

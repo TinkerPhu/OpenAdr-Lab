@@ -321,8 +321,8 @@ shows its own fleet-publisher status (connected / last publish).
    the extended seed script; idempotent.
 5. **Shared crate** — extract `VEN/src/common` (+ `event_timing`, `TimeWindow`) into a workspace
    crate used by VEN and BFF (D-06).
-6. **Locks** — every Node1/Node2 docker build or test run under `scripts/docker_host_lock.sh`;
-   WSL cargo under `scripts/wsl_lock.sh`; E2E preferably on Node2.
+6. **Locks** — every Node1/Node2 docker build or test run under `ci/locks/docker_host_lock.sh`;
+   WSL cargo under `ci/locks/wsl_lock.sh`; E2E preferably on Node2.
 
 ---
 
