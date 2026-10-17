@@ -186,6 +186,21 @@ pub fn net_power_kw(telemetry: &serde_json::Value) -> Option<f64> {
     telemetry.get("grid")?.get("net_power_kw")?.as_f64()
 }
 
+/// The ingest client's connection settings. A VEN's plan leaf is far over rumqttc's 10 KiB
+/// default (`MAX_PACKET_BYTES`); over it, the connection that carries every VEN is dropped.
+fn mqtt_options(config: &FleetMqttConfig) -> rumqttc::MqttOptions {
+    let mut opts = rumqttc::MqttOptions::new("vtn-bff-fleet", config.host.clone(), config.port);
+    opts.set_keep_alive(std::time::Duration::from_secs(30));
+    opts.set_max_packet_size(
+        lab_core::fleet_channel::MAX_PACKET_BYTES,
+        lab_core::fleet_channel::MAX_PACKET_BYTES,
+    );
+    if let (Some(u), Some(p)) = (&config.username, &config.password) {
+        opts.set_credentials(u.clone(), p.clone());
+    }
+    opts
+}
+
 /// Subscribe and keep `state` current until the process ends. Returns the client, which also
 /// publishes the fleet's objective commands (`fleet_command`).
 ///
@@ -199,14 +214,9 @@ pub fn spawn_ingest(
     status: Arc<RwLock<FleetIngestStatus>>,
     store: Option<crate::fleet_store::TelemetryWriter>,
 ) -> rumqttc::AsyncClient {
-    use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
+    use rumqttc::{AsyncClient, Event, Packet, QoS};
 
-    let mut opts = MqttOptions::new("vtn-bff-fleet", config.host.clone(), config.port);
-    opts.set_keep_alive(std::time::Duration::from_secs(30));
-    if let (Some(u), Some(p)) = (&config.username, &config.password) {
-        opts.set_credentials(u.clone(), p.clone());
-    }
-    let (client, mut eventloop) = AsyncClient::new(opts, 128);
+    let (client, mut eventloop) = AsyncClient::new(mqtt_options(&config), 128);
     let publisher = client.clone();
     let topic = fleet_subscription(&config.root);
     let root = config.root.clone();
@@ -289,6 +299,19 @@ mod tests {
 
     fn now() -> DateTime<Utc> {
         DateTime::from_timestamp(1_700_000_000, 0).unwrap()
+    }
+
+    /// A VEN's plan leaf is hundreds of kB; at rumqttc's 10 KiB default the BFF would drop the
+    /// connection carrying every VEN each time one arrived.
+    #[test]
+    fn the_ingest_client_accepts_packets_as_large_as_a_plan() {
+        let config =
+            FleetMqttConfig::from_vars(|k| (k == "FLEET_MQTT_HOST").then(|| "lab-mqtt".into()))
+                .unwrap();
+        assert_eq!(
+            mqtt_options(&config).max_packet_size(),
+            lab_core::fleet_channel::MAX_PACKET_BYTES
+        );
     }
 
     #[test]

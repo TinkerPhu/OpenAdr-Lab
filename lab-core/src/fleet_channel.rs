@@ -27,6 +27,15 @@ pub mod leaf {
     pub const COMMAND_OBJECTIVE: &str = "command/objective";
 }
 
+/// The largest MQTT packet a fleet client sends or accepts [bytes], set on both ends' clients.
+///
+/// rumqttc's default is 10 KiB each way, and a VEN's `plan` leaf is far larger (a 24 h horizon
+/// with its slots, allocations and forecasts runs to hundreds of kB). Above the limit the sender
+/// fails the publish inside its event loop and reconnects, re-sends the leaf on the new
+/// connection and fails again; the receiver drops the connection that carries every VEN.
+/// mosquitto's own default is far above this.
+pub const MAX_PACKET_BYTES: usize = 4 * 1024 * 1024;
+
 /// `<root>/fleet/<ven>`: everything one VEN publishes and receives lives under it.
 pub fn ven_topic_root(root: &str, ven: &str) -> String {
     format!("{root}/fleet/{ven}")

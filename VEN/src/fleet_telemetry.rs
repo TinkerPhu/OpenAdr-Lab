@@ -124,24 +124,8 @@ impl FleetMqttPublisher {
     /// which is what `/health` and the VEN UI report.
     pub fn spawn(config: FleetMqttConfig) -> (Self, mpsc::Receiver<Vec<u8>>) {
         let broker = &config.broker;
-        let mut opts = MqttOptions::new(config.client_id.clone(), broker.host.clone(), broker.port);
-        opts.set_keep_alive(std::time::Duration::from_secs(30));
-        if let (Some(u), Some(p)) = (&broker.username, &broker.password) {
-            opts.set_credentials(u.clone(), p.clone());
-        }
-        // Last will: if this VEN dies without saying goodbye, the broker tells
-        // subscribers on its behalf. A fleet view must distinguish "quiet" from
-        // "gone", and a VEN that has crashed cannot make that distinction
-        // itself -- which is exactly why the broker holds the message.
         let status_topic = format!("{}/{}", config.topic_root, leaf::STATUS);
-        opts.set_last_will(rumqttc::LastWill::new(
-            status_topic.clone(),
-            serde_json::json!({"state": "offline"}).to_string(),
-            QoS::AtLeastOnce,
-            true,
-        ));
-
-        let (client, mut eventloop) = AsyncClient::new(opts, 32);
+        let (client, mut eventloop) = AsyncClient::new(mqtt_options(&config, &status_topic), 32);
         let connected = Arc::new(AtomicBool::new(false));
         let latest = Arc::new(Mutex::new(LatestLeaves::default()));
         let (command_tx, command_rx) = mpsc::channel(COMMAND_QUEUE);
@@ -224,6 +208,32 @@ impl FleetMqttPublisher {
     fn remember(&self, update: impl FnOnce(&mut LatestLeaves)) {
         update(&mut self.latest.lock().unwrap_or_else(|e| e.into_inner()));
     }
+}
+
+/// The client's connection settings: keep-alive, credentials, the packet limit the `plan` leaf
+/// needs (rumqttc's 10 KiB default is far under it, `MAX_PACKET_BYTES`), and the last will.
+fn mqtt_options(config: &FleetMqttConfig, status_topic: &str) -> MqttOptions {
+    let broker = &config.broker;
+    let mut opts = MqttOptions::new(config.client_id.clone(), broker.host.clone(), broker.port);
+    opts.set_keep_alive(std::time::Duration::from_secs(30));
+    opts.set_max_packet_size(
+        lab_core::fleet_channel::MAX_PACKET_BYTES,
+        lab_core::fleet_channel::MAX_PACKET_BYTES,
+    );
+    if let (Some(u), Some(p)) = (&broker.username, &broker.password) {
+        opts.set_credentials(u.clone(), p.clone());
+    }
+    // Last will: if this VEN dies without saying goodbye, the broker tells
+    // subscribers on its behalf. A fleet view must distinguish "quiet" from
+    // "gone", and a VEN that has crashed cannot make that distinction
+    // itself -- which is exactly why the broker holds the message.
+    opts.set_last_will(rumqttc::LastWill::new(
+        status_topic,
+        serde_json::json!({"state": "offline"}).to_string(),
+        QoS::AtLeastOnce,
+        true,
+    ));
+    opts
 }
 
 /// Say we are here, retained, so a subscriber that connects later still learns
@@ -468,6 +478,19 @@ mod tests {
             latest: Arc::new(Mutex::new(LatestLeaves::default())),
         };
         (publisher, eventloop)
+    }
+
+    /// A plan leaf is hundreds of kB; rumqttc's 10 KiB default would fail it and drop the
+    /// connection (`MAX_PACKET_BYTES`).
+    #[test]
+    fn the_client_accepts_and_sends_packets_as_large_as_a_plan() {
+        let config =
+            FleetMqttConfig::from_vars("ven-7", vars(&[("FLEET_MQTT_HOST", "lab-mqtt")])).unwrap();
+        let opts = mqtt_options(&config, "openadr-lab/fleet/ven-7/status");
+        assert_eq!(
+            opts.max_packet_size(),
+            lab_core::fleet_channel::MAX_PACKET_BYTES
+        );
     }
 
     #[test]

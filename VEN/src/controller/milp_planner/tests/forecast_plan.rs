@@ -160,3 +160,20 @@ fn the_usage_forecast_report_carries_the_forecast_net_power() {
         );
     }
 }
+
+/// The plan goes out whole on the fleet channel's `plan` leaf: a real horizon is far over the MQTT
+/// client's 10 KiB default and must fit the packet limit both fleet clients are set to.
+#[test]
+fn a_forecast_plan_fits_the_fleet_channel_packet_limit() {
+    let tariffs = make_tariffs(0.30, 0.08, 300.0);
+    let plan = plan_from_forecast(request(&tariffs), trace);
+    let bytes = serde_json::to_vec(&plan).unwrap().len();
+    assert!(
+        bytes > 10 * 1024,
+        "{bytes} bytes: the 10 KiB default would refuse this plan"
+    );
+    assert!(
+        bytes < lab_core::fleet_channel::MAX_PACKET_BYTES / 4,
+        "{bytes} bytes leaves no room under MAX_PACKET_BYTES"
+    );
+}
