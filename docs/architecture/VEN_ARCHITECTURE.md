@@ -376,6 +376,38 @@ campaign cases, stability with both passes on) are enforced by `controller/tests
 and `controller/tests/arbiter_limit_tests.rs`; the use case by
 `tests/features/ven_import_limit_enforcement.feature`.
 
+#### The opportunistic objective: dispatch without a plan
+
+`PlannerObjective::Opportunistic` is the common non-planning HEMS, run on the same site so the
+lab can compare it with planning. `PlannerObjective::dispatches_from_plan()` is the one switch:
+the tick takes its opportunistic arm (`build_tick_setpoints`), the planning cycle forecasts
+instead of solving (§2.3.3), and nothing a planning objective does changes.
+
+- **One step, live and forecast.** `controller::arbiter::opportunistic_step` is the whole
+  decision: `request_regime` (a start-now request runs its asset at full power and takes it out
+  of the pass; an EV without a request and with its opportunistic switch off stays out),
+  `opportunistic_pass` (the site balance shared out open-loop in the rank each asset declares,
+  `Asset::surplus_claim_rank` carried on `AssetSnapshot`: a surplus is absorbed, storage covers
+  import and never exports), then `dispatch_stages`, the stages every pass goes through
+  (dispatch window, comms-loss clamp, limit pass; `controller/arbiter/stages.rs`). The arm
+  follows no plan allocation anywhere: no plan slot, EV overlays built without a plan.
+- **Requests without look-ahead.** Each request mode declares how it is served
+  (`UserRequestMode::non_planning_dispatch`); an EV session's target and a heater's start-now
+  target reach the asset as per-asset tick inputs, so the asset says when it is done (the heater
+  holds the target through its own ceiling latch).
+- **Where commands land.** After the limit pass the opportunistic step also cuts a lagging
+  lever (the EV charger applies a command a tick late) so its command lands under the limit
+  (`limit::hold_where_commands_land`); judged on this tick alone the pass released a cut charger
+  and import alternated above the limit. Planning mode does not apply it yet (R-145).
+- **Switching back.** The opportunistic arm writes no deviation lever, displacement or
+  deviation figure, so the first planned tick decides as a fresh planning VEN does
+  (`tasks/sim_tick/tests/switch_back.rs`).
+
+Pinned by `controller/arbiter/tests/opportunistic_tests.rs`, the planning-mode tick golden
+(`tasks/sim_tick/tests/setpoints_golden.rs`, which must not change), and
+`tests/features/ven_opportunistic_objective.feature`. `GET /arbiter-diagnostics` carries the pass's
+outcome (`opportunistic`: site balance, leading asset, unresolved excess).
+
 ### 2.2 Two-Speed Loop
 
 The controller operates at two timescales:
@@ -618,6 +650,30 @@ cross-restart state. See
 `openspec/changes/penalty-threshold-check/design.md` (archived once merged;
 `docs/history/project_journal.md` has the resolution summary) for the full
 set of decisions and rejected alternatives.
+
+#### 2.3.3 The opportunistic objective: a forecast instead of a solve
+
+Under `opportunistic` the cycle's one guard (`tasks/planning/plan_for.rs`) does not solve. It
+builds the same inputs a solve would (`milp_planner::planner_inputs`), and
+`milp_planner::plan_from_forecast` hands the slot grid and each PV array's and base load's
+forecast series to `simulator::opportunistic_forecast`: a clone of the site stepped slot by slot
+with `opportunistic_step`, the forecast series fed as measured readings (which bypass the assets'
+smoothing), the requests in force at each slot start read by the tick's own functions
+(`OverlayEnabled::at`, `opportunistic_requests`), the scheduled import limit and alert windows.
+Each asset reads its part of the trace back itself (`AssetMilpContext::solution_from_trace`, in
+its `*_declared.rs`), and the result goes through `translate_to_plan` like a solved plan: status
+`SIMULATED`, friction 0, the trace's real cap and penalty exceedance (so a foreseen overrun warns
+as it would after a solve), and marginal values per slot of the import tariff when the slot
+imports or is balanced, the export tariff when it exports. A simulated plan is always adopted, and
+so is the first plan after a change of `dispatches_from_plan()` either way
+(`evaluate_acceptance_gate`).
+
+One forecast step and one live tick given the same state command the same setpoints
+(`tasks/sim_tick/tests/forecast_guard.rs`); the forecaster's own behaviour is pinned by
+`simulator/tests/opportunistic_forecast_tests.rs` and the plan by
+`controller/milp_planner/tests/forecast_plan.rs`. Coarse slots smooth what live dispatch does
+second by second; that is accepted. An export capacity limit is not applied in the forecast (PV is
+not curtailed in it).
 
 ### 2.4 Data Flows
 
@@ -1554,7 +1610,7 @@ behaviour classes (`state.rs::SimInjectState`):
 | GET | `/capacity/schedule` | 2 | `CapacitySnapshot[]` — the Dynamic Operating Envelope's per-interval import/export limit schedule (with each limit's source event) — the single source for which limit applies when |
 | GET | `/obligations` | 2 | Pending report obligations extracted from events |
 | GET | `/plan` | 3 | Active Plan or `null` |
-| PUT | `/plan/objective` | 3 | Override the active `PlannerObjective` |
+| GET / PUT | `/plan/objective` | 3 | The objective in force, who set it (`profile`, `ven_ui`, `fleet`), when, the profile's objective and the accepted ones; PUT sets it from the VEN UI (`services::objective::set_objective`, the one setter the fleet command uses too) and replans |
 | GET | `/plan/events` | 3 | SSE stream of `PlannerEvent`s (`SolvingStarted`/`SolvingProgress`/`PlanReady`) |
 | GET | `/ledger` | 4 | Per-asset cumulative energy / cost / CO₂ ledger; with `?asset_id=`, that asset's open period and its closed monthly ones (`closed_periods`, `null` without a history store), listed on the Dashboard's ledger card |
 | GET | `/user-requests` | 5 | All active user energy task requests |

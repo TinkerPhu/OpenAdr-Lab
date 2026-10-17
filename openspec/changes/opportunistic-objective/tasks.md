@@ -214,7 +214,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       source `fleet`; restart restores it; clearing returns to `profile`; forecast report arrives
       after adoption and the fleet forecast route sums it; after a second switch the route returns the
       first forecast as `before`.
-- [ ] 9.3 Use cases: a new `UC-19: Running Without Planning (opportunistic objective)` in
+- [x] 9.3 Use cases: a new `UC-19: Running Without Planning (opportunistic objective)` in
       `docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md` (switch, surplus order, battery
       covering import, request modes, objective source); a new section `13. Comparing the Fleet
       With and Without Planning` in `docs/use-cases/SYSTEM-USE-CASES.md` (switch from the VTN UI,
@@ -222,7 +222,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       arbiter section (opportunistic pass, D2–D5), planning section (forecast, D6–D7);
       `docs/plans/fleet-monitor/phase-0-foundation.md` §6.2 gains the `objective` and
       `command/objective` rows and marks `plan` as published.
-- [ ] 9.4 `docs/reference/TECHNICAL_DEBTS.md` (Severity/Kind/Cost/Why-open each): lab-mqtt per-VEN
+- [x] 9.4 `docs/reference/TECHNICAL_DEBTS.md` (Severity/Kind/Cost/Why-open each): lab-mqtt per-VEN
       ACL needs no debt row (8.0 extends it and tests it); per-kind
       `apply_ev_lever_opportunistic` (planning overlay) and `opportunistic_pass` answer "how
       much surplus does the EV take"

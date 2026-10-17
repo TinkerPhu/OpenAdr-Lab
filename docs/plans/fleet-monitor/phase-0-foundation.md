@@ -244,7 +244,19 @@ already serves the same data (DTO passthrough — no new vocabulary).
 | `telemetry` | yes | 0 | every 5 s (configurable) | `ts`, `grid.net_power_kw` (signed), per asset `power_kw`/`soc` — as `/sim` snapshot |
 | `signals` | yes | 1 | on change | `GET /signals` |
 | `trace` | no | 1 | on every `ControllerEvent` | one `/trace/events` entry |
-| `plan` | yes | 1 | on adoption | `GET /plan` (later views; cheap to add now) |
+| `plan` | yes | 1 | on every adoption, and re-sent on every connect | `GET /plan` (the Fleet page's per-VEN plan drill-down) |
+| `objective` | yes | 1 | at start-up, on every change, re-sent on every connect | `GET /plan/objective` (objective in force, its source, the objectives the VEN accepts) |
+| `command/objective` | yes | 1 | written by the BFF, read by the VEN | `{"objective", "requested_at"}` (`lab_core::fleet_channel::ObjectiveCommand`); empty = released |
+
+Topic shape, leaf names, the command body and the broker settings live once in
+`lab_core::fleet_channel`, used by both ends. `objective` and `plan` go out with `try_publish`
+from a spawned task, so neither a route nor the planning cycle waits on the broker. The one
+inbound leaf is the lab operator's version of the VEN UI's objective switch, not a grid
+instruction (those stay OpenADR): the VEN applies a new `requested_at` with source `fleet`,
+ignores the broker's redelivery of one it applied (a local change made since survives), and on
+an empty payload goes back to its profile objective only while the fleet's objective is still in
+force (`services::objective::decide_fleet_command`). The BFF may write only that leaf
+(`VTN/mosquitto/fleet-acl.conf`, `scripts/test_fleet_acl.sh`).
 
 Publishing is one outbound port in the VEN (`TelemetryPort`, no-op when
 `FLEET_MQTT_HOST` is unset — same two-gate pattern as `real_measurement_mqtt.md`), fed from the
