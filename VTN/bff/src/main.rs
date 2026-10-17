@@ -56,6 +56,68 @@ pub struct AppCtx {
     pub fleet_root: String,
 }
 
+/// Every route the BFF serves, with the metrics, request-id, tracing and CORS layers around them.
+fn router(ctx: AppCtx) -> Router {
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_headers(Any);
+
+    let x_request_id = HeaderName::from_static("x-request-id");
+
+    Router::new()
+        .route("/api/health", get(routes::health::health))
+        .route(
+            "/api/programs",
+            get(routes::programs::get_programs).post(routes::programs::create_program),
+        )
+        .route(
+            "/api/programs/:id",
+            put(routes::programs::update_program).delete(routes::programs::delete_program),
+        )
+        .route(
+            "/api/events",
+            get(routes::events::get_events).post(routes::events::create_event),
+        )
+        .route(
+            "/api/events/:id",
+            put(routes::events::update_event).delete(routes::events::delete_event),
+        )
+        .route("/api/vens", get(routes::vens::get_vens))
+        .route("/api/vens/:id", delete(routes::vens::delete_ven))
+        .route("/api/reports", get(routes::reports::get_reports))
+        // The fleet's live state (phase 0 §7). Historical series arrive with
+        // the telemetry store; this is what a dashboard opens with.
+        .route("/api/fleet/power", get(routes::fleet::fleet_power))
+        .route("/api/fleet/reactions", get(routes::fleet::fleet_reactions))
+        .route("/api/fleet/signals", get(routes::fleet::fleet_signals))
+        // The fleet's objective (openspec `opportunistic-objective` D10): command one VEN or all.
+        .route(
+            "/api/fleet/objective",
+            put(routes::fleet::put_fleet_objective),
+        )
+        .route("/api/fleet/forecast", get(routes::fleet::fleet_forecast))
+        .route(
+            "/api/fleet/vens/:ven/objective",
+            put(routes::fleet::put_ven_objective),
+        )
+        .route(
+            "/api/fleet/vens/:ven/plan",
+            get(routes::fleet::get_ven_plan),
+        )
+        .route("/api/reports/:id", delete(routes::reports::delete_report))
+        .route("/api/metrics", get(routes::metrics::get_metrics))
+        .route_layer(middleware::from_fn_with_state(
+            ctx.clone(),
+            metrics_middleware,
+        ))
+        .with_state(ctx)
+        .layer(PropagateRequestIdLayer::new(x_request_id.clone()))
+        .layer(TraceLayer::new_for_http())
+        .layer(SetRequestIdLayer::new(x_request_id, MakeRequestUuid))
+        .layer(cors)
+}
+
 async fn metrics_middleware(State(_ctx): State<AppCtx>, req: Request, next: Next) -> Response {
     let method = req.method().to_string();
     let path = req.uri().path().to_string();
@@ -168,64 +230,7 @@ async fn main() -> anyhow::Result<()> {
         info!("DATABASE_URL not set — VTN recorder disabled");
     }
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
-        .allow_headers(Any);
-
-    let x_request_id = HeaderName::from_static("x-request-id");
-
-    let app = Router::new()
-        .route("/api/health", get(routes::health::health))
-        .route(
-            "/api/programs",
-            get(routes::programs::get_programs).post(routes::programs::create_program),
-        )
-        .route(
-            "/api/programs/:id",
-            put(routes::programs::update_program).delete(routes::programs::delete_program),
-        )
-        .route(
-            "/api/events",
-            get(routes::events::get_events).post(routes::events::create_event),
-        )
-        .route(
-            "/api/events/:id",
-            put(routes::events::update_event).delete(routes::events::delete_event),
-        )
-        .route("/api/vens", get(routes::vens::get_vens))
-        .route("/api/vens/:id", delete(routes::vens::delete_ven))
-        .route("/api/reports", get(routes::reports::get_reports))
-        // The fleet's live state (phase 0 §7). Historical series arrive with
-        // the telemetry store; this is what a dashboard opens with.
-        .route("/api/fleet/power", get(routes::fleet::fleet_power))
-        .route("/api/fleet/reactions", get(routes::fleet::fleet_reactions))
-        .route("/api/fleet/signals", get(routes::fleet::fleet_signals))
-        // The fleet's objective (openspec `opportunistic-objective` D10): command one VEN or all.
-        .route(
-            "/api/fleet/objective",
-            put(routes::fleet::put_fleet_objective),
-        )
-        .route("/api/fleet/forecast", get(routes::fleet::fleet_forecast))
-        .route(
-            "/api/fleet/vens/:ven/objective",
-            put(routes::fleet::put_ven_objective),
-        )
-        .route(
-            "/api/fleet/vens/:ven/plan",
-            get(routes::fleet::get_ven_plan),
-        )
-        .route("/api/reports/:id", delete(routes::reports::delete_report))
-        .route("/api/metrics", get(routes::metrics::get_metrics))
-        .route_layer(middleware::from_fn_with_state(
-            ctx.clone(),
-            metrics_middleware,
-        ))
-        .with_state(ctx)
-        .layer(PropagateRequestIdLayer::new(x_request_id.clone()))
-        .layer(TraceLayer::new_for_http())
-        .layer(SetRequestIdLayer::new(x_request_id, MakeRequestUuid))
-        .layer(cors);
+    let app = router(ctx);
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;
     info!("BFF listening on {}", cfg.listen_addr);

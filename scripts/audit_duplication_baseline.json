@@ -51,19 +51,18 @@
   "VEN/src/assets/ev_session_context.rs::from_state": 240,
   "VEN/src/assets/ev_trip_series.rs::plan_inputs": 104,
   "VEN/src/assets/heater_milp.rs::from_state": 125,
-  "VEN/src/controller/milp_planner/results.rs::translate_to_plan": 250,
+  "VEN/src/controller/milp_planner/results.rs::translate_to_plan": 239,
   "VEN/src/controller/milp_planner/solver_phase2.rs::solve_milp_two_phase": 105,
   "VEN/src/controller/reporter.rs::build_measurement_report_for_obligation": 131,
   "VEN/src/profile/validate.rs::validate": 355,
   "VEN/src/routes/mod.rs::build_router": 121,
   "VEN/src/services/obligation.rs::check_and_report": 106,
-  "VEN/src/tasks/planning/cycle.rs::run_plan_cycle": 125,
-  "VEN/src/tasks/planning/mod.rs::spawn_planning": 110,
+  "VEN/src/tasks/planning/cycle.rs::run_plan_cycle": 120,
   "VEN/src/tasks/poll_events/detect.rs::detect_event_changes": 107,
   "VEN/src/tasks/poll_events/mod.rs::spawn_event_poll": 158,
-  "VEN/src/tasks/sim_tick/tick.rs::tick_once": 157,
+  "VEN/src/tasks/sim_tick/tick.rs::tick_once": 147,
   "VEN/src/vtn_reports.rs::upsert_report": 102,
-  "VTN/bff/src/main.rs::main": 134
+  "VTN/bff/src/main.rs::main": 101
  },
  "test_duplicated_windows": {
   "VEN/src/controller/milp_planner/tests": 156
