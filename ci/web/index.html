@@ -137,9 +137,15 @@ function renderTimeline() {
   const t1 = Math.max(now, ...shown.map(t => dt(t.eta) || 0));
   const x = ms => left + (ms - t0) / (t1 - t0 || 1) * (W - left - 10);
   let out = "";
-  for (let i = 0; i <= 5; i++) {
-    const ms = t0 + (t1 - t0) * i / 5, xx = x(ms);
-    out += `<line class="axis" x1="${xx}" x2="${xx}" y1="${top - 4}" y2="${top + shown.length * rowH}"/><text class="lbl" x="${xx + 2}" y="12">${new Date(ms).toLocaleString([], {day:"numeric", hour:"2-digit", minute:"2-digit"})}</text>`;
+  // One tick per full local hour; labels are thinned when the span is too long to read them all.
+  const H = 3600000, plotH = top + shown.length * rowH;
+  const first = new Date(t0); first.setMinutes(0, 0, 0);
+  const hours = Math.ceil((t1 - t0) / H) + 1;
+  const every = Math.max(1, Math.ceil(hours / Math.floor((W - left) / 34)));
+  for (let ms = first.getTime() + (first.getTime() < t0 ? H : 0), n = 0; ms <= t1; ms += H, n++) {
+    const d = new Date(ms), xx = x(ms), midnight = d.getHours() === 0;
+    out += `<line class="axis" x1="${xx}" x2="${xx}" y1="${top - 4}" y2="${plotH}"${midnight ? ' stroke-width="1.5"' : ""}/>`;
+    if (n % every === 0) out += `<text class="lbl" x="${xx + 2}" y="12" text-anchor="start">${midnight ? d.toLocaleDateString([], {day: "numeric", month: "short"}) : String(d.getHours()).padStart(2, "0") + ":00"}</text>`;
   }
   shown.forEach((t, i) => {
     const y = top + i * rowH, s = t.started ? dt(t.started) : null, e = ends(t);
