@@ -15969,3 +15969,17 @@ docs, so it never applied.
 **Decision with the user.** Hybrid: Node3 stays the only thing that merges; non-merging runs use
 Node2 under the existing lock rules.
 
+
+## 2026-10-16 — Plan sweep: asset max power/energy forecast spec closed
+
+**What.** Read every file under `docs/plans/` against the code. Only `asset-max-power-forecast-spec.md`
+was fully implemented (Specs C/D/E: `asset_max_power_series`, `resolve_plan_state_at`, the unified
+capacity/envelope engine); it was deleted. Its conventions (sign, consumption-only "export" as minimum
+forced import, uncertainty resolved upstream) moved into `VEN_ARCHITECTURE.md` §3.0a, which also
+dropped a stale mention of `asset_max_power`, the endpoint function that was removed as dead code.
+
+**Why the rest stays.** `mqtt_notifier_conformance.md` (planned, not scheduled), `roadmap/phase-6-*`
+(not started), `fleet-monitor/` (phase 0 still has the `/api/fleet/stream` SSE and the Reports-page
+series open; the vision is a standing document), `strategic_roadmap.md` and `roadmap/README.md` (live
+indexes), `refactoring_backlog.md` (standing, empty). `opportunistic-objective-fleet-forecast.md` is
+already replaced by the 051 openspec change on its branch.
