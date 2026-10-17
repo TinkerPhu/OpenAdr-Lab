@@ -18,7 +18,6 @@ pub mod notification;
 pub mod objective_setting;
 pub mod plan;
 pub mod plan_cost;
-
 pub mod plan_outcome;
 pub mod planner_params;
 pub mod pv_snow;
