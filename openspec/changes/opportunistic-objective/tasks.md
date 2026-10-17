@@ -185,7 +185,7 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
       with a VTN client; the rules are pure functions tested in `bff/src/fleet_command.rs`
       (validation naming VEN and value, empty retained release, one VEN per spacing in paused
       time), the handlers stay thin, and 9.2 exercises them end to end.)
-- [ ] 8.4 `scripts/seed_vtn.py`: `USAGE_FORECAST` descriptor on the fleet-monitoring event and
+- [x] 8.4 `scripts/seed_vtn.py`: `USAGE_FORECAST` descriptor on the fleet-monitoring event and
       `PAYLOAD_CONTRACT["USAGE_FORECAST"] = {"units": "KWH"}`; `docs/reference/WIRE_PROFILE.md`
       row if missing (the lab-core table test checks it).
 - [ ] 8.5 `GET /api/fleet/forecast`: newest `USAGE_FORECAST` report per online VEN from the

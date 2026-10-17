@@ -39,7 +39,7 @@ import requests
 # so there is one copy of that truth and it is not this file.
 LAB_PROFILE_ATTRIBUTE = {
     "type": "openadr-lab.profile",
-    "values": ["https://github.com/TinkerPhu/OpenAdr-Lab/blob/main/docs/reference/WIRE_PROFILE.md#v2"],
+    "values": ["https://github.com/TinkerPhu/OpenAdr-Lab/blob/main/docs/reference/WIRE_PROFILE.md#v3"],
 }
 
 # How often each VEN reports its own telemetry, and over what interval.
@@ -76,6 +76,14 @@ PROGRAMS = [
             {
                 "objectType": "REPORT_PAYLOAD_DESCRIPTOR",
                 "payloadType": "OPERATING_STATE",
+            },
+            # The forecast each VEN reports of what it will draw (openspec
+            # `opportunistic-objective` D11): energy per interval, as USAGE.
+            {
+                "objectType": "REPORT_PAYLOAD_DESCRIPTOR",
+                "payloadType": "USAGE_FORECAST",
+                "readingType": "FORECAST",
+                "units": "KWH",
             },
         ],
     },
@@ -142,7 +150,19 @@ def build_events():
                         "frequency": 1,
                         "reportIntervals": "OPEN_INTERVALS",
                         "historical": True,
-                    }
+                    },
+                    {
+                        # What the VEN expects to draw (D11), for the VTN UI's
+                        # fleet forecast. `frequency: 0` is an ad hoc report: the
+                        # VEN chooses when (profile v3: at once when its plan's
+                        # objective changes, else every 15 minutes), on its own
+                        # intervals, its plan's slots.
+                        "payloadType": "USAGE_FORECAST",
+                        "readingType": "FORECAST",
+                        "frequency": 0,
+                        "reportIntervals": "OPEN_INTERVALS",
+                        "historical": False,
+                    },
                 ],
             },
         ],
@@ -558,6 +578,7 @@ PAYLOAD_CONTRACT = {
     # program declares them for the reports it asks for.
     "DEMAND": {"units": "KW"},
     "USAGE": {"units": "KWH"},
+    "USAGE_FORECAST": {"units": "KWH"},
     "BASELINE": {"units": "KWH"},
     "STORAGE_CHARGE_LEVEL": {"units": "PERCENT"},
     "OPERATING_STATE": {},
