@@ -16108,3 +16108,18 @@ curve, so only the editor needed to change.
 - The route-level status codes (404, 422) are pinned by the BDD scenarios; the repo has no handler test
   harness for these routes.
 
+
+## One ci/ directory, a CI web board, a repo that runs on one machine (refactor/ci-board-web)
+
+**What.** All CI/CD moved under a top-level `ci/` (runner, board, hand-off, deploy, install, `locks/`, `audits/`,
+`web/`, systemd units). New read-only board `ci/web/ci_web.py` (stdlib, port 8480) with a single-page view:
+queue, running ticket and step, timeline, step bars, logs, and an estimated finish time per ticket (median of
+finished tickets of the same class, chained through the queue). `run_all_tests.sh` and the lock now default to
+the local docker; `CI_HOST` is required by the hand-off scripts. Plan: `docs/plans/ci_directory_and_standalone.md`.
+
+**Why.** A public repo should not need Node2/Node3, and CI spread over `scripts/` hid what the CI is. The queue
+was only visible through `ci-next.sh --all`.
+
+**Learnings.** The CI cannot test its own move: the installed runner is the previous version and calls the old
+audit paths, so the cutover is a manual merge plus `install.sh` with an empty queue. `board_docs_only` had to keep
+`ci/audits/` and `ci/locks/` as code: the suites and the gates use them, unlike the runner scripts.

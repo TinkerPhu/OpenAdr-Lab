@@ -4,7 +4,7 @@ type: decision
 created: 2026-07-17
 updated: 2026-07-31
 synced_commit: aff3f57
-sources: [scripts/docker_host_lock.sh, scripts/wsl_lock.sh, run_all_tests.sh, .claude/CLAUDE.md]
+sources: [ci/locks/docker_host_lock.sh, ci/locks/wsl_lock.sh, run_all_tests.sh, .claude/CLAUDE.md]
 tags: [node1, docker, concurrency, dev-workflow]
 ---
 
@@ -14,7 +14,7 @@ Multiple AI sessions work in parallel worktrees (the pattern kept from
 [[superpowers-not-adopted]]), and most tasks end in a docker build or E2E run on the
 single shared Node1 described in [[deployment-topology]]. Concurrent
 `docker compose build/run` invocations there corrupt each other's stacks and produce
-false test failures. Since 2026-07-17, `scripts/docker_host_lock.sh` provides a cooperative
+false test failures. Since 2026-07-17, `ci/locks/docker_host_lock.sh` provides a cooperative
 **lease lock** that every Node1 docker sequence must hold (`.claude/CLAUDE.md`
 §node1-lock).
 
@@ -32,7 +32,7 @@ waits until its entry is first. Rejected for two reasons
    covering every checkout and machine that can reach the host. A Pi reboot clears
    `/tmp`, which is the correct outcome for a lock.
 
-## Mechanism (scripts/docker_host_lock.sh)
+## Mechanism (ci/locks/docker_host_lock.sh)
 
 - Mutex = atomic `mkdir` on Node1, executed via a single `ssh bash -s` round-trip
   so check-and-act cannot race. An owner file records `user@host:worktree-path`, the
@@ -52,7 +52,7 @@ waits until its entry is first. Rejected for two reasons
   [[fleet-tooling]] work) must bracket themselves with acquire/release per the
   `.claude/CLAUDE.md` rule.
 
-## Same pattern for the shared WSL instance (`scripts/wsl_lock.sh`)
+## Same pattern for the shared WSL instance (`ci/locks/wsl_lock.sh`)
 
 The dev laptop has only 8 GB RAM (`.claude/CLAUDE.md` §memory-budget); a `wsl cargo
 build/check/test/clippy` can exhaust the pagefile and crash WSL, and — same root cause as the

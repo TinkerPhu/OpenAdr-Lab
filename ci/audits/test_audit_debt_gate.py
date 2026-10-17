@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for audit_debt_gate.py — run: python -m unittest scripts/test_audit_debt_gate.py"""
+"""Tests for audit_debt_gate.py — run: python -m unittest ci/audits/test_audit_debt_gate.py"""
 import os
 import sys
 import unittest

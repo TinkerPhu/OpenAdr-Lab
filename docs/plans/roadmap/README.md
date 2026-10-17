@@ -23,7 +23,7 @@ and open remainders (the S-1…S-6 experiment run, persona re-run) tracked in
   `NNN-<slug>` (openspec ID) → test-first (write failing test, then implement) →
   all four suites green → PR to `main`, rebase + fast-forward merge.
 - **Gates before merge:** `cargo fmt --check`, `cargo clippy -- -D warnings`,
-  `cargo audit`, `scripts/audit_file_sizes.py` (tasks/ ≤ 200, VEN/src/ ≤ 500
+  `cargo audit`, `ci/audits/audit_file_sizes.py` (tasks/ ≤ 200, VEN/src/ ≤ 500
   production lines), E2E green on Node1.
 - **Test pyramid (VEN Rust):** Domain → Use-case → Adapter-contract → Integration;
   mocks in `VEN/src/services/test_support/`; naming `test_<function>_<scenario>`.

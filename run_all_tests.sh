@@ -36,12 +36,13 @@ set -euo pipefail
 # ── Configuration ────────────────────────────────────────────────────────────
 
 # SSH hostname of the machine running Docker. Falls back to the shared
-# OPENADR_LAB_HOST env var (also used by scripts/docker_host_lock.sh) before the
-# hardcoded default, so the host only needs to be set in one place.
+# OPENADR_LAB_HOST env var (also used by ci/locks/docker_host_lock.sh) before the
+# default (this machine), so the host only needs to be set in one place. A fresh clone needs
+# no lab host at all; a lab sets e.g. `export OPENADR_LAB_HOST=Node1`.
 # Set to empty string "" to run docker commands directly on this machine (no SSH).
 # Example remote value: "Node1"
 # `-` not `:-`: an explicitly empty DOCKER_HOST means "local", as documented above.
-TEST_HOST="${DOCKER_HOST-${OPENADR_LAB_HOST:-Node1}}"  # override with DOCKER_HOST="" for local docker
+TEST_HOST="${DOCKER_HOST-${OPENADR_LAB_HOST:-localhost}}"  # default: docker on this machine; remote hosts are opt-in
 DOCKER_DIR="/srv/docker/openadr_lab"  # repo path on the docker host
 
 # Auto-detect: if DOCKER_HOST is empty, "localhost", or matches this machine's
@@ -156,8 +157,8 @@ if { $RUN_E2E || $RUN_RESILIENCE || $RUN_RUST || $RUN_COVERAGE; }; then
     if [[ "${LOCK_HELD_BY_CALLER:-}" != 1 ]]; then
         _LOCK_TARGET="$TEST_HOST"; $_DOCKER_IS_LOCAL && _LOCK_TARGET=localhost
         header "Acquiring $_DOCKER_LABEL lock"
-        LOCK_HOST="$_LOCK_TARGET" bash "$SCRIPT_DIR/scripts/docker_host_lock.sh" acquire -l 180 -m "run_all_tests.sh ${*:-all}"
-        trap 'LOCK_HOST="$_LOCK_TARGET" bash "$SCRIPT_DIR/scripts/docker_host_lock.sh" release' EXIT
+        LOCK_HOST="$_LOCK_TARGET" bash "$SCRIPT_DIR/ci/locks/docker_host_lock.sh" acquire -l 180 -m "run_all_tests.sh ${*:-all}"
+        trap 'LOCK_HOST="$_LOCK_TARGET" bash "$SCRIPT_DIR/ci/locks/docker_host_lock.sh" release' EXIT
     fi
 
     # GB-24: fails fast if Node2's resident fleet experiment (VEN/scale_out/node2/,
@@ -276,13 +277,13 @@ if $RUN_LOCAL; then
     if command -v wsl &> /dev/null; then
         # /c/DriveD/... (Git Bash) -> /mnt/c/DriveD/... (WSL)
         WSL_VEN_DIR=$(echo "$SCRIPT_DIR/VEN" | sed "s|^/\([a-z]\)/|/mnt/\1/|")
-        bash "$SCRIPT_DIR/scripts/wsl_lock.sh" acquire -m "run_all_tests.sh: ven-app tests" -l 30 > /dev/null
+        bash "$SCRIPT_DIR/ci/locks/wsl_lock.sh" acquire -m "run_all_tests.sh: ven-app tests" -l 30 > /dev/null
         if wsl bash -lc "cd $WSL_VEN_DIR && cargo test -j 2 -p ven-app" 2>&1 | tail -20; then
             pass "VEN Rust unit+integration"
         else
             fail "VEN Rust unit+integration"
         fi
-        bash "$SCRIPT_DIR/scripts/wsl_lock.sh" release > /dev/null
+        bash "$SCRIPT_DIR/ci/locks/wsl_lock.sh" release > /dev/null
     else
         # Loudly, not silently: on a host without WSL this suite is simply not
         # covered, and the summary should say so rather than imply otherwise.

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ci-next.sh — pick up the next finished CI result and resume the session that asked for it.
 #
-#   bash scripts/ci/ci-next.sh             # list finished tickets; resume the session of the chosen one
-#   bash scripts/ci/ci-next.sh 2           # the second one in the list
-#   bash scripts/ci/ci-next.sh --list      # only list
-#   bash scripts/ci/ci-next.sh --all       # the whole board, with every status
-#   bash scripts/ci/ci-next.sh --new       # start a FRESH session in the ticket's worktree instead
+#   bash ci/ci-next.sh             # list finished tickets; resume the session of the chosen one
+#   bash ci/ci-next.sh 2           # the second one in the list
+#   bash ci/ci-next.sh --list      # only list
+#   bash ci/ci-next.sh --all       # the whole board, with every status
+#   bash ci/ci-next.sh --new       # start a FRESH session in the ticket's worktree instead
 #                                          # (cheaper than waking a long session for a plain "merged")
-#   bash scripts/ci/ci-next.sh --dry-run   # print the command, resume nothing, acknowledge nothing
+#   bash ci/ci-next.sh --dry-run   # print the command, resume nothing, acknowledge nothing
 #
 # Resuming happens from the directory the session was started in (stored in the ticket); the
 # resumed session gets the runner's result as its first message. A ticket is acknowledged when
@@ -15,7 +15,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CI_HOST="${CI_HOST:-Node3}"
+CI_HOST="${CI_HOST:?set CI_HOST to the ssh name of the CI host (e.g. export CI_HOST=Node3); see ci/README.md}"
 MODE=resume
 DRY=no
 PICK=""
@@ -67,7 +67,7 @@ $(case "$STATUS" in
     merged)  echo "origin/main now holds the tested commit. Finish the task: delete this branch (local and origin), remove your worktree, return any docker host checkout you used to main." ;;
     deployed) echo "The deploy ran and the services are up on the target host. Report it to the user; if something looks wrong, hand off a rollback (ci-handoff.sh --deploy ... --rollback)." ;;
     green)   echo "Tested but not merged (check-only hand-off). Report the result to the user." ;;
-    *)       echo "It did not merge. Find the cause in the result below (full logs are on the CI host), fix it, push, and run scripts/ci/ci-handoff.sh again." ;;
+    *)       echo "It did not merge. Find the cause in the result below (full logs are on the CI host), fix it, push, and run ci/ci-handoff.sh again." ;;
 esac)
 
 $RESULT"

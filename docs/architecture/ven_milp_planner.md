@@ -38,7 +38,7 @@ pass's objective, so the cap equals `c_star` term for term by construction. A ne
 or objective term is added in `model_skeleton.rs`, once.
 
 **How assets take part.** The planner core knows no asset kind; it plans whatever contexts it is
-handed, each by its own roster id, and `scripts/audit_ven_architecture.py` (rules 16 and 17) fails
+handed, each by its own roster id, and `ci/audits/audit_ven_architecture.py` (rules 16 and 17) fails
 when a kind is named in `controller/milp_planner/` or `controller/milp_interactions.rs`.
 
 - *Declaration.* `AssetMilpContext::declare(n, DeclareMode, vars)` returns the asset's variables

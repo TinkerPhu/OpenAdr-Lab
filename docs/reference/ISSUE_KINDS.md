@@ -2,7 +2,7 @@
 
 The leading number is the kind's **weight**: higher = more important. Equal weights tie and
 fall back to Severity. Change a number to change priorities; nothing else needs editing.
-`scripts/audit_debt_gate.py` reads the `N. \`kind\`` lines and sorts findings by weight
+`ci/audits/audit_debt_gate.py` reads the `N. \`kind\`` lines and sorts findings by weight
 descending, then by Severity (S1 first).
 
 Each open issue in `TECHNICAL_DEBTS.md` / `BACKLOG.md` carries: **Kind** (below),

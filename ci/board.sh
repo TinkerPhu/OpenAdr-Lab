@@ -19,7 +19,7 @@
 #   source it (BOARD_NO_MAIN=1) for the functions — the runner and the tests do;
 #   or send it to the board's machine on stdin, as a session does without needing any
 #   copy of the repository on Node3:
-#       ssh Node3 'bash -s -- create SESSION_ID=... BRANCH=... SHA=...' < scripts/ci/board.sh
+#       ssh Node3 'bash -s -- create SESSION_ID=... BRANCH=... SHA=...' < ci/board.sh
 set -uo pipefail
 export LC_ALL=C
 
@@ -126,15 +126,16 @@ board_create() {
 
 # board_docs_only — reads changed paths on stdin; succeeds when none can change what the Rust or
 # E2E suites see. Docs, wiki and openspec directories, top-level markdown files, the agent config
-# (.claude/) and the CI mechanism (scripts/ci/, pinned by its own test_*.sh, which the audits-only
-# path runs) are not code; a .md file inside a code directory still is (it may be embedded or
-# read by a build).
+# (.claude/) and the CI mechanism (ci/, pinned by its own test_*.sh, which the audits-only
+# path runs; but not ci/audits/ or ci/locks/, which run_all_tests.sh and the gates use) are not
+# code; a .md file inside a code directory still is (it may be embedded or read by a build).
 board_docs_only() {
     local p
     while IFS= read -r p; do
         [ -z "$p" ] && continue
         case "$p" in
-            docs/*|wiki/*|openspec/*|.claude/*|scripts/ci/*) ;;
+            ci/audits/*|ci/locks/*) return 1 ;;   # merge gates and the host lock: the suites run them
+            docs/*|wiki/*|openspec/*|.claude/*|ci/*) ;;
             */*) return 1 ;;
             *.md) ;;
             *) return 1 ;;

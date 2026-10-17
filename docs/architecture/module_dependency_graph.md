@@ -5,7 +5,7 @@ and `scripts/audit_module_graph.py` checks that every edge resolves and that eve
 top-level directory appears in it. The import graph below it is generated from the code
 (`python scripts/gen_module_graph.py`; `--check` fails when it is stale), so it is the authority on
 which module imports which. The ring rules themselves are enforced by
-`scripts/audit_ven_architecture.py`.
+`ci/audits/audit_ven_architecture.py`.
 
 ## Component diagram (hand-drawn)
 

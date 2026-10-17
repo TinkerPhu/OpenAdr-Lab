@@ -21,10 +21,10 @@ If it is not, say so and merge the old way (manual gate, own docker host run).
 2. Everything committed, **including the project journal and KEY_LEARNINGS entries** and any
    `Debt-deferred:` line the debt gate needs: they are tested and merged together with the code.
 3. `git push -f origin HEAD:<branch>`.
-4. `bash scripts/ci/ci-handoff.sh` (`--kind check` only when the user wants Node3's verdict without a merge: experiments and A/B runs
+4. `bash ci/ci-handoff.sh` (`--kind check` only when the user wants Node3's verdict without a merge: experiments and A/B runs
    belong on Node2 by hand, because Node3 is one lane and a full run holds it for an hour).
 5. Tell the user the ticket name. Do not wait, poll or start the suite yourself. The user
-   resumes you with `scripts/ci/ci-next.sh` when the result is there (a full run takes about an hour,
+   resumes you with `ci/ci-next.sh` when the result is there (a full run takes about an hour,
    queued tickets longer).
    - **Finished work** (`--kind merge`): stop. There is nothing left to do until the result arrives.
    - **Work in progress** (`--kind check` on a milestone of an unfinished branch): do not stop. Keep
@@ -51,7 +51,7 @@ Your first message is the runner's `result.md`.
 
 ## Deploying
 
-Only when the user asks: `bash scripts/ci/ci-handoff.sh --deploy <Node1|Node2> <VEN|VTN|VEN/scale_out/node2> "<services>"`
+Only when the user asks: `bash ci/ci-handoff.sh --deploy <Node1|Node2> <VEN|VTN|VEN/scale_out/node2> "<services>"`
 (`--rollback` returns to the previous images). It ships `origin/main`, so the change must have merged
 first. The result status is `deployed`; verify the service is healthy and tell the user.
 
@@ -60,6 +60,6 @@ first. The result status is `deployed`; verify the service is healthy and tell t
 - Start no build or test run that is not needed (docs/guidelines/TESTING.md, "Rules for runs"):
   nothing twice for the same commit, nothing while a run is in flight, warm caches first.
 
-- One ticket at a time is tested; others queue oldest first. `bash scripts/ci/ci-next.sh --all` shows the board.
+- One ticket at a time is tested; others queue oldest first. `bash ci/ci-next.sh --all` shows the board.
 - Do not ask the runner to test an unpushed commit; `ci-handoff.sh` refuses it.
 - Docs-only changes take the short path (audits only) and merge in minutes.

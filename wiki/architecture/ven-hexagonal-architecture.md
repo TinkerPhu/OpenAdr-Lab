@@ -62,7 +62,7 @@ need the concrete `SimState` (sim-snapshot clone, pending-PV-inject patch,
 
 File-size caps: 500 **production** lines in `VEN/src/`, 200 in `tasks/` —
 non-blank lines excluding `#[cfg(test)]` blocks and test-only paths, exactly
-what `scripts/audit_file_sizes.py` measures (allowlisted exception:
+what `ci/audits/audit_file_sizes.py` measures (allowlisted exception:
 `assets/mod.rs`, whose real fix is the enum→trait refactor, R-08). The audit
 passes repo-wide; `tasks/planning.rs` sits near its cap and is the first
 candidate for a split when it next grows.

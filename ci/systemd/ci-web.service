@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenADR Lab CI board (read-only API and web view over the handoff board)
+After=network-online.target
+
+[Service]
+User=@USER@
+Environment=BOARD_DIR=/srv/ci/board CI_WEB_PORT=8480
+ExecStart=/usr/bin/python3 /srv/ci/bin/ci/web/ci_web.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

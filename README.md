@@ -265,13 +265,11 @@ bash run_all_tests.sh --resilience # resilience tests only
 bash run_all_tests.sh --rust       # openleadr-rs cargo tests only
 ```
 
-Configure the docker host at the top of `run_all_tests.sh`:
-
-```bash
-DOCKER_HOST=""                        # "" = run docker commands locally (no SSH)
-                                      # set to e.g. "Node1" for a remote host
-DOCKER_DIR="/srv/docker/openadr_lab"  # repo path on the docker host
-```
+By default the suites run on this machine's docker. To use a remote docker host, set
+`OPENADR_LAB_HOST` (or `DOCKER_HOST`) to its ssh name, e.g. `export OPENADR_LAB_HOST=Node1`.
+Nothing in the repository requires Node1, Node2 or Node3: they are one lab's deployment.
+`DOCKER_DIR` (default `/srv/docker/openadr_lab`) is the repo path on a remote host. The CI
+runner and its web board (`ci/`) are optional, see `ci/README.md`.
 
 GitHub Actions runs lint/audit/DCO checks on PRs and the file-size audit on
 pushes; the E2E workflow is manual-dispatch only. Run the full suite yourself
@@ -281,11 +279,8 @@ before merging.
 
 The project was developed on a Raspberry Pi 4 (ARM64). All images are multi-arch and the application code is architecture-agnostic, so it runs on any Linux Docker host. Three things need to be adjusted:
 
-**1. `run_all_tests.sh`** — set your host and repo path:
-```bash
-DOCKER_HOST=""                        # "" = local; or SSH hostname e.g. "my-server"
-DOCKER_DIR="/your/repo/path"
-```
+**1. `run_all_tests.sh`** — local docker is the default; for a remote host set
+`OPENADR_LAB_HOST` to its ssh name and `DOCKER_DIR` to the repo path there.
 
 **2. `tests/docker-compose.openleadr-test.yml`** — remove the resource caps (they prevent OOM crashes on a 4 GB Raspberry Pi; unnecessary on bigger machines):
 ```yaml

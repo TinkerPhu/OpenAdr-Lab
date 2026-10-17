@@ -9,20 +9,20 @@
 # machine that can reach it.
 #
 # Usage:
-#   bash scripts/docker_host_lock.sh acquire -m "E2E run for fix/foo"        # 60-min lease
-#   bash scripts/docker_host_lock.sh acquire -m "full suite" -l 180          # 180-min lease
-#   bash scripts/docker_host_lock.sh release
-#   bash scripts/docker_host_lock.sh refresh [-l MIN]   # extend the lease (from now)
-#   bash scripts/docker_host_lock.sh status
+#   bash ci/locks/docker_host_lock.sh acquire -m "E2E run for fix/foo"        # 60-min lease
+#   bash ci/locks/docker_host_lock.sh acquire -m "full suite" -l 180          # 180-min lease
+#   bash ci/locks/docker_host_lock.sh release
+#   bash ci/locks/docker_host_lock.sh refresh [-l MIN]   # extend the lease (from now)
+#   bash ci/locks/docker_host_lock.sh status
 #
-# Semantics (scripts/lib/lease_lock_core.sh, shared with wsl_lock.sh):
+# Semantics (ci/locks/lib/lease_lock_core.sh, shared with wsl_lock.sh):
 #   - The acquirer declares its own lease end (now + LEASE_MIN, stored as a UTC
 #     epoch in the lock). Once that point is past, the lock counts as dead
 #     (crashed session) and is stolen by the next acquirer, with a warning.
 #   - Re-entrant per owner: acquiring while already holding renews the lease.
 #   - acquire waits up to MAX_WAIT_SEC, then exits 2 ("rerun to keep waiting") —
 #     kept under the 10-minute tool timeout of AI sessions on purpose.
-#   - Owner identity = user@host:<worktree path>#session-<id> (scripts/lib/
+#   - Owner identity = user@host:<worktree path>#session-<id> (ci/locks/lib/
 #     lease_lock_cli.sh), so release/refresh only act on a lock you own.
 #   - Host: LOCK_HOST overrides for this script only; OPENADR_LAB_HOST is
 #     the shared default (also used by run_all_tests.sh); falls back to "Node1".
@@ -33,7 +33,7 @@
 #
 set -euo pipefail
 
-LOCK_TARGET_HOST="${LOCK_HOST:-${OPENADR_LAB_HOST:-Node1}}"
+LOCK_TARGET_HOST="${LOCK_HOST:-${OPENADR_LAB_HOST:-localhost}}"
 LEASE_MIN="${LOCK_LEASE_MIN:-60}"
 POLL_SEC="${LOCK_POLL_SEC:-20}"
 MAX_WAIT_SEC="${LOCK_MAX_WAIT_SEC:-540}"

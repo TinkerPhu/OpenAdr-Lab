@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 # runner.sh — the CI runner on Node3: works through the handoff board's queued tickets.
 #
-# Started every minute by the systemd timer (scripts/ci/systemd/), it takes the oldest queued
-# ticket (scripts/ci/board.sh), holds the host's lock, and for the ticket's commit:
+# Started every minute by the systemd timer (ci/systemd/), it takes the oldest queued
+# ticket (ci/board.sh), holds the host's lock, and for the ticket's commit:
 #   1. rebases it onto origin/main, so what is tested is exactly what would land;
 #   2. quick tier: the python audits and, for code, fmt / clippy / cargo test / cargo audit
 #      in the repo's unit-test harness (tests/docker-compose.ven-unit-test.yml);
 #   3. full tier (TIERS contains "full"): run_all_tests.sh --rust --e2e --resilience here;
 #   4. KIND=merge and everything green: fast-forwards origin/main to the tested commit.
-# A change the suites cannot see (docs, .claude/, scripts/ci/) runs the audits and the CI mechanism tests only. The verdict goes into the ticket (status, result.md)
-# Nothing here resumes a session: the user does that with scripts/ci/ci-next.sh.
+# A change the suites cannot see (docs, .claude/, ci/) runs the audits and the CI mechanism tests only. The verdict goes into the ticket (status, result.md)
+# Nothing here resumes a session: the user does that with ci/ci-next.sh.
 #
-# Installed by scripts/ci/install.sh into /srv/ci/bin, so a ticket that changes these very
+# Installed by ci/install.sh into /srv/ci/bin, so a ticket that changes these very
 # scripts is tested by the previous version of them.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CI_ROOT="${CI_ROOT:-/srv/ci}"
-CI_BIN="${CI_BIN:-$(dirname "$HERE")}"                 # holds docker_host_lock.sh and lib/
+LOCK_SH="${CI_LOCK_SH:-$HERE/locks/docker_host_lock.sh}"   # the host lock, installed beside the runner
 CI_REPO="${CI_REPO:-/srv/docker/openadr_lab}"
 # The audits are stdlib python, but audit_step_definitions dry-runs behave: install.sh builds a venv.
 PY="$CI_ROOT/venv/bin/python3"; [ -x "$PY" ] || PY=python3
@@ -50,12 +50,12 @@ run_step() {
 acquire_lock() {
     local i
     for i in 1 2 3; do
-        LOCK_OWNER=ci-runner LOCK_HOST=localhost bash "$CI_BIN/docker_host_lock.sh" acquire -l 150 -m "ci: $1" && return 0
+        LOCK_OWNER=ci-runner LOCK_HOST=localhost bash "$LOCK_SH" acquire -l 150 -m "ci: $1" && return 0
         [ $? -eq 2 ] || return 1
     done
     return 1
 }
-release_lock() { LOCK_OWNER=ci-runner LOCK_HOST=localhost bash "$CI_BIN/docker_host_lock.sh" release || true; }
+release_lock() { LOCK_OWNER=ci-runner LOCK_HOST=localhost bash "$LOCK_SH" release || true; }
 
 # checkout_rebased <sha> — the checkout at <sha> rebased onto origin/main. 0 ok, 3 conflict, 1 other.
 checkout_rebased() {
@@ -77,11 +77,11 @@ checkout_rebased() {
 quick_tier() { # $1 = docs-only (yes|no)
     local s
     for s in audit_file_sizes audit_duplication audit_debt_gate audit_ven_architecture audit_step_definitions; do
-        run_step "$s" "$PY" "scripts/$s.py" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
+        run_step "$s" "$PY" "ci/audits/$s.py" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     done
     # The CI mechanism has no other test: a change to it skips the suites, so these always run.
-    for s in test_board test_handoff test_deploy; do
-        run_step "ci/$s" bash "scripts/ci/$s.sh" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
+    for s in test_board test_handoff test_deploy test_web; do
+        run_step "ci/$s" bash "ci/$s.sh" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     done
     [ "$1" = yes ] && return 0
     # The harness copies VEN/ and lab-core/ into its image, so the image is rebuilt from this commit;
@@ -162,7 +162,7 @@ deploy_ticket() { # [--rollback] <target> <stack> <service>...
     git reset -q --hard && git clean -fdq && git fetch -q origin --prune || return 1
     git checkout -q --detach origin/main && git submodule update -q --init --recursive || return 1
     TESTED_SHA="$(git rev-parse HEAD)"
-    run_step "deploy ${*}" bash scripts/ci/deploy.sh "$@" >>"$TICKET_DIR/full.log" 2>&1
+    run_step "deploy ${*}" bash ci/deploy.sh "$@" >>"$TICKET_DIR/full.log" 2>&1
 }
 
 # test_and_merge — rebase, quick tier, full tier, merge: sets VERDICT (and NOTE).

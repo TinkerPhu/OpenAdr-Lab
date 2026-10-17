@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # ci-handoff.sh — hand the current branch to the CI runner on Node3, then stop working on it.
 #
-# Writes a ticket onto the handoff board (scripts/ci/board.sh); the runner rebases the commit
+# Writes a ticket onto the handoff board (ci/board.sh); the runner rebases the commit
 # onto origin/main, tests it and, if everything is green, fast-forwards main. The session can
-# close: `scripts/ci/ci-next.sh` lists finished tickets and resumes the session that wrote one.
+# close: `ci/ci-next.sh` lists finished tickets and resumes the session that wrote one.
 #
-#   bash scripts/ci/ci-handoff.sh                    # test everything, merge if green
-#   bash scripts/ci/ci-handoff.sh --kind check       # test only, never merge
-#   bash scripts/ci/ci-handoff.sh --tiers quick      # audits/fmt/clippy/cargo test only (never merges code)
-#   bash scripts/ci/ci-handoff.sh --deploy Node1 VEN "ven-2 ven-3"     # ONLY after the user said so:
+#   bash ci/ci-handoff.sh                    # test everything, merge if green
+#   bash ci/ci-handoff.sh --kind check       # test only, never merge
+#   bash ci/ci-handoff.sh --tiers quick      # audits/fmt/clippy/cargo test only (never merges code)
+#   bash ci/ci-handoff.sh --deploy Node1 VEN "ven-2 ven-3"     # ONLY after the user said so:
 #       the runner builds release images of origin/main, ships them to Node1 and switches the
 #       services over (--rollback in addition: back to the previous images). No branch is involved.
 #
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CI_HOST="${CI_HOST:-Node3}"
+CI_HOST="${CI_HOST:?set CI_HOST to the ssh name of the CI host (e.g. export CI_HOST=Node3); see ci/README.md}"
 TIERS=quick,full
 KIND=merge
 RESUME_DIR=""
@@ -75,4 +75,4 @@ TICKET="$(ssh "$CI_HOST" "bash -s -- $(printf '%q ' create \
 echo "handed off: $TICKET"
 echo "  $BRANCH @ ${SHA:0:8}, tiers $TIERS, kind $KIND"
 echo "  The runner picks it up within a minute. Close this session if you like;"
-echo "  'bash scripts/ci/ci-next.sh' resumes it with the result (--all shows the whole board)."
+echo "  'bash ci/ci-next.sh' resumes it with the result (--all shows the whole board)."

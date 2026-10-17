@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for audit_ven_architecture.py — run: python -m unittest scripts/test_audit_ven_architecture.py"""
+"""Tests for audit_ven_architecture.py — run: python -m unittest ci/audits/test_audit_ven_architecture.py"""
 import os
 import sys
 import tempfile

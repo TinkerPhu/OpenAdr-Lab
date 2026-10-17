@@ -63,7 +63,7 @@ pub mod timeline;
 // so they were the domain ring importing infra. They now live in `simulator/`,
 // beside the `forecast.rs` they already shared, and `controller/` imports
 // neither `crate::assets` nor `crate::simulator` (checked by
-// `scripts/audit_ven_architecture.py`).
+// `ci/audits/audit_ven_architecture.py`).
 
 // ── Monitoring & reporting ────────────────────────────────────────────────────
 pub mod monitor;

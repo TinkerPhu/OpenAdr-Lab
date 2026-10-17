@@ -10,13 +10,13 @@ Two measures over production code (Rust and TypeScript, test code excluded):
 Test code is not measured file set by file set (a fixture refactor moves windows between sets)
 but as one total of duplicated windows per directory in TEST_ROOTS, which may not grow (R-120).
 
-The existing state is the baseline (scripts/audit_duplication_baseline.json). The gate fails only
+The existing state is the baseline (ci/audits/audit_duplication_baseline.json). The gate fails only
 when a branch ADDS a cluster, GROWS one, adds a long function or lengthens one; improvements pass
 and are recorded by `--update`. It makes `one-concept-one-function` checkable instead of
 remembered: run it before any VEN/UI merge, like audit_file_sizes.py.
 
-  python scripts/audit_duplication.py            # check against the baseline
-  python scripts/audit_duplication.py --update   # re-record the baseline (after reducing debt)
+  python ci/audits/audit_duplication.py            # check against the baseline
+  python ci/audits/audit_duplication.py --update   # re-record the baseline (after reducing debt)
 """
 import collections
 import hashlib

@@ -1,7 +1,7 @@
 # Architectural smells — sweep of 2026-10-09
 
 A sweep of `VEN/src` (production code only: comments and `#[cfg(test)]` blocks stripped with the same
-filter `scripts/audit_ven_architecture.py` uses) and the VEN UI, made on `main` at `b1dcf2eb` after
+filter `ci/audits/audit_ven_architecture.py` uses) and the VEN UI, made on `main` at `b1dcf2eb` after
 R-112..R-115 and R-110's first step merged. Items already in `docs/reference/TECHNICAL_DEBTS.md` are
 listed at the end, not repeated. Severity uses the S1..S4 scale of `docs/reference/ISSUE_KINDS.md`.
 

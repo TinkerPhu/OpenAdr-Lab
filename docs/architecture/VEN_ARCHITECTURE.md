@@ -1483,7 +1483,7 @@ kit's own `ZoneDef`, so `tsc` fails if the two shapes part.
 ### 4.2 OpenADR Proxy
 
 Forwards queries to the VTN through `VtnPort` (`app_ctx::Vtn`); no route holds the concrete
-`VtnClient` (`scripts/audit_ven_architecture.py`, rule 14). Handler tests drive the routes with
+`VtnClient` (`ci/audits/audit_ven_architecture.py`, rule 14). Handler tests drive the routes with
 `MockVtn` (`routes/reports.rs`).
 
 | Method | Path | Description |

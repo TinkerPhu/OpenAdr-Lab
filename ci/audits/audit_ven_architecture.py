@@ -133,7 +133,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from audit_file_sizes import strip_test_blocks, is_test_only_path  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 VEN_SRC = REPO_ROOT / "VEN" / "src"
 BFF_SRC = REPO_ROOT / "VTN" / "bff" / "src"
 LAB_CORE_SRC = REPO_ROOT / "lab-core" / "src"

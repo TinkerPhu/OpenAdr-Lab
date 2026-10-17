@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Does the CI handoff board (scripts/ci/board.sh) queue, order and report tickets correctly?
+# Does the CI handoff board (ci/board.sh) queue, order and report tickets correctly?
 #
 # The board is plain files on Node3: one directory per handoff, written by sessions and by
 # the runner. These cases run the real library against a throwaway directory.
 #
-# Usage:  bash scripts/ci/test_board.sh
+# Usage:  bash ci/test_board.sh
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d)"
@@ -60,10 +60,10 @@ check "second bump is 2"                    2        "$(board_bump_attempt "$T1"
 echo "docs-only classification"
 check "markdown and docs are docs-only"     0 "$(printf 'docs/a.md\nwiki/b.md\nREADME.md\nopenspec/changes/x/design.md\n' | board_docs_only; echo $?)"
 check "a source file is not docs-only"      1 "$(printf 'docs/a.md\nVEN/src/main.rs\n' | board_docs_only; echo $?)"
-check "CI scripts are invisible to the suites" 0 "$(printf 'scripts/ci/runner.sh\nscripts/ci/test_deploy.sh\n' | board_docs_only; echo $?)"
+check "CI scripts are invisible to the suites" 0 "$(printf 'ci/runner.sh\nci/test_deploy.sh\n' | board_docs_only; echo $?)"
 check "agent config is invisible to the suites" 0 "$(printf '.claude/CLAUDE.md\n.claude/skills/ci-handoff/SKILL.md\n' | board_docs_only; echo $?)"
-check "CI scripts plus VEN code are code"   1 "$(printf 'scripts/ci/runner.sh\nVEN/src/main.rs\n' | board_docs_only; echo $?)"
-check "an audit script is not docs-only"    1 "$(printf 'scripts/audit_duplication.py\n' | board_docs_only; echo $?)"
+check "CI scripts plus VEN code are code"   1 "$(printf 'ci/runner.sh\nVEN/src/main.rs\n' | board_docs_only; echo $?)"
+check "an audit script is not docs-only"    1 "$(printf 'ci/audits/audit_duplication.py\n' | board_docs_only; echo $?)"
 check "the test entrypoint is not docs-only" 1 "$(printf 'tests/entrypoint.sh\n' | board_docs_only; echo $?)"
 check "a feature file is not docs-only"     1 "$(printf 'tests/features/a.feature\n' | board_docs_only; echo $?)"
 check ".md inside code is still code"       1 "$(printf 'VEN/profiles/a.yaml\nVEN/notes.md\n' | board_docs_only; echo $?)"

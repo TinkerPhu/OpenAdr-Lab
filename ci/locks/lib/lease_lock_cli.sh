@@ -3,7 +3,7 @@
 #
 # Owns who the caller is (owner identity), argument parsing and the acquire wait
 # loop. It knows nothing about where the lock lives: the sourcing script defines
-#   lock_op <op> <description>   run scripts/lib/lease_lock_core.sh on the lock's
+#   lock_op <op> <description>   run ci/locks/lib/lease_lock_core.sh on the lock's
 #                                machine with: op "$LOCK_OWNER_ID" "$LEASE_MIN" desc <path>
 # and sets LEASE_MIN, POLL_SEC, MAX_WAIT_SEC and LOCK_SCRIPT_NAME before calling
 # lease_lock_main "$@".
