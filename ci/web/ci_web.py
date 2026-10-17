@@ -79,10 +79,17 @@ def read_request(d):
 
 
 def parse_result(text):
-    r = {"verdict": None, "note": None, "finished": None, "steps": []}
+    r = {"verdict": None, "note": None, "finished": None, "steps": [],
+         "suites_run": None, "suites_skipped": None}
     m = re.search(r"^- verdict: \*\*(\w+)\*\*(?: \u2014 (.*))?$", text, re.M)
     if m:
         r["verdict"], r["note"] = m.group(1), m.group(2)
+    for key, label in (("suites_run", "run"), ("suites_skipped", "skipped")):
+        m = re.search(rf"^- {label}: (.*)$", text, re.M)
+        if m and m.group(1) != "(none)":
+            r[key] = m.group(1).split()
+        elif m:
+            r[key] = []
     m = re.search(r"^- finished: (\S+)", text, re.M)
     if m:
         r["finished"] = m.group(1)
@@ -118,7 +125,7 @@ def step_class(steps):
 
 
 def planned_class(request):
-    """The class a ticket not yet run will most likely have (docs-only is only known once run)."""
+    """The class a ticket not yet run will most likely have (the suites it needs are known only once run)."""
     tiers = request.get("TIERS") or "quick,full"
     return "full" if "full" in tiers.split(",") else "quick"
 
@@ -155,6 +162,7 @@ def read_ticket(name):
         "started": iso(start), "finished": iso(finished),
         "duration_s": int((finished - start).total_seconds()) if start and finished else None,
         "note": result["note"], "steps": result["steps"],
+        "suites_run": result["suites_run"], "suites_skipped": result["suites_skipped"],
         "class": step_class(result["steps"]) if result["steps"] else planned_class(req),
         "current_step": step if running else None,
         "current_step_since": iso(since) if running else None,

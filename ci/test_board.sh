@@ -57,16 +57,71 @@ echo "attempts"
 check "first bump is 1"                     1        "$(board_bump_attempt "$T1")"
 check "second bump is 2"                    2        "$(board_bump_attempt "$T1")"
 
-echo "docs-only classification"
-check "markdown and docs are docs-only"     0 "$(printf 'docs/a.md\nwiki/b.md\nREADME.md\nopenspec/changes/x/design.md\n' | board_docs_only; echo $?)"
-check "a source file is not docs-only"      1 "$(printf 'docs/a.md\nVEN/src/main.rs\n' | board_docs_only; echo $?)"
-check "CI scripts are invisible to the suites" 0 "$(printf 'ci/runner.sh\nci/test_deploy.sh\n' | board_docs_only; echo $?)"
-check "agent config is invisible to the suites" 0 "$(printf '.claude/CLAUDE.md\n.claude/skills/ci-handoff/SKILL.md\n' | board_docs_only; echo $?)"
-check "CI scripts plus VEN code are code"   1 "$(printf 'ci/runner.sh\nVEN/src/main.rs\n' | board_docs_only; echo $?)"
-check "an audit script is not docs-only"    1 "$(printf 'ci/audits/audit_duplication.py\n' | board_docs_only; echo $?)"
-check "the test entrypoint is not docs-only" 1 "$(printf 'tests/entrypoint.sh\n' | board_docs_only; echo $?)"
-check "a feature file is not docs-only"     1 "$(printf 'tests/features/a.feature\n' | board_docs_only; echo $?)"
-check ".md inside code is still code"       1 "$(printf 'VEN/profiles/a.yaml\nVEN/notes.md\n' | board_docs_only; echo $?)"
-check "no changed file is docs-only"        0 "$(printf '' | board_docs_only; echo $?)"
+echo "suite selection"
+suites() { printf '%b' "$1" | board_suites | tr '
+' ' ' | sed 's/ $//'; }
+ALL="cargo e2e resilience rust-vtn"
+check "docs and markdown select nothing"          ""  "$(suites 'docs/a.md
+wiki/b.md
+README.md
+openspec/changes/x/design.md
+')"
+check "CI scripts select nothing"                 ""  "$(suites 'ci/runner.sh
+ci/test_deploy.sh
+ci/web/ci_web.py
+')"
+check "agent config selects nothing"              ""  "$(suites '.claude/CLAUDE.md
+.claude/skills/ci-handoff/SKILL.md
+')"
+check "VEN source: cargo, e2e, resilience"        "cargo e2e resilience" "$(suites 'VEN/src/main.rs
+')"
+check "UI only: e2e"                              "e2e" "$(suites 'VEN/ui/src/a.tsx
+VTN/ui/src/b.tsx
+lab-ui/src/c.ts
+')"
+check "a feature file: e2e only"                  "e2e" "$(suites 'tests/features/a.feature
+tests/features/steps/x.py
+')"
+check "the resilience script: resilience only"    "resilience" "$(suites 'tests/failure_recovery_test.sh
+')"
+check "the openleadr test harness: rust-vtn only" "rust-vtn" "$(suites 'tests/docker-compose.openleadr-test.yml
+tests/Dockerfile.openleadr-test
+')"
+check "the VEN unit harness: cargo only"          "cargo" "$(suites 'tests/Dockerfile.ven-unit-test
+')"
+check "the BFF: cargo, e2e, resilience"           "cargo e2e resilience" "$(suites 'VTN/bff/src/main.rs
+')"
+check "other VTN files: e2e, resilience"          "e2e resilience" "$(suites 'VTN/docker-compose.yml
+')"
+check "mixed paths select the union"              "cargo e2e resilience" "$(suites 'docs/a.md
+VEN/ui/src/a.tsx
+VEN/src/main.rs
+')"
+check "an audit script runs everything"           "$ALL" "$(suites 'ci/audits/audit_duplication.py
+')"
+check "the host lock runs everything"             "$ALL" "$(suites 'ci/locks/docker_host_lock.sh
+')"
+check "the test entrypoint runs everything"       "$ALL" "$(suites 'tests/entrypoint.sh
+')"
+check "a path no rule names runs everything"      "$ALL" "$(suites 'brand_new_dir/x
+')"
+check "openleadr-rs runs everything"              "$ALL" "$(suites 'openleadr-rs/src/lib.rs
+')"
+check ".md inside code is code"                   "cargo e2e resilience" "$(suites 'VEN/notes.md
+')"
+check "a top-level non-md file runs everything"   "$ALL" "$(suites 'jobs.json
+')"
+check "no changed file selects nothing"           ""  "$(suites '')"
+check "the reason lists path and rule"            "VEN/ui/a.tsx -> e2e" "$(printf 'VEN/ui/a.tsx
+' | board_suites_why)"
+
+echo "suite map"
+map_suites() { grep -v '^#' "$SCRIPT_DIR/suites.map" | awk 'NF{print $2}' | tr ',' '\n' | sort -u; }
+flagless=""
+for s in $(map_suites | grep -v -x -e '-' -e all -e cargo); do
+    grep -q -e "--${s/rust-vtn/rust})" "$SCRIPT_DIR/../run_all_tests.sh" || flagless="$flagless $s"
+done
+check "every suite in the map is a run_all_tests.sh flag" "" "$flagless"
+check "the last rule is the catch-all"            "* all" "$(grep -v '^#' "$SCRIPT_DIR/suites.map" | awk 'NF{print $1, $2}' | tail -1)"
 
 [ "$FAILS" -eq 0 ] && echo "all passed" || { echo "$FAILS failed"; exit 1; }

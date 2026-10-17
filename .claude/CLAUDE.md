@@ -83,7 +83,7 @@ no-needless-runs: every build and test run costs minutes to hours on shared hard
 that is not needed. Do not repeat a check that already passed on the same commit; do not start a
 run while one is in flight (wait for it, or ask); look for warm caches and volumes before any
 build that would start cold; do not run the Rust or E2E suites for a change they cannot see (docs,
-wiki, openspec, scripts that no test runs: the runner's docs-only path covers those); run the
+wiki, openspec, scripts that no test runs: the runner's suite selection, ci/suites.map, covers those); run the
 narrowest test that proves the change while working and leave the full gate to the runner. When a
 run is lost to the environment (killed shell, restarted WSL), find out why before starting it again.
 

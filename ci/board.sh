@@ -124,24 +124,49 @@ board_create() {
 
 # ── Classifying a change ─────────────────────────────────────────────────────
 
-# board_docs_only — reads changed paths on stdin; succeeds when none can change what the Rust or
-# E2E suites see. Docs, wiki and openspec directories, top-level markdown files, the agent config
-# (.claude/) and the CI mechanism (ci/, pinned by its own test_*.sh, which the audits-only
-# path runs; but not ci/audits/ or ci/locks/, which run_all_tests.sh and the gates use) are not
-# code; a .md file inside a code directory still is (it may be embedded or read by a build).
-board_docs_only() {
+# ── Which suites a change needs ──────────────────────────────────────────────
+
+BOARD_SUITES_MAP="${BOARD_SUITES_MAP:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)/suites.map}"
+BOARD_ALL_SUITES="cargo e2e resilience rust-vtn"
+
+# board_rule_for <path> - the suites the map names for one changed path (space separated, empty
+# for none). The one place that reads the map; the first matching rule wins.
+board_rule_for() {
+    local path="$1" pat suites
+    while read -r pat suites; do
+        case "$pat" in ''|'#'*) continue ;; esac
+        case "$pat" in
+            */*) [[ "$path" == $pat ]] || continue ;;
+            *)   [[ "$path" != */* && "$path" == $pat ]] || continue ;;
+        esac
+        case "$suites" in
+            -) ;;
+            all) echo "$BOARD_ALL_SUITES" ;;
+            *) echo "${suites//,/ }" ;;
+        esac
+        return 0
+    done < "$BOARD_SUITES_MAP"
+    echo "$BOARD_ALL_SUITES"   # a map without a catch-all must not skip anything
+}
+
+# board_suites - changed paths on stdin; prints the union of the suites they need, one per line,
+# sorted. No output: nothing but the always-on audits and CI self-tests needs to run.
+board_suites() {
     local p
     while IFS= read -r p; do
         [ -z "$p" ] && continue
-        case "$p" in
-            ci/audits/*|ci/locks/*) return 1 ;;   # merge gates and the host lock: the suites run them
-            docs/*|wiki/*|openspec/*|.claude/*|ci/*) ;;
-            */*) return 1 ;;
-            *.md) ;;
-            *) return 1 ;;
-        esac
+        board_rule_for "$p"
+    done | tr ' ' '\n' | sed '/^$/d' | sort -u
+}
+
+# board_suites_why - changed paths on stdin; "<path> -> <suites>" per path (none: "-"), for result.md
+board_suites_why() {
+    local p s
+    while IFS= read -r p; do
+        [ -z "$p" ] && continue
+        s="$(board_rule_for "$p")"
+        echo "$p -> ${s:--}"
     done
-    return 0
 }
 
 # ── Command line (only when run, not when sourced) ───────────────────────────

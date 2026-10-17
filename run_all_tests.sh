@@ -109,10 +109,11 @@ FAIL_COUNT=0
 SKIP_COUNT=0
 RESULTS=()
 
-pass()  { PASS_COUNT=$((PASS_COUNT + 1)); RESULTS+=("${GREEN}PASS${NC}  $1"); echo -e "  ${GREEN}PASS${NC}  $1"; }
-fail()  { FAIL_COUNT=$((FAIL_COUNT + 1)); RESULTS+=("${RED}FAIL${NC}  $1"); echo -e "  ${RED}FAIL${NC}  $1"; }
-skip()  { SKIP_COUNT=$((SKIP_COUNT + 1)); RESULTS+=("${YELLOW}SKIP${NC}  $1"); echo -e "  ${YELLOW}SKIP${NC}  $1"; }
-header(){ echo -e "\n${CYAN}${BOLD}═══ $1 ═══${NC}\n"; }
+pass()  { PASS_COUNT=$((PASS_COUNT + 1)); RESULTS+=("${GREEN}PASS${NC}  $1 ($((SECONDS - _HEADER_AT))s)"); echo -e "  ${GREEN}PASS${NC}  $1 ($((SECONDS - _HEADER_AT))s)"; }
+fail()  { FAIL_COUNT=$((FAIL_COUNT + 1)); RESULTS+=("${RED}FAIL${NC}  $1 ($((SECONDS - _HEADER_AT))s)"); echo -e "  ${RED}FAIL${NC}  $1 ($((SECONDS - _HEADER_AT))s)"; }
+skip()  { SKIP_COUNT=$((SKIP_COUNT + 1)); RESULTS+=("${YELLOW}SKIP${NC}  $1 ($((SECONDS - _HEADER_AT))s)"); echo -e "  ${YELLOW}SKIP${NC}  $1 ($((SECONDS - _HEADER_AT))s)"; }
+_HEADER_AT=$SECONDS   # a verdict line carries the seconds since its header: CI suite timing
+header(){ _HEADER_AT=$SECONDS; echo -e "\n${CYAN}${BOLD}═══ $1 ═══${NC}\n"; }
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
 

@@ -1,0 +1,45 @@
+# Which suites a changed path can affect. Read by board_suites (ci/board.sh).
+#
+#   <pattern>   <suite>[,<suite>...]    suites: cargo e2e resilience rust-vtn | all | -  (none)
+#
+# The first matching rule wins, so specific rules come first. A pattern with a '/' is a shell
+# glob on the repo-relative path ('*' also matches '/'); a pattern without one matches top-level
+# files only. A ticket runs the union over its changed paths; the last rule, '*', makes any path
+# no rule names run everything. Write a rule only when you can name what the path cannot affect.
+# The audits and the CI mechanism's own tests (ci/test_*.sh) run for every ticket regardless.
+#
+#   cargo       the VEN cargo tier (fmt, clippy, test, audits) of the quick tier
+#   rust-vtn    run_all_tests.sh --rust      (the openleadr-rs submodule's own tests)
+#   e2e         run_all_tests.sh --e2e       (behave over the whole stack, UIs included)
+#   resilience  run_all_tests.sh --resilience
+
+# Documentation and tooling no suite builds or runs
+docs/*                          -
+wiki/*                          -
+openspec/*                      -
+.claude/*                       -
+# The merge gates and the host lock are used by the suites and the runner
+ci/audits/*                     all
+ci/locks/*                      all
+ci/*                            -
+*.md                            -
+
+# The UIs are built and driven only by the E2E stack (browser steps)
+VEN/ui/*                        e2e
+VTN/ui/*                        e2e
+lab-ui/*                        e2e
+
+# Test harness files, by the suite whose compose file or script they belong to
+tests/features/*                e2e
+tests/failure_recovery_test.sh  resilience
+tests/*openleadr-test*          rust-vtn
+tests/*ven-unit-test*           cargo
+tests/*ven-coverage*            cargo
+
+# Rust code the stack runs: the cargo tier, the stack builds, the restart tests
+VEN/*                           cargo,e2e,resilience
+lab-core/*                      cargo,e2e,resilience
+VTN/bff/*                       cargo,e2e,resilience
+VTN/*                           e2e,resilience
+
+*                               all
