@@ -16211,3 +16211,10 @@ with the current total, so `before` keeps every other VEN's current forecast. Wr
 scenario showed that an ad hoc forecast obligation was first due 15 minutes after it was learned,
 so a new VEN reported no forecast for that long; it is now due at once. The BFF has no route-test
 harness (R-149), so its rules are pure functions with unit tests and the routes are E2E's.
+
+**CI unit-test harness compiles what it is given (051).** The second hand-off failed clippy on
+`lab_core::fleet_channel` not being found, although the tested commit contains it. Ticket 052
+had just compiled main's `lab-core` into the shared target volume, and the cached COPY layer gave
+051's identical sources the times of an older build, so cargo kept 052's artifacts (no
+`Checking lab-core` in the log). The harness's entrypoint now touches the sources before every
+command; lab-core and the VEN crate recompile each run, which they nearly always did anyway.

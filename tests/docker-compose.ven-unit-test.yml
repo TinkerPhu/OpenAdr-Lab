@@ -32,6 +32,12 @@ services:
     build:
       context: ..
       dockerfile: tests/Dockerfile.ven-unit-test
+    # Cargo trusts file times for path crates. A cached COPY layer keeps the times of the build
+    # that made it, so after another branch compiled into the shared target volume the sources
+    # look older than its artifacts and cargo reuses them (the CI runner checked a branch against
+    # main's lab-core). Stamping the sources now makes every run compile what it was given.
+    entrypoint: ["sh", "-c", "find /app/src /app/tests /app/benches /lab-core -name '*.rs' -exec touch {} + 2>/dev/null; exec \"$$@\"", "--"]
+    command: ["cargo", "test", "--jobs", "2"]   # the image's CMD, which an entrypoint override drops
     volumes:
       - ven-cargo-registry:/usr/local/cargo/registry
       - ven-cargo-git:/usr/local/cargo/git

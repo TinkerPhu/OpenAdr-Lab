@@ -3586,3 +3586,14 @@ right for keeping an x86 plan identical to the last bit; it is no longer needed 
 - Size the limit to the largest leaf, set it on every client of the channel from one constant
   (`lab_core::fleet_channel::MAX_PACKET_BYTES`), and pin it with a test that a realistic body
   exceeds the library default.
+
+## A cached image layer plus a shared cargo target volume compiles the wrong source (2026-10-17)
+
+- Cargo decides whether a path crate is fresh by file times. Docker's layer cache matches COPY by
+  content, not times, so a cached layer brings back the times of the build that first made it.
+  Once another branch has compiled a different version into the shared `target` volume, those
+  sources look older than its artifacts and cargo reuses them: the CI runner checked 051 against
+  main's `lab-core` and reported modules missing that the tested commit contains.
+- Stamp the sources when the container starts (`tests/docker-compose.ven-unit-test.yml`'s
+  entrypoint), never in a build step, which the cache would replay too. The tell is a log with no
+  `Checking <crate>` line for a crate whose source changed.
