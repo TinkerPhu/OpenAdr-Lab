@@ -279,7 +279,14 @@ pub fn extract_report_obligations(
 
             let (interval_width_s, submit_every_s) = report_timing(event, descriptor);
 
-            let due_at = now + Duration::seconds(submit_every_s as i64);
+            // An ad hoc forecast is the VEN's to send when it chooses, and the VTN has none yet:
+            // the first goes out at once, as after an objective change (WIRE_PROFILE v3).
+            let ad_hoc = descriptor.frequency == 0;
+            let due_at = if ad_hoc && !descriptor.historical {
+                now
+            } else {
+                now + Duration::seconds(submit_every_s as i64)
+            };
 
             result.push(OadrReportObligation {
                 id: Uuid::new_v4(),
@@ -295,7 +302,7 @@ pub fn extract_report_obligations(
                 created_at: now,
                 historical: descriptor.historical,
                 aggregate: descriptor.aggregate,
-                ad_hoc: descriptor.frequency == 0,
+                ad_hoc,
             });
         }
     }
@@ -1969,8 +1976,10 @@ mod tests {
             "payloadType": "USAGE_FORECAST", "readingType": "FORECAST",
             "historical": false, "frequency": 0
         }));
-        let ob = &extract_report_obligations(&events, Utc::now(), &[])[0];
+        let now = Utc::now();
+        let ob = &extract_report_obligations(&events, now, &[])[0];
         assert!(ob.ad_hoc);
+        assert_eq!(ob.due_at, now, "the VEN's first forecast goes out at once");
         assert_eq!(ob.interval_width_s, 900, "the event's own grid");
         assert_eq!(ob.submit_every_s, AD_HOC_FORECAST_EVERY_S);
         assert_eq!(AD_HOC_FORECAST_EVERY_S, 900);
@@ -1981,9 +1990,15 @@ mod tests {
     #[test]
     fn frequency_zero_for_a_measurement_uses_the_profile_cadence() {
         let events = quarter_hourly_event(json!({"payloadType": "USAGE", "frequency": 0}));
-        let ob = &extract_report_obligations(&events, Utc::now(), &[])[0];
+        let now = Utc::now();
+        let ob = &extract_report_obligations(&events, now, &[])[0];
         assert!(ob.ad_hoc);
         assert_eq!(ob.submit_every_s, DEFAULT_REPORT_CADENCE_S);
+        assert_eq!(
+            ob.due_at,
+            now + Duration::seconds(DEFAULT_REPORT_CADENCE_S as i64),
+            "a measurement has nothing to report yet"
+        );
     }
 
     /// Every other `frequency` keeps its meaning: intervals between reports.

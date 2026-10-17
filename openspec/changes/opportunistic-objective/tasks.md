@@ -202,12 +202,14 @@ and the host checked out on the branch (`git log -1` verified). "BDD green" mean
 
 ## 9. Use cases, BDD, docs
 
-- [ ] 9.1 BDD `tests/features/ven_opportunistic_objective.feature`: switch objective via `PUT
+- [x] 9.1 BDD `tests/features/ven_opportunistic_objective.feature`: switch objective via `PUT
       /plan/objective`; surplus absorbed in order; battery covers import, never exports; BY_DEADLINE
       EV starts now; OPPORTUNISTIC EV idle without surplus; import limit bounds start-now; switch
       back to `min_cost` and the plan's allocations drive the assets again; a `min_cost` VEN's
       no-plan startup is unchanged (battery idle). Prefer `{x:g}` numeric steps; run `audit_step_definitions.py`.
-- [ ] 9.2 BDD `tests/features/fleet_objective_control.feature` (test stack has `mosquitto`,
+      (The last one is not an E2E scenario: the E2E VEN always holds a plan by then. It is pinned
+      by the tick golden's no-plan scenarios, `tasks/sim_tick/tests/setpoints_golden.rs`.)
+- [x] 9.2 BDD `tests/features/fleet_objective_control.feature` (test stack has `mosquitto`,
       `FLEET_MQTT_HOST`, `test-bff`): switch one VEN and the fleet through the BFF; VEN reports
       source `fleet`; restart restores it; clearing returns to `profile`; forecast report arrives
       after adoption and the fleet forecast route sums it; after a second switch the route returns the

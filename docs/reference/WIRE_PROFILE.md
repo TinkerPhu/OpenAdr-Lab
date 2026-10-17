@@ -202,8 +202,8 @@ v3 adds to v2 and changes nothing in it.
 `frequency: 0` is an ad hoc report: *"the VEN is expected to generate a report at any time it
 chooses"* (User Guide, report descriptors). This lab's VEN chooses:
 
-- **A forecast** (`historical: false`) is submitted at once when the plan in force changes
-  objective, and otherwise every 15 minutes. Four forecasts per VEN per hour keep the VTN's
+- **A forecast** (`historical: false`) is submitted as soon as the VEN learns of the request,
+  at once when the plan in force changes objective, and otherwise every 15 minutes. Four forecasts per VEN per hour keep the VTN's
   report table small while a change of objective still reaches it immediately.
 - **A measurement** (`historical: true`) has no such moment and is submitted at the profile
   default cadence, one hour. The VEN logs that it applied it.
