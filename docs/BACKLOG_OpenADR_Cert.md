@@ -96,7 +96,7 @@ Beyond the spec: the VEN reads the scopes out of its own token and reports a mis
 | CONTROL_SETPOINT / CONTROL_LEVEL_OFFSET | — | Missing | Not handled |
 | Alert payloads (GRID_EMERGENCY, BLACK_START, OUTAGE, FLEX_ALERT, FIRE, FREEZING, WIND) | — | Partial | GRID_EMERGENCY and BLACK_START clamp planned import to 0 over their window; the other five are not handled |
 | CURVE / OLS payloads | — | Missing | Not handled |
-| Capacity subscription / reservation | — | Partial | Import and export subscription/reservation bind the solver as a contracted allowance, and the VEN reports the capacity it wants (`IMPORT_RESERVATION_CAPACITY`, `EXPORT_RESERVATION_CAPACITY`). Not time-aware per interval (GB-48 C) and no fee (GB-56) |
+| Capacity subscription / reservation | — | Partial | Import and export subscription/reservation are time-aware schedules that bind the solver per slot as a contracted allowance (the subscription is the default once the limit schedule is exhausted, §8.10.1), and the VEN reports the capacity it wants (`IMPORT_RESERVATION_CAPACITY`, `EXPORT_RESERVATION_CAPACITY`). Not covered: the grid-power-outage rule of §8.10.1, and no fee (GB-56) |
 | Opt-in / opt-out signalling | — | Missing | No mechanism |
 | Looping events (`P9999Y` duration) | — | Full | `lab_core::event_timing` |
 | Variable-duration intervals | — | Full | ISO 8601 durations; one interval-timing rule for every parser (`lab_core::event_timing`) |

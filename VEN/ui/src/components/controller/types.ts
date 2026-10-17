@@ -43,6 +43,9 @@ export const SERIES_COLORS: Record<string, string> = {
    * colors since it's a different physical quantity (kW, not €/kWh) sharing the diagram. */
   import_capacity_limit: "#5d4037",
   export_capacity_limit: "#00838f",
+  /** Contracted allowance (subscription + reservation) — the capacity-limit hues, lighter. */
+  import_capacity_allowance: "#a1887f",
+  export_capacity_allowance: "#4dd0e1",
 };
 
 // ─── Summary (left section of each asset cell) ───────────────────────────────
@@ -122,6 +125,10 @@ export type TariffTimePoint = {
   importLimitKw: number | null;
   /** Dynamic Operating Envelope export limit [kW] — direct VTN signal (EXPORT_CAPACITY_LIMIT) */
   exportLimitKw: number | null;
+  /** Contracted import allowance [kW] — subscription + reservation (IMPORT_CAPACITY_SUBSCRIPTION/RESERVATION) */
+  importAllowanceKw: number | null;
+  /** Contracted export allowance [kW] — subscription + reservation (EXPORT_CAPACITY_SUBSCRIPTION/RESERVATION) */
+  exportAllowanceKw: number | null;
 };
 
 // ─── Stacked area (accumulated asset power cell) ──────────────────────────────

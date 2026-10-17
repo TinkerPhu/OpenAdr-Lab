@@ -30,9 +30,9 @@ pub(crate) struct TickContext {
     pub grid_max_import_kw: f64,
     pub grid_max_export_kw: f64,
     pub plan_snap: Option<crate::entities::plan::Plan>,
-    pub capacity_snap: crate::entities::capacity::OadrCapacityState,
-    /// Per-interval capacity limits (priority-resolved) — the arbiter's limit
-    /// pass reads the one in force at `now`.
+    /// The priority-resolved capacity schedule (limits, subscriptions, reservations) —
+    /// every tick reader (arbiter limit pass, PV generation limit, grid asset limits)
+    /// asks it at `now`, through `entities::capacity::effective_capacity_limit`.
     pub capacity_schedule: Vec<crate::entities::capacity::CapacitySnapshot>,
     pub dispatch_windows: Vec<crate::entities::capacity::DispatchWindow>,
     pub alert_windows: Vec<crate::entities::capacity::AlertWindow>,
@@ -110,7 +110,6 @@ pub(crate) async fn resolve_tick_context(
         grid_max_import_kw,
         grid_max_export_kw,
         plan_snap,
-        capacity_snap: state.capacity_state().await,
         capacity_schedule: state.planned_capacity_limits().await,
         dispatch_windows: state.dispatch_windows().await,
         alert_windows: state.alert_windows().await,

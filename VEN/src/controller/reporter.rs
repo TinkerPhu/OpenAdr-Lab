@@ -180,8 +180,8 @@ pub fn build_measurement_report_for_obligation(
             // (openleadr-wire's `ReportType` enum) — NOT `IMPORT_CAPACITY_RESERVATION`,
             // which is a distinct *event* payload type (OpenADR 3.1 §Payload Type
             // Enumerations: capacity "granted by the VTN" on an event, vs. capacity
-            // "requested" on a report). `openadr_interface.rs::parse_capacity_state`
-            // correctly keeps the other string for that reason — verified during
+            // "requested" on a report). `rate_schedule.rs::parse_capacity_schedule`
+            // (`CAPACITY_PAYLOAD_TYPES`) correctly keeps the other string for that reason — verified during
             // GB-21 implementation, not conflated here.
             // R-76: both arms are a straight read of one named, already-correct
             // field. The direction crossing, the absolute-vs-additional error and

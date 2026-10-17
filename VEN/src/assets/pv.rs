@@ -61,8 +61,8 @@ pub struct PvInverter {
     pub inverter_max_kw: f64,
     /// Active generation limit in kW (≤ 0); None = no curtailment limit. This is a device-level
     /// cap on the inverter's own output — not the site's net grid export, which the inverter has
-    /// no visibility into (see `OadrCapacityState.export_limit_kw`/`SimInjectState.grid_export_limit_kw`
-    /// for that, genuinely site-level, concept).
+    /// no visibility into (see the capacity schedule's `export_limit_kw` and
+    /// `SimInjectState.grid_export_limit_kw` for that, genuinely site-level, concept).
     pub generation_limit_kw: Option<f64>,
     /// Which source produced `generation_limit_kw` (plan, live capacity/VTN, arbiter, or
     /// manual sim-inject). Set each tick alongside `generation_limit_kw`, copied into `PvState`

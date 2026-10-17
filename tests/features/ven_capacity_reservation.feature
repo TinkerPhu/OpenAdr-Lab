@@ -14,3 +14,10 @@ Feature: Capacity reservations constrain the planner (WP3.3, §8.10)
     When I wait for a capacity-change replan with at least one slot capped at 3 kW
     When I delete the saved capacity event
     And I wait for the VEN /plan to have no slot with import_cap_kw below 4.0
+
+  Scenario: The reservation request shrinks while a reservation window is active
+    Given I create an open program "reservation-request-test" and save its ID
+    And I announce an import capacity subscription of 0.5 kW starting in 0 minutes for 4320 minutes
+    And I note the VEN's import reservation request
+    When I announce an import capacity reservation of 0.25 kW starting in 0 minutes for 30 minutes
+    Then the VEN's import reservation request is 0.25 kW lower within 120 seconds

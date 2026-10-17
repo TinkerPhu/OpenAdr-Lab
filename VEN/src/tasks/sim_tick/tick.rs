@@ -86,7 +86,7 @@ pub(crate) async fn tick_once(
         let resolved_pv_generation_limit = crate::controller::comms_loss::pv_generation_limit(
             &pre_snap,
             ctx.plan_snap.as_ref(),
-            &ctx.capacity_snap,
+            &ctx.capacity_schedule,
             &ctx.inject,
             now,
             outcome.pv_generation_limit_tighten_kw,

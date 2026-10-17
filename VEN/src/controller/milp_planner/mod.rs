@@ -25,9 +25,9 @@ use crate::entities::plan::Plan;
 #[cfg(test)]
 mod test_prelude {
     pub use chrono::Duration;
-    // Still named by the test module through `use super::*`, but no longer
-    // by production code here: `run_planner` takes a `GridSignals` now.
-    pub use crate::entities::capacity::OadrCapacityState;
+    // Named by the test module through `use super::*`, but not by production
+    // code here: `run_planner` takes a `GridSignals` now.
+    pub use crate::entities::capacity::CapacitySnapshot;
     pub use crate::entities::tariff_snapshot::TariffTimeSeries;
     pub use good_lp::{constraint, Solution, SolverModel};
 }

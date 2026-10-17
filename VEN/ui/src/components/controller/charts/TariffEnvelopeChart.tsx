@@ -56,6 +56,8 @@ export function TariffEnvelopeChart({
   const clipped = carryForwardLastKnown(withTariffCarry, tMax, [
     "importLimitKw",
     "exportLimitKw",
+    "importAllowanceKw",
+    "exportAllowanceKw",
   ]);
 
   // Tariff (€/kWh) and capacity limit (kW) are different physical dimensions and must not
@@ -68,7 +70,12 @@ export function TariffEnvelopeChart({
     MIN_TARIFF_SPAN_EUR_KWH
   );
   const capacityDomain = minSpanDomain(
-    clipped.flatMap((p) => [p.values?.importLimitKw, p.values?.exportLimitKw]),
+    clipped.flatMap((p) => [
+      p.values?.importLimitKw,
+      p.values?.exportLimitKw,
+      p.values?.importAllowanceKw,
+      p.values?.exportAllowanceKw,
+    ]),
     MIN_POWER_SPAN_KW
   );
 
@@ -104,6 +111,24 @@ export function TariffEnvelopeChart({
       dataKey: (row) => row.values?.exportLimitKw ?? null,
       color: SERIES_COLORS.export_capacity_limit,
       strokeDasharray: "3 3",
+      connectNulls: true,
+      formatter: formatPowerValue,
+    },
+    {
+      key: "Import allowance [kW]",
+      axisId: "capacity",
+      dataKey: (row) => row.values?.importAllowanceKw ?? null,
+      color: SERIES_COLORS.import_capacity_allowance,
+      strokeDasharray: "6 3",
+      connectNulls: true,
+      formatter: formatPowerValue,
+    },
+    {
+      key: "Export allowance [kW]",
+      axisId: "capacity",
+      dataKey: (row) => row.values?.exportAllowanceKw ?? null,
+      color: SERIES_COLORS.export_capacity_allowance,
+      strokeDasharray: "6 3",
       connectNulls: true,
       formatter: formatPowerValue,
     },

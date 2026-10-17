@@ -85,8 +85,8 @@ def _interval_values(ptype, count):
         ]
     if count == 1:
         # Capacity types must NOT default to 0.0 — a zero import/export limit means
-        # "no power allowed" and would poison all subsequent tests via parse_capacity_state
-        # (which takes the global minimum across all visible events).
+        # "no power allowed" and would poison all subsequent tests through the capacity schedule
+        # (every visible event's limit applies in its window).
         _CAPACITY_TYPES = {"IMPORT_CAPACITY_LIMIT", "EXPORT_CAPACITY_LIMIT"}
         default = 10000.0 if ptype in _CAPACITY_TYPES else 0.0
         return [{"id": 0, "payloads": [{"type": ptype, "values": [default]}]}]

@@ -39,10 +39,12 @@
 //! is the property that matters for asking. The counterfactual refinement is a
 //! deliberate non-goal — it needs a second solve per direction per report.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::entities::capacity::OadrCapacityState;
+use crate::entities::capacity::{contracted_allowance_kw, CapacitySnapshot};
+use crate::entities::capacity_curve::CommitmentDirection;
 use crate::entities::plan::SiteHeadroom;
 
 /// Additional capacity requested per direction (kW), both `>= 0`.
@@ -60,16 +62,24 @@ pub struct ReservationRequest {
 }
 
 impl ReservationRequest {
-    /// What to ask for, given what the site can do and what it is allowed.
+    /// What to ask for at `now`, given what the site can do and what it is
+    /// allowed at that moment (the contracted allowance the capacity schedule
+    /// holds for `now`, so a reservation window shrinks the request while it runs).
     ///
     /// `headroom`'s fields are signed (positive = import) per
     /// `SiteHeadroom`'s convention, so each direction's capability
     /// is read in its own sign and floored at zero: a direction the site
     /// cannot serve is not a negative request, it is no request.
-    pub fn from_headroom(headroom: &SiteHeadroom, capacity: &OadrCapacityState) -> Self {
+    pub fn from_headroom(
+        headroom: &SiteHeadroom,
+        capacity_schedule: &[CapacitySnapshot],
+        now: DateTime<Utc>,
+    ) -> Self {
+        let allowance_kw =
+            |direction| contracted_allowance_kw(capacity_schedule, direction, now, now);
         Self {
-            import_kw: Self::beyond(headroom.down_kw, capacity.import_allowance_kw()),
-            export_kw: Self::beyond(-headroom.up_kw, capacity.export_allowance_kw()),
+            import_kw: Self::beyond(headroom.down_kw, allowance_kw(CommitmentDirection::Import)),
+            export_kw: Self::beyond(-headroom.up_kw, allowance_kw(CommitmentDirection::Export)),
         }
     }
 
@@ -97,12 +107,20 @@ mod tests {
         }
     }
 
-    fn allowance(import_kw: Option<f64>, export_kw: Option<f64>) -> OadrCapacityState {
-        OadrCapacityState {
+    /// A schedule that declares a subscription around `now()`.
+    fn allowance(import_kw: Option<f64>, export_kw: Option<f64>) -> Vec<CapacitySnapshot> {
+        vec![CapacitySnapshot {
+            interval_start: now() - chrono::Duration::hours(1),
+            interval_end: now() + chrono::Duration::hours(1),
             import_subscription_kw: import_kw,
             export_subscription_kw: export_kw,
-            ..OadrCapacityState::default()
-        }
+            ..CapacitySnapshot::default()
+        }]
+    }
+
+    fn now() -> DateTime<Utc> {
+        use chrono::TimeZone;
+        Utc.with_ymd_and_hms(2026, 9, 15, 10, 0, 0).unwrap()
     }
 
     /// The defect R-76 names: each direction must be read in its own sign.
@@ -113,6 +131,7 @@ mod tests {
         let req = ReservationRequest::from_headroom(
             &headroom(-8.0, 11.0),
             &allowance(Some(7.0), Some(2.0)),
+            now(),
         );
         assert_eq!(req.import_kw, 4.0, "11 kW capability less 7 kW contracted");
         assert_eq!(req.export_kw, 6.0, "8 kW capability less 2 kW contracted");
@@ -120,7 +139,8 @@ mod tests {
 
     #[test]
     fn from_headroom_asks_for_nothing_when_no_allowance_is_declared() {
-        let req = ReservationRequest::from_headroom(&headroom(-8.0, 11.0), &allowance(None, None));
+        let req =
+            ReservationRequest::from_headroom(&headroom(-8.0, 11.0), &allowance(None, None), now());
         assert_eq!(
             (req.import_kw, req.export_kw),
             (0.0, 0.0),
@@ -133,6 +153,7 @@ mod tests {
         let req = ReservationRequest::from_headroom(
             &headroom(-2.0, 3.0),
             &allowance(Some(10.0), Some(10.0)),
+            now(),
         );
         assert_eq!((req.import_kw, req.export_kw), (0.0, 0.0));
     }
@@ -146,6 +167,7 @@ mod tests {
         let req = ReservationRequest::from_headroom(
             &headroom(1.5, 11.0),
             &allowance(Some(7.0), Some(2.0)),
+            now(),
         );
         assert_eq!(req.export_kw, 0.0, "cannot export, so asks for no export");
         assert_eq!(req.import_kw, 4.0, "the import side is unaffected");
@@ -155,12 +177,38 @@ mod tests {
     /// through the entity that owns the rule.
     #[test]
     fn from_headroom_counts_subscription_and_reservation_together() {
-        let capacity = OadrCapacityState {
+        let schedule = vec![CapacitySnapshot {
+            interval_start: now() - chrono::Duration::hours(1),
+            interval_end: now() + chrono::Duration::hours(1),
             import_subscription_kw: Some(6.0),
             import_reservation_kw: Some(3.0),
-            ..OadrCapacityState::default()
-        };
-        let req = ReservationRequest::from_headroom(&headroom(0.0, 11.0), &capacity);
+            ..CapacitySnapshot::default()
+        }];
+        let req = ReservationRequest::from_headroom(&headroom(0.0, 11.0), &schedule, now());
         assert_eq!(req.import_kw, 2.0, "11 kW less a combined 9 kW allowance");
+    }
+
+    /// GB-48 C: the request is measured against the allowance *now*, so it shrinks
+    /// while a reservation window runs and grows back after it.
+    #[test]
+    fn from_headroom_shrinks_inside_a_reservation_window() {
+        let hour = chrono::Duration::hours(1);
+        let segment = |from, to, reservation_kw| CapacitySnapshot {
+            interval_start: from,
+            interval_end: to,
+            import_subscription_kw: Some(5.0),
+            import_reservation_kw: reservation_kw,
+            ..CapacitySnapshot::default()
+        };
+        let schedule = vec![
+            segment(now() - hour * 2, now(), None),
+            segment(now(), now() + hour, Some(3.0)),
+            segment(now() + hour, now() + hour * 2, None),
+        ];
+        let capability = headroom(0.0, 10.0);
+        let at = |t| ReservationRequest::from_headroom(&capability, &schedule, t).import_kw;
+        assert_eq!(at(now() - hour / 2), 5.0, "outside the window: 10 less 5");
+        assert_eq!(at(now() + hour / 2), 2.0, "inside it: 10 less 5 + 3");
+        assert_eq!(at(now() + hour * 3 / 2), 5.0, "after it: back to 10 less 5");
     }
 }

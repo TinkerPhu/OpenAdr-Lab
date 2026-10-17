@@ -1089,7 +1089,7 @@ fn phase1_setup(
     sim: &SimSnapshot,
     now: DateTime<Utc>,
     tariffs: &TariffTimeSeries,
-    cap: &OadrCapacityState,
+    cap: &[CapacitySnapshot],
 ) -> (
     Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
     MilpInputs,

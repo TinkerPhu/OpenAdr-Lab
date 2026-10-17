@@ -434,6 +434,22 @@ The power chart shows the EV packet is NOT pre-committed to the 18:00–20:00 of
 - Trigger `CAPACITY_CHANGE` on next replan
 - If EV would have charged at 7 kW but site baseline is 0.5 kW: effective limit for EV = 5 − 0.5 = 4.5 kW. The plan allocates accordingly.
 
+### Subscriptions and reservations apply in their own window (GB-48)
+
+`IMPORT_CAPACITY_SUBSCRIPTION` / `IMPORT_CAPACITY_RESERVATION` events (and the export pair) are
+schedules, like the limit. Give an event an `intervalPeriod` and its value binds only inside it:
+
+- a reservation announced for tomorrow raises the planned import cap only for tomorrow's slots
+  (Controller → Rate chart: the dashed *Import allowance* line steps up inside the window);
+- once the limit schedule runs out, the subscription is the default limit (OpenADR 3.1 User Guide
+  §8.10.1), so slots after the last limit are capped at it rather than left unlimited;
+- a limit takes effect at its start and ends at its end: the Capacity card and the dispatcher turn
+  over at the boundary, without waiting for the next 30 s event poll;
+- the *requesting +N kW* chip shrinks while a reservation window runs, because the request is measured
+  against the allowance at that moment.
+
+Pinned by the BDD scenarios in `ven_capacity_schedule.feature` and `ven_capacity_reservation.feature`.
+
 ### The VEN asking for more capacity (R-76, 2026-10-04)
 
 Half of Step5 is now observable. When a VTN event declares an import subscription or

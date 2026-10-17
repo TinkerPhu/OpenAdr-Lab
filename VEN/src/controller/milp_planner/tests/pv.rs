@@ -227,8 +227,7 @@ fn pv_forecast_override_none_is_non_zero_during_day() {
 // ── PV-export decision variable (pv-export-curtailment) ────────────────────
 
 /// An export limit covering the whole horizon from `now`, as a capacity-schedule
-/// segment (GB-48: the planner reads limits from the schedule per slot; the
-/// folded `OadrCapacityState.export_limit_kw` means "in force now" only).
+/// segment (GB-48: the planner reads limits from the schedule per slot).
 fn export_limit_schedule(
     limit_kw: f64,
     now: DateTime<Utc>,
@@ -240,6 +239,7 @@ fn export_limit_schedule(
         export_limit_kw: Some(limit_kw),
         import_limit_event_id: None,
         export_limit_event_id: Some("export-cap".to_string()),
+        ..Default::default()
     }]
 }
 

@@ -9,7 +9,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::controller::vtn_port::{EventTypeName, OadrEvent};
-use crate::entities::capacity::CapacitySnapshot;
+use crate::entities::capacity::{CapacitySnapshot, CAPACITY_PAYLOAD_TYPES};
 use crate::entities::tariff_snapshot::TariffSnapshot;
 use lab_core::wire_contract::PayloadReader;
 
@@ -202,35 +202,34 @@ pub fn parse_rate_snapshots(events: &[OadrEvent], reader: &PayloadReader) -> Vec
         .collect()
 }
 
-/// Parse the capacity-limit schedule (Dynamic Operating Envelope, OpenADR 3.1
-/// User Guide §8.10.1) from a slice of OpenADR events. Handles
-/// IMPORT_CAPACITY_LIMIT/EXPORT_CAPACITY_LIMIT payload types per event interval.
-/// The single source for "which limit applies when" (GB-48): read it through
-/// `entities::capacity::tightest_capacity_limit`.
+/// Parse the capacity schedule (Dynamic Operating Envelope and capacity
+/// management, OpenADR 3.1 User Guide §8.10) from a slice of OpenADR events.
+/// Handles the six `*_CAPACITY_LIMIT` / `*_SUBSCRIPTION` / `*_RESERVATION`
+/// payload types (`entities::capacity::CAPACITY_PAYLOAD_TYPES`) per event interval,
+/// each resolved by event priority on its own.
+/// The single source for "which capacity value applies when" (GB-48): read it
+/// through `entities::capacity::{tightest_capacity_limit, contracted_allowance_kw}`.
 pub fn parse_capacity_schedule(
     events: &[OadrEvent],
     reader: &PayloadReader,
 ) -> Vec<CapacitySnapshot> {
-    collect_interval_groups(
-        events,
-        reader,
-        &["IMPORT_CAPACITY_LIMIT", "EXPORT_CAPACITY_LIMIT"],
-    )
-    .into_iter()
-    .filter_map(|(interval_start, interval_end, payloads)| {
-        let import = payloads.get("IMPORT_CAPACITY_LIMIT");
-        let export = payloads.get("EXPORT_CAPACITY_LIMIT");
-        if import.is_none() && export.is_none() {
-            return None;
-        }
-        Some(CapacitySnapshot {
-            interval_start,
-            interval_end,
-            import_limit_kw: import.map(|v| v.value),
-            export_limit_kw: export.map(|v| v.value),
-            import_limit_event_id: import.map(|v| v.event_id.clone()),
-            export_limit_event_id: export.map(|v| v.event_id.clone()),
+    collect_interval_groups(events, reader, &CAPACITY_PAYLOAD_TYPES)
+        .into_iter()
+        .map(|(interval_start, interval_end, payloads)| {
+            let value = |t: &str| payloads.get(t).map(|v| v.value);
+            let event_id = |t: &str| payloads.get(t).map(|v| v.event_id.clone());
+            CapacitySnapshot {
+                interval_start,
+                interval_end,
+                import_limit_kw: value("IMPORT_CAPACITY_LIMIT"),
+                export_limit_kw: value("EXPORT_CAPACITY_LIMIT"),
+                import_limit_event_id: event_id("IMPORT_CAPACITY_LIMIT"),
+                export_limit_event_id: event_id("EXPORT_CAPACITY_LIMIT"),
+                import_subscription_kw: value("IMPORT_CAPACITY_SUBSCRIPTION"),
+                export_subscription_kw: value("EXPORT_CAPACITY_SUBSCRIPTION"),
+                import_reservation_kw: value("IMPORT_CAPACITY_RESERVATION"),
+                export_reservation_kw: value("EXPORT_CAPACITY_RESERVATION"),
+            }
         })
-    })
-    .collect()
+        .collect()
 }

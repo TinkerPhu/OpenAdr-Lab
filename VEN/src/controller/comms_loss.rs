@@ -12,7 +12,8 @@ use chrono::{DateTime, Utc};
 
 use crate::controller::dispatcher::ResolvedPvGenerationLimit;
 use crate::controller::SimSnapshot;
-use crate::entities::capacity::OadrCapacityState;
+use crate::entities::capacity::{effective_capacity_limit, CapacitySnapshot};
+use crate::entities::capacity_curve::CommitmentDirection;
 use crate::entities::plan::Plan;
 use crate::entities::sim_inject::SimInjectState;
 
@@ -44,17 +45,18 @@ impl CommsLossState {
 }
 
 /// The PV generation limit in force this tick, across every source that can
-/// impose one: the VTN's capacity state (with any sim-injected stand-in), the
-/// adopted plan, the deviation arbiter, a manual operator cap, and
+/// impose one: the VTN's export capacity limit (with any sim-injected stand-in),
+/// the adopted plan, the deviation arbiter, a manual operator cap, and
 /// comms-loss curtailment.
 ///
 /// A thin composition over `dispatcher::resolve_pv_generation_limit_kw`,
 /// which owns the precedence rules; this adds only the two inputs that have
-/// to be derived first.
+/// to be derived first. The export limit is read from the capacity schedule at
+/// `now` (GB-48), so it changes at its interval boundary, not at the next poll.
 pub fn pv_generation_limit(
     sim: &SimSnapshot,
     plan: Option<&Plan>,
-    capacity: &OadrCapacityState,
+    capacity_schedule: &[CapacitySnapshot],
     inject: &SimInjectState,
     now: DateTime<Utc>,
     arbiter_tighten_kw: Option<f64>,
@@ -62,7 +64,14 @@ pub fn pv_generation_limit(
 ) -> ResolvedPvGenerationLimit {
     crate::controller::dispatcher::resolve_pv_generation_limit_kw(
         plan,
-        &capacity.with_sim_injected_limits(inject),
+        effective_capacity_limit(
+            capacity_schedule,
+            inject,
+            CommitmentDirection::Export,
+            now,
+            now,
+        )
+        .map(|l| l.limit_kw),
         now,
         arbiter_tighten_kw,
         inject.pv_generation_limit_kw,
@@ -75,6 +84,7 @@ mod tests {
     use super::*;
     use crate::assets::pv::PvInverter;
     use crate::entities::asset_params::PvParams;
+    use crate::entities::capacity::CapacitySnapshot;
     use crate::services::test_support::asset_snapshots::snapshot_from_asset;
 
     fn empty_sim() -> SimSnapshot {
@@ -149,5 +159,74 @@ mod tests {
     #[test]
     fn a_site_with_no_pv_asset_gets_no_ceiling() {
         assert_eq!(state(true).pv_ceiling_kw(&empty_sim()), None);
+    }
+
+    // GB-48 B': the export limit behind the PV generation limit is read from the
+    // capacity schedule at the tick's own `now`, never from a value stored at the
+    // last event poll.
+    fn export_limit_segment(from: DateTime<Utc>, to: DateTime<Utc>, kw: f64) -> CapacitySnapshot {
+        CapacitySnapshot {
+            interval_start: from,
+            interval_end: to,
+            export_limit_kw: Some(kw),
+            export_limit_event_id: Some("vtn-export".to_string()),
+            ..CapacitySnapshot::default()
+        }
+    }
+
+    #[test]
+    fn the_pv_limit_follows_the_export_limit_schedule_at_the_ticks_own_time() {
+        use chrono::{Duration, TimeZone};
+        let start = Utc.with_ymd_and_hms(2026, 9, 15, 12, 0, 0).unwrap();
+        let schedule = [export_limit_segment(start, start + Duration::hours(1), 2.0)];
+        let sim = sim_with_pv(10.0);
+        let limit_at = |now| {
+            pv_generation_limit(
+                &sim,
+                None,
+                &schedule,
+                &SimInjectState::default(),
+                now,
+                None,
+                None,
+            )
+            .limit_kw
+        };
+        // The same schedule, three ticks, no poll between them.
+        assert_eq!(
+            limit_at(start - Duration::seconds(1)),
+            None,
+            "not in force yet"
+        );
+        assert_eq!(limit_at(start), Some(-2.0), "in force from its start");
+        assert_eq!(
+            limit_at(start + Duration::hours(1)),
+            None,
+            "ended at its end"
+        );
+    }
+
+    #[test]
+    fn an_injected_export_limit_stands_in_only_where_no_vtn_limit_applies() {
+        use chrono::{Duration, TimeZone};
+        let start = Utc.with_ymd_and_hms(2026, 9, 15, 12, 0, 0).unwrap();
+        let schedule = [export_limit_segment(start, start + Duration::hours(1), 2.0)];
+        let inject = SimInjectState {
+            grid_export_limit_kw: Some(7.0),
+            ..SimInjectState::default()
+        };
+        let sim = sim_with_pv(10.0);
+        let limit_at =
+            |now| pv_generation_limit(&sim, None, &schedule, &inject, now, None, None).limit_kw;
+        assert_eq!(
+            limit_at(start + Duration::minutes(5)),
+            Some(-2.0),
+            "a VTN limit wins"
+        );
+        assert_eq!(
+            limit_at(start - Duration::minutes(5)),
+            Some(-7.0),
+            "the stand-in fills the gap"
+        );
     }
 }

@@ -45,10 +45,19 @@ export function buildTariffPricePoints(tariffs: ApiTariffSnapshot[]): TariffTime
     gridPowerKw: null,
     importLimitKw: null,
     exportLimitKw: null,
+    importAllowanceKw: null,
+    exportAllowanceKw: null,
   }));
 }
 
-// 1b. Capacity-limit (Dynamic Operating Envelope) steps from /capacity/schedule —
+/** Contracted allowance of one segment: subscription + reservation, either alone counting (as the
+ *  VEN's planner reads it); null when the segment declares neither. */
+function allowanceKw(subscriptionKw: number | null, reservationKw: number | null): number | null {
+  if (subscriptionKw === null && reservationKw === null) return null;
+  return (subscriptionKw ?? 0) + (reservationKw ?? 0);
+}
+
+// 1b. Capacity (limit + allowance) steps from /capacity/schedule —
 //     same shape/cadence as buildTariffPricePoints, one point per interval_start.
 export function buildCapacityLimitPoints(schedule: ApiCapacitySnapshot[]): TariffTimePoint[] {
   return schedule.map((c) => ({
@@ -61,6 +70,8 @@ export function buildCapacityLimitPoints(schedule: ApiCapacitySnapshot[]): Tarif
     gridPowerKw: null,
     importLimitKw: c.import_limit_kw ?? null,
     exportLimitKw: c.export_limit_kw ?? null,
+    importAllowanceKw: allowanceKw(c.import_subscription_kw ?? null, c.import_reservation_kw ?? null),
+    exportAllowanceKw: allowanceKw(c.export_subscription_kw ?? null, c.export_reservation_kw ?? null),
   }));
 }
 
@@ -77,6 +88,8 @@ export function buildPowerPoints(points: AssetTimelinePoint[]): TariffTimePoint[
     gridPowerKw: p.values?.["power_kw"] ?? null,
     importLimitKw: null,
     exportLimitKw: null,
+    importAllowanceKw: null,
+    exportAllowanceKw: null,
   }));
 }
 

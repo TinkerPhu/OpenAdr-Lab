@@ -96,7 +96,7 @@ pub(crate) fn live_previews(
     let released_limit = crate::controller::comms_loss::pv_generation_limit(
         pre_snap,
         ctx.plan_snap.as_ref(),
-        &ctx.capacity_snap,
+        &ctx.capacity_schedule,
         &ctx.inject,
         now,
         None,

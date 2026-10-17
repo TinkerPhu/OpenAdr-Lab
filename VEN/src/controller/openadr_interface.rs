@@ -3,9 +3,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::controller::vtn_port::{EventTypeName, OadrEvent, OadrPayload, PayloadValues};
-use crate::entities::capacity::{
-    AlertWindow, DispatchWindow, OadrCapacityState, OadrReportObligation, SimpleWindow,
-};
+use crate::entities::capacity::{AlertWindow, DispatchWindow, OadrReportObligation, SimpleWindow};
 use lab_core::event_timing::{timed_intervals, TimedInterval};
 use lab_core::wire_contract::PayloadReader;
 use openleadr_wire::report::ReportDescriptor as WireReportDescriptor;
@@ -14,63 +12,6 @@ use openleadr_wire::report::ReportDescriptor as WireReportDescriptor;
 // VEN/src/ 500-production-line cap) — re-exported here so call sites and this file's own
 // tests can keep referencing `openadr_interface::{parse_rate_snapshots, parse_capacity_schedule}`.
 pub use crate::controller::rate_schedule::{parse_capacity_schedule, parse_rate_snapshots};
-
-// ---------------------------------------------------------------------------
-// Capacity state parsing
-// ---------------------------------------------------------------------------
-
-/// The capacity state in force at `now` (GB-48). The import/export limits are
-/// the priority-resolved schedule's values covering `now`, read through the one
-/// lookup (`entities::capacity::tightest_capacity_limit`) — a limit that has not
-/// started or has ended is not in force. Subscription and reservation stay the
-/// strictest value over all listed events (making them time-aware is a separate
-/// step, BACKLOG GB-48 option C). `last_updated` is set when any capacity payload
-/// is listed.
-pub fn parse_capacity_state(
-    events: &[OadrEvent],
-    reader: &PayloadReader,
-    now: DateTime<Utc>,
-) -> OadrCapacityState {
-    use crate::entities::capacity::tightest_capacity_limit;
-    use crate::entities::capacity_curve::CommitmentDirection::{Export, Import};
-
-    let strictest = |payload_type: &str| {
-        events
-            .iter()
-            .flat_map(|event| event_payloads(event).map(move |p| (event, p)))
-            .filter(|(_, p)| p.value_type.wire_name() == payload_type)
-            .filter_map(|(event, p)| reader.value(event, p))
-            .reduce(f64::min)
-    };
-    let found_any = [
-        "IMPORT_CAPACITY_LIMIT",
-        "EXPORT_CAPACITY_LIMIT",
-        "IMPORT_CAPACITY_SUBSCRIPTION",
-        "IMPORT_CAPACITY_RESERVATION",
-        "EXPORT_CAPACITY_SUBSCRIPTION",
-        "EXPORT_CAPACITY_RESERVATION",
-    ]
-    .iter()
-    .any(|t| strictest(t).is_some());
-    if !found_any {
-        return OadrCapacityState::default();
-    }
-
-    let schedule = parse_capacity_schedule(events, reader);
-    let import = tightest_capacity_limit(&schedule, Import, now, now);
-    let export = tightest_capacity_limit(&schedule, Export, now, now);
-    OadrCapacityState {
-        import_limit_kw: import.as_ref().map(|l| l.limit_kw),
-        import_limit_event_id: import.and_then(|l| l.event_id),
-        export_limit_kw: export.as_ref().map(|l| l.limit_kw),
-        export_limit_event_id: export.and_then(|l| l.event_id),
-        import_subscription_kw: strictest("IMPORT_CAPACITY_SUBSCRIPTION"),
-        import_reservation_kw: strictest("IMPORT_CAPACITY_RESERVATION"),
-        export_subscription_kw: strictest("EXPORT_CAPACITY_SUBSCRIPTION"),
-        export_reservation_kw: strictest("EXPORT_CAPACITY_RESERVATION"),
-        last_updated: Some(now),
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Windowed signals: alerts, SIMPLE levels, direct setpoints
@@ -341,6 +282,19 @@ pub fn extract_report_obligations(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entities::capacity::OadrCapacityState;
+    use crate::entities::sim_inject::SimInjectState;
+
+    /// The capacity state in force at `now`, from the events as an event poll lists them: what
+    /// `GET /capacity` answers. The schedule is the only thing parsed; `now` is read from it.
+    fn capacity_state_at(
+        events: &[OadrEvent],
+        reader: &PayloadReader,
+        now: DateTime<Utc>,
+    ) -> OadrCapacityState {
+        let schedule = parse_capacity_schedule(events, reader);
+        OadrCapacityState::at(&schedule, &SimInjectState::default(), now, None)
+    }
     use crate::controller::vtn_port::OadrEvent;
     use chrono::TimeZone;
     use serde_json::json;
@@ -488,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_capacity_state_export_subscription_and_reservation() {
+    fn test_capacity_state_at_export_subscription_and_reservation() {
         let events = json!([{
             "id": "cap-1",
             "programID": "prog-1",
@@ -501,10 +455,11 @@ mod tests {
                 ]
             }]
         }]);
-        let cap = parse_capacity_state(
+        // The state is read at a moment: inside the interval both apply.
+        let cap = capacity_state_at(
             &lab_core::test_fixtures::events_from_json(events),
             &PayloadReader::default(),
-            Utc::now(),
+            ts("2026-03-14T00:30:00Z"),
         );
         assert_eq!(cap.export_subscription_kw, Some(4.0));
         assert_eq!(cap.export_reservation_kw, Some(2.0));
@@ -826,8 +781,7 @@ mod tests {
             &lab_core::test_fixtures::events_from_json(events),
             &PayloadReader::default(),
         );
-        // Unlike parse_capacity_state (which collapses to the strictest single value),
-        // the schedule keeps both intervals with their own distinct limits.
+        // The schedule keeps both intervals with their own distinct limits.
         assert_eq!(snapshots.len(), 2);
         assert_eq!(snapshots[0].import_limit_kw, Some(5.0));
         assert_eq!(snapshots[0].export_limit_kw, None);
@@ -870,7 +824,7 @@ mod tests {
     // gap meant `grid_samples.import_limit_kw`/`export_limit_kw` had never
     // once been populated on any VEN, across the whole deployment's history
     // (confirmed empirically, see docs/BACKLOG.md GB-33) -- the real
-    // functional enforcement (`parse_capacity_state`, feeding the planner)
+    // functional enforcement (`OadrCapacityState::at`, `GET /capacity`)
     // was unaffected since it never required per-interval timing, but the
     // schedule this test covers silently dropped every such event.
     #[test]
@@ -966,7 +920,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_capacity_state_import_limit() {
+    fn test_capacity_state_at_import_limit() {
         let events = json!([
             {
                 "id": "evt-cap",
@@ -990,23 +944,18 @@ mod tests {
         // limit has not started — this test used to expect 5.0 here, which is
         // exactly the bug (a future limit applied now).
         let before = Utc.with_ymd_and_hms(2025, 1, 1, 9, 0, 0).unwrap();
-        let cap = parse_capacity_state(&events, &PayloadReader::default(), before);
+        let cap = capacity_state_at(&events, &PayloadReader::default(), before);
         assert_eq!(
             cap.import_limit_kw, None,
             "not in force before its interval"
         );
-        assert_eq!(
-            cap.last_updated,
-            Some(before),
-            "last_updated must equal the injected clock, not wall-clock Utc::now()"
-        );
         let during = Utc.with_ymd_and_hms(2025, 1, 1, 10, 30, 0).unwrap();
-        let cap = parse_capacity_state(&events, &PayloadReader::default(), during);
+        let cap = capacity_state_at(&events, &PayloadReader::default(), during);
         assert_eq!(cap.import_limit_kw, Some(5.0));
         assert_eq!(cap.import_limit_event_id, Some("evt-cap".to_string()));
         let after = Utc.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap();
         assert_eq!(
-            parse_capacity_state(&events, &PayloadReader::default(), after).import_limit_kw,
+            capacity_state_at(&events, &PayloadReader::default(), after).import_limit_kw,
             None
         );
     }
@@ -1014,9 +963,9 @@ mod tests {
     // GB-48: overlapping limits resolve like every other payload type — by
     // event priority, then creation time (GB-45, User Guide §7.1) — not
     // "strictest wins", which was a second rule contradicting the schedule the
-    // history records. Formerly `test_parse_capacity_state_strictest_wins`.
+    // history records. Formerly `test_capacity_state_at_strictest_wins`.
     #[test]
-    fn test_parse_capacity_state_overlapping_limits_resolve_by_priority() {
+    fn test_capacity_state_at_overlapping_limits_resolve_by_priority() {
         let events = json!([
             {
                 "id": "evt-a",
@@ -1040,7 +989,7 @@ mod tests {
             }
         ]);
         let now = Utc.with_ymd_and_hms(2025, 1, 1, 10, 30, 0).unwrap();
-        let cap = parse_capacity_state(
+        let cap = capacity_state_at(
             &lab_core::test_fixtures::events_from_json(events),
             &PayloadReader::default(),
             now,
@@ -1054,14 +1003,14 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_capacity_state_untimed_limit_is_in_force_while_listed() {
+    fn test_capacity_state_at_untimed_limit_is_in_force_while_listed() {
         // The E2E use-case events send limits without any intervalPeriod.
         let events = json!([{
             "id": "evt-untimed",
             "programID": "prog-1",
             "intervals": [{"id": 0, "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [10000.0]}]}]
         }]);
-        let cap = parse_capacity_state(
+        let cap = capacity_state_at(
             &lab_core::test_fixtures::events_from_json(events),
             &PayloadReader::default(),
             Utc::now(),
@@ -1652,6 +1601,109 @@ mod tests {
         assert_eq!(import_at(&snaps, "2026-01-03T17:15:00Z"), Some(17.0));
     }
 
+    // Time-aware subscription and reservation (GB-48 C): every capacity quantity is a
+    // priority-resolved schedule, not a min folded over all listed events.
+    #[test]
+    fn parse_capacity_schedule_reservation_applies_only_inside_its_window() {
+        let events = vec![
+            window_event(
+                "sub",
+                None,
+                "2026-09-08T00:00:00Z",
+                "2026-09-09T00:00:00Z",
+                "PT48H",
+                &[("IMPORT_CAPACITY_SUBSCRIPTION", 5.0)],
+            ),
+            window_event(
+                "res",
+                None,
+                "2026-09-08T00:00:00Z",
+                "2026-09-10T08:00:00Z",
+                "PT2H",
+                &[("IMPORT_CAPACITY_RESERVATION", 3.0)],
+            ),
+        ];
+        let got: Vec<_> = parse_capacity_schedule(&events, &PayloadReader::default())
+            .into_iter()
+            .map(|c| {
+                (
+                    c.interval_start,
+                    c.import_subscription_kw,
+                    c.import_reservation_kw,
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (ts("2026-09-09T00:00:00Z"), Some(5.0), None),
+                (ts("2026-09-10T08:00:00Z"), Some(5.0), Some(3.0)),
+                (ts("2026-09-10T10:00:00Z"), Some(5.0), None),
+            ],
+            "the reservation exists only in its own two hours"
+        );
+    }
+
+    #[test]
+    fn parse_capacity_schedule_reads_export_subscription_and_reservation() {
+        let events = vec![window_event(
+            "exp",
+            None,
+            "2026-09-08T00:00:00Z",
+            "2026-09-09T00:00:00Z",
+            "PT1H",
+            &[
+                ("EXPORT_CAPACITY_SUBSCRIPTION", 4.0),
+                ("EXPORT_CAPACITY_RESERVATION", 2.0),
+            ],
+        )];
+        let got = parse_capacity_schedule(&events, &PayloadReader::default());
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].export_subscription_kw, Some(4.0));
+        assert_eq!(got[0].export_reservation_kw, Some(2.0));
+        assert_eq!(got[0].import_subscription_kw, None);
+    }
+
+    #[test]
+    fn parse_capacity_schedule_resolves_overlapping_events_per_quantity() {
+        let events = vec![
+            window_event(
+                "low",
+                Some(5),
+                "2026-09-08T00:00:00Z",
+                "2026-09-09T09:00:00Z",
+                "PT3H",
+                &[
+                    ("IMPORT_CAPACITY_LIMIT", 6.0),
+                    ("IMPORT_CAPACITY_SUBSCRIPTION", 4.0),
+                ],
+            ),
+            window_event(
+                "high",
+                Some(1),
+                "2026-09-08T00:00:00Z",
+                "2026-09-09T10:00:00Z",
+                "PT1H",
+                &[("IMPORT_CAPACITY_SUBSCRIPTION", 2.0)],
+            ),
+        ];
+        let got = parse_capacity_schedule(&events, &PayloadReader::default());
+        let mid = got
+            .iter()
+            .find(|c| c.interval_start == ts("2026-09-09T10:00:00Z"))
+            .expect("a segment for 10:00-11:00");
+        assert_eq!(
+            mid.import_subscription_kw,
+            Some(2.0),
+            "higher priority wins the subscription"
+        );
+        assert_eq!(
+            mid.import_limit_kw,
+            Some(6.0),
+            "and the limit still comes from the other event"
+        );
+    }
+
     #[test]
     fn parse_capacity_schedule_short_high_priority_limit_splits_longer_one() {
         let events = vec![
@@ -1950,7 +2002,7 @@ mod tests {
             ),
         ];
         let reader = PayloadReader::default();
-        let cap = parse_capacity_state(&events, &reader, ts("2026-09-09T12:00:00Z"));
+        let cap = capacity_state_at(&events, &reader, ts("2026-09-09T12:00:00Z"));
         assert_eq!(cap.import_limit_kw, None, "230 VOLTS is not a kW limit");
         assert_eq!(cap.export_limit_kw, Some(3.0));
         let schedule = parse_capacity_schedule(&events, &reader);

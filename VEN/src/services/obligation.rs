@@ -7,6 +7,7 @@ use tracing::{debug, error, info};
 use crate::controller::history_port::record_report_sent;
 use crate::controller::reporter::AssetReportSample;
 use crate::controller::{HistoryPort, VtnPort};
+use crate::entities::reservation_request::ReservationRequest;
 use crate::entities::DomainError;
 use crate::state::AppState;
 
@@ -50,12 +51,11 @@ impl ObligationService {
             // in each direction, less what the VTN has already contracted.
             // Both halves are read here because the request is the pair; the
             // reporter is handed the answer, not the inputs.
-            let capacity = state.capacity_state().await;
-            let reservation = state.site_headroom().await.map(|env| {
-                crate::entities::reservation_request::ReservationRequest::from_headroom(
-                    &env, &capacity,
-                )
-            });
+            let schedule = state.planned_capacity_limits().await;
+            let reservation = state
+                .site_headroom()
+                .await
+                .map(|env| ReservationRequest::from_headroom(&env, &schedule, now));
             // WP3.6: USAGE_FORECAST obligations report from the adopted plan.
             let plan = state.active_plan().await;
             // WP5.4: BASELINE obligations report the event-blind heuristic forecast.

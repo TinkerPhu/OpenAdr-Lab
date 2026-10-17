@@ -24,6 +24,10 @@ export function makeCapacitySnapshot(fields: WithStart<CapacitySnapshot>): Capac
     export_limit_kw: null,
     import_limit_event_id: null,
     export_limit_event_id: null,
+    import_subscription_kw: null,
+    export_subscription_kw: null,
+    import_reservation_kw: null,
+    export_reservation_kw: null,
     ...fields,
   };
 }

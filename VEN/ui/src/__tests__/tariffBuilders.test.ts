@@ -76,6 +76,10 @@ describe("buildCapacityLimitPoints", () => {
       export_limit_kw: 3.0,
       import_limit_event_id: null,
       export_limit_event_id: null,
+      import_subscription_kw: null,
+      export_subscription_kw: null,
+      import_reservation_kw: null,
+      export_reservation_kw: null,
       ...overrides,
     };
   }
@@ -89,6 +93,24 @@ describe("buildCapacityLimitPoints", () => {
     const result = buildCapacityLimitPoints([makeCapacitySnapshot({ import_limit_kw: 4.5, export_limit_kw: 2.5 })]);
     expect(result[0].importLimitKw).toBe(4.5);
     expect(result[0].exportLimitKw).toBe(2.5);
+  });
+
+  it("maps subscription + reservation to one contracted allowance per direction", () => {
+    const result = buildCapacityLimitPoints([
+      makeCapacitySnapshot({
+        import_subscription_kw: 5.0,
+        import_reservation_kw: 3.0,
+        export_reservation_kw: 2.0,
+      }),
+    ]);
+    expect(result[0].importAllowanceKw).toBe(8.0);
+    expect(result[0].exportAllowanceKw).toBe(2.0);
+  });
+
+  it("leaves the allowance null where the segment declares neither", () => {
+    const result = buildCapacityLimitPoints([makeCapacitySnapshot()]);
+    expect(result[0].importAllowanceKw).toBeNull();
+    expect(result[0].exportAllowanceKw).toBeNull();
   });
 
   it("preserves null import_limit_kw as null", () => {
@@ -184,6 +206,8 @@ function makePoint(ts: number, overrides: Partial<ReturnType<typeof buildTariffP
     gridPowerKw: null,
     importLimitKw: null,
     exportLimitKw: null,
+    importAllowanceKw: null,
+    exportAllowanceKw: null,
     ...overrides,
   };
 }

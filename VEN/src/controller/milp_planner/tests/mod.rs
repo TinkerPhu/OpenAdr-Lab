@@ -62,12 +62,11 @@ fn make_tariffs(imp: f64, exp: f64, co2_g: f64) -> TariffTimeSeries {
 /// syntax, rather than every call site spelling out three empty vectors.
 pub(super) fn test_grid(
     tariffs: &TariffTimeSeries,
-    capacity: &OadrCapacityState,
+    capacity_schedule: &[CapacitySnapshot],
 ) -> crate::entities::grid_signals::GridSignals {
     crate::entities::grid_signals::GridSignals {
         tariffs: tariffs.clone(),
-        capacity: capacity.clone(),
-        capacity_schedule: vec![],
+        capacity_schedule: capacity_schedule.to_vec(),
         alert_windows: vec![],
         simple_windows: vec![],
     }
@@ -127,8 +126,26 @@ const NO_REFS: StaleRateRefs<'static> = StaleRateRefs {
     co2: None,
 };
 
-fn no_capacity() -> OadrCapacityState {
-    OadrCapacityState::default()
+/// The capacity schedule of a VTN that has announced nothing.
+fn no_capacity() -> Vec<CapacitySnapshot> {
+    vec![]
+}
+
+/// A schedule declaring a contracted allowance over the whole planning horizon: the VTN's
+/// `*_CAPACITY_SUBSCRIPTION` / `*_RESERVATION` events as the parser would resolve them.
+fn allowance_schedule(
+    import: (Option<f64>, Option<f64>),
+    export: (Option<f64>, Option<f64>),
+) -> Vec<CapacitySnapshot> {
+    vec![CapacitySnapshot {
+        interval_start: fixed_now() - Duration::hours(1),
+        interval_end: fixed_now() + Duration::hours(48),
+        import_subscription_kw: import.0,
+        import_reservation_kw: import.1,
+        export_subscription_kw: export.0,
+        export_reservation_kw: export.1,
+        ..CapacitySnapshot::default()
+    }]
 }
 
 fn make_profile() -> Profile {
@@ -721,7 +738,7 @@ fn build_phase1_weights(profile: &Profile, objective: PlannerObjective) -> Phase
 #[allow(clippy::too_many_arguments)] // test wrapper mirrors the real solve-path signature
 fn build_milp_inputs(
     tariffs: &TariffTimeSeries,
-    cap: &OadrCapacityState,
+    cap: &[CapacitySnapshot],
     profile: &Profile,
     now: DateTime<Utc>,
     shiftable_loads: &[crate::entities::device_session::ShiftableLoad],
@@ -741,7 +758,7 @@ fn build_milp_inputs(
 #[allow(clippy::too_many_arguments)] // test wrapper mirrors the real solve-path signature
 fn build_milp_inputs_with_override(
     tariffs: &TariffTimeSeries,
-    cap: &OadrCapacityState,
+    cap: &[CapacitySnapshot],
     profile: &Profile,
     now: DateTime<Utc>,
     // Superseded by `ctxs` (shiftable-load-as-asset) — kept as a parameter
@@ -771,7 +788,7 @@ fn build_milp_inputs_with_override(
 fn run_planner(
     mut asset_contexts: Vec<Box<dyn crate::controller::milp_planner::AssetMilpContext>>,
     tariffs: &TariffTimeSeries,
-    capacity: &OadrCapacityState,
+    capacity: &[CapacitySnapshot],
     profile: &Profile,
     now: DateTime<Utc>,
     trigger: PlanTrigger,
@@ -806,7 +823,7 @@ fn bmi(
     profile: &Profile,
     sim: &SimSnapshot,
     tariffs: &TariffTimeSeries,
-    cap: &OadrCapacityState,
+    cap: &[CapacitySnapshot],
     now: DateTime<Utc>,
     ev_session: Option<&crate::entities::device_session::EvSession>,
     heater_target: Option<&crate::entities::device_session::HeaterTarget>,
