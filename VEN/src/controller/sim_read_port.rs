@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use crate::entities::asset::{AssetCapabilityView, ComfortRate};
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::comfort::EnergyBand;
+use crate::entities::comfort_spend::ComfortFillSpan;
 use crate::entities::ev_usage::EvUsageSimState;
 use crate::entities::timeline::TimelineSnapshot;
 
@@ -29,6 +30,10 @@ pub trait SimReadPort: Send + Sync {
     /// bands; `None` = unknown asset, or an asset that does not price energy by a comfort curve.
     async fn comfort_bands(&self, asset_id: &str, rates: &[ComfortRate])
         -> Option<Vec<EnergyBand>>;
+
+    /// What the asset declares about the energy its curve prices; `None` = unknown asset, or an
+    /// asset that does not price energy by a comfort curve.
+    async fn comfort_fill_span(&self, asset_id: &str) -> Option<ComfortFillSpan>;
 
     /// The EV's configured usage schedule; `None` when there is no EV or no schedule.
     async fn usage_schedule_view(

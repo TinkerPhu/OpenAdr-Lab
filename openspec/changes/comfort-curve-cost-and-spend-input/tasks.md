@@ -38,16 +38,16 @@ hand-offs to the Node3 runner; B starts only after A is merged. Before touching 
 
 ### 6. Domain conversion
 
-- [ ] 6.1 Write the `entities/comfort.rs` tests: 50 kWh at 20 % with "60 % for EUR 2.00, 80 % for EUR 2.50" gives 0.10 then 0.05 EUR/kWh; round-trip spend is within EUR 0.01 at each knot; a non-concave curve errors naming the point in spend terms; falling spend errors; a 3-point curve yields at most 8 planner bands. Verify they fail first.
-- [ ] 6.2 Implement `rates_from_cumulative_spend` (pure; energy per fill passed in; result validated by `validate_curve`) and the inverse view as a running sum over the asset's bands, with no second integral. Verify 6.1 passes and `audit_duplication.py` reports nothing new.
+- [x] 6.1 Write the `entities/comfort.rs` tests: 50 kWh at 20 % with "60 % for EUR 2.00, 80 % for EUR 2.50" gives 0.10 then 0.05 EUR/kWh; round-trip spend is within EUR 0.01 at each knot; a non-concave curve errors naming the point in spend terms; falling spend errors; a 3-point curve yields at most 8 planner bands. Verify they fail first.
+- [x] 6.2 Implement `rates_from_cumulative_spend` (pure; energy per fill passed in; result validated by `validate_curve`) and the inverse view as a running sum over the asset's bands, with no second integral. Verify 6.1 passes and `audit_duplication.py` reports nothing new.
 
 ### 7. Route and UI
 
-- [ ] 7.1 Write and then pass the route tests for `POST /assets/:id/comfort_curve/spend`: 201 with the stored marginal curve and source `override`; non-concave 422; heater 422 "not available for that asset". Register the route and add the types. Verify `cargo test -p ven-app comfort`.
-- [ ] 7.2 Add the read-back: the card shows an EV's stored curve as cumulative spend rows labelled "from X % (current charge)", a heater keeps the marginal table, saving spend rows calls the spend route, and a 422 message is displayed. Write the `ComfortCurveCard.test.tsx` cases first. Verify `npm test` and eslint.
-- [ ] 7.3 Update the card's help text (marginal-versus-total sentence and the concavity rule). The marginal editor stays for non-EV assets; verify by the heater test from 7.2.
+- [x] 7.1 Add `POST /assets/:id/comfort_curve/spend` (201 with the stored marginal curve and source `override`; non-concave 422; heater 422 "not available for that asset"), register it and add the types. The conversion is unit tested in `entities/comfort_spend.rs` and over the real EV bands in `assets/ev_comfort.rs`; the route's status codes are pinned by the BDD scenario of 8.1. Verify `cargo test -p ven-app comfort`.
+- [x] 7.2 Add the read-back: the card shows an EV's stored curve as cumulative spend rows labelled "from X % (current charge)", a heater keeps the marginal table, saving spend rows calls the spend route, and a 422 message is displayed. Write the `ComfortCurveCard.test.tsx` cases first. Verify `npm test` and eslint.
+- [x] 7.3 Update the card's help text (marginal-versus-total sentence and the concavity rule). The marginal editor stays for non-EV assets; verify by the heater test from 7.2.
 
 ### 8. Use case, docs, hand-off (B)
 
-- [ ] 8.1 Add a `@use_case` scenario: set the EV curve by cumulative spend, read back the stored marginal bids with `source: override`; a non-concave spend curve is rejected with 422. Verify `audit_step_definitions.py`.
+- [x] 8.1 Add a `@use_case` scenario: set the EV curve by cumulative spend, read back the stored marginal bids with `source: override`; a non-concave spend curve is rejected with 422. Verify `audit_step_definitions.py`.
 - [ ] 8.2 Wave Part B into the docs, journal and KEY_LEARNINGS (the D4 and D5 reasoning), remove GB-53 from `docs/BACKLOG.md`, run `audit_debt_gate.py`, hand off. After the merge, delete this change folder and the branch and worktree.

@@ -120,3 +120,27 @@ Feature: User comfort-curve override (WP4.2, BL-19)
     When I ask what the comfort curve for asset "toaster" with points "0.5:0.40" can cost
     Then the comfort curve request is rejected with status 404
 
+  @use_case
+  Scenario: A curve entered as the total you will pay is stored as bids and reads back as that total (GB-53)
+    # "EUR 1.50 to reach 50 %, EUR 2.00 to reach 70 %" is how people think. The VEN counts it from
+    # the EV's current charge, turns it into the marginal bids it plans on, and shows the stored
+    # curve back as the same totals. Written without the pack size: the round trip is the check.
+    Given the comfort curve for asset "ev" reports source "default"
+    And I inject ev_soc 0.20 via sim inject
+    When I set the comfort curve for asset "ev" by total spend "0.5:1.50,0.7:2.00"
+    Then the comfort curve for asset "ev" reports source "override"
+    And the stored comfort curve for asset "ev" reads back as total spend "0.5:1.50,0.7:2.00"
+    When I delete the comfort curve override for asset "ev"
+    Then the comfort curve for asset "ev" reports source "default"
+
+  Scenario: A spend curve whose price per kWh rises is refused
+    # 20 -> 40 %: EUR 1.00 for the first step; 40 -> 60 %: EUR 2.00 for the same energy.
+    Given I inject ev_soc 0.20 via sim inject
+    When I try to set the comfort curve for asset "ev" by total spend "0.4:1.00,0.6:3.00"
+    Then the comfort curve request is rejected with status 422
+
+  Scenario: Spend input is refused for an asset that does not price energy per fill, and 404s for an unknown one
+    When I try to set the comfort curve for asset "heater" by total spend "0.6:2.00"
+    Then the comfort curve request is rejected with status 422
+    When I try to set the comfort curve for asset "toaster" by total spend "0.6:2.00"
+    Then the comfort curve request is rejected with status 404

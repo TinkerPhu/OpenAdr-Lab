@@ -152,6 +152,19 @@ pub(super) fn ev_energy_segments(
     merged
 }
 
+/// The EV's own answer to "where does my priced energy start and stop": from the current state
+/// of charge to `soc_target_frac` (the BMS ceiling `capability_inner` enforces), over the pack.
+pub(super) fn ev_fill_span(
+    charger: &super::ev::EvCharger,
+    soc_frac: f64,
+) -> crate::entities::comfort_spend::ComfortFillSpan {
+    crate::entities::comfort_spend::ComfortFillSpan {
+        from_fill: soc_frac,
+        limit_fill: charger.soc_target_frac,
+        capacity_kwh: charger.battery_kwh,
+    }
+}
+
 /// The EV's own answer to "what does this curve price, from here to my charge limit": the
 /// bands from the current state of charge up to `soc_target_frac` (the BMS ceiling
 /// `capability_inner` enforces), priced by the curve's money bid alone. CO2 is left out so the
@@ -464,5 +477,41 @@ mod tests {
         );
         let cost = crate::entities::comfort::max_cost_eur(&bands);
         assert!((cost - 5.0).abs() < 1e-9, "0.10 x 50 kWh, got {cost}");
+    }
+
+    #[test]
+    fn a_spend_curve_reads_back_within_a_cent_over_the_real_bands() {
+        use crate::entities::comfort_spend::{
+            cumulative_spend_view, rates_from_cumulative_spend, ComfortSpendPoint,
+        };
+        let c = charger(50.0, 1.0);
+        let span = ev_fill_span(&c, 0.20);
+        let pts = [
+            ComfortSpendPoint {
+                fill: 0.60,
+                cumulative_max_cost_eur: 2.00,
+                max_marginal_co2: 0.0,
+            },
+            ComfortSpendPoint {
+                fill: 0.80,
+                cumulative_max_cost_eur: 2.50,
+                max_marginal_co2: 0.0,
+            },
+        ];
+        let rates = rates_from_cumulative_spend(&pts, &span).unwrap();
+        let bands = ev_comfort_bands(&c, 0.20, &rates);
+        let view = cumulative_spend_view(&rates, &bands, &span);
+        for want in &pts {
+            let got = view
+                .iter()
+                .find(|p| (p.fill - want.fill).abs() < 1e-6)
+                .expect("point");
+            assert!(
+                (got.cumulative_max_cost_eur - want.cumulative_max_cost_eur).abs() < 0.01,
+                "{view:?}"
+            );
+        }
+        // R-97: a curve costs the solver its band count, so a 2-interval spend curve must stay small.
+        assert!(bands.len() <= 8, "{} bands: {bands:?}", bands.len());
     }
 }

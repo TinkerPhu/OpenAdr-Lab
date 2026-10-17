@@ -16084,3 +16084,27 @@ planner and never reached the UI.
 - No handler-level test harness exists for the comfort routes; the pure `comfort_curve_cost` is unit
   tested and the route's 404/422/no-store behaviour is pinned by the BDD scenario.
 
+## Comfort curve as cumulative spend (GB-53 part B, same branch)
+
+**What.** An EV's comfort curve can be entered and read back as the total you will pay to reach a level,
+counted from the current charge (`POST /assets/:id/comfort_curve/spend`, a *Total spend* view in the
+card). `entities/comfort_spend.rs` converts at the boundary; the stored curve, `validate_curve` and the
+planner are unchanged. The asset declares what the conversion needs (`Asset::comfort_fill_span`), and
+the read-back sums the asset's own bands (`cumulative_spend_view`), so there is still one integral.
+
+**Why.** "€1.50 to reach 50 %" is how people think; a marginal €/kWh bid is not. The two are the same
+curve, so only the editor needed to change.
+
+**Issues.**
+- The stored curve is piecewise-linear and cannot hold a step, so a constant-price interval is written as
+  two points a hair apart (`STEP_GAP_FILL`), plus a closing point; the error is cents, pinned by
+  `a_cumulative_curve_reads_back_within_a_cent` over the real EV bands, with a band-count bound (R-97).
+- Spend is relative to the current charge and the curve is in absolute charge, so the same totals drift
+  as the charge moves. The card names the starting charge and re-derives the totals from the stored curve
+  each time; a per-request curve would remove the drift (left open in the openspec design).
+- A linear ramp reads back as few rows (one per stored fill plus the limit); saving those rows turns the
+  ramp into steps. Accepted; the marginal view still shows the ramp.
+- `budget_eur` is a separate hard ceiling and stays so: a curve's spend is already bounded by its own area.
+- The route-level status codes (404, 422) are pinned by the BDD scenarios; the repo has no handler test
+  harness for these routes.
+

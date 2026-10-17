@@ -3531,3 +3531,19 @@ right for keeping an x86 plan identical to the last bit; it is no longer needed 
 - Replaying a live rule for a forecast runs it through states the live tests never combined. The
   thermostat forecast found that Absorb armed the comfort-ceiling latch and so could never heat
   past `temp_max_c` from below; its unit test only ever started above it.
+
+## An input relative to "now" belongs at the boundary, and the stored form stays absolute (2026-10-17)
+
+- A comfort curve is stored in absolute state of charge, but "I will pay EUR 2 to reach 60 %" is relative to
+  the charge now. The conversion therefore lives at the route (`comfort_spend.rs`), the store and the
+  planner never see a relative value, and the card re-derives the totals from the stored curve each time it
+  reads, so the view cannot disagree with what the planner prices. The cost is that the same totals mean
+  something else once the charge moves, and the card says what it counted from.
+- A piecewise-linear store cannot hold a step. Writing a constant interval as two points a hair apart
+  costs cents; checking it over the real asset's bands (not a restated walk) is what made that a
+  measured number. Test a round trip through the owner of the integral, and bound the band count, since
+  every band is a solver variable (R-97).
+- Two things that look alike were not: `budget_eur` is a hard per-session ceiling in the MILP, a curve's
+  maximum cost is the area under it. Naming the field after the UI label (`cumulative_max_cost_eur`) kept
+  the two apart.
+

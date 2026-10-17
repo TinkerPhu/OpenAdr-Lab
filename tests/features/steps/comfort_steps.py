@@ -279,3 +279,50 @@ def step_comfort_cost_planned(context):
     planned = context.comfort_cost["planned_cost_eur"]
     assert planned >= 0.0, f"planned spend {planned}: {context.comfort_cost}"
 
+
+# ---------------------------------------------------------------------------
+# GB-53 part B: a curve given as the total you will pay, from the current charge.
+# ---------------------------------------------------------------------------
+
+def _parse_spend_points(spec):
+    """"0.5:1.50,0.7:2.00" -> ComfortSpendPoint list (fill:total_eur pairs)."""
+    return [
+        {
+            "fill": float(fill),
+            "cumulative_max_cost_eur": float(eur),
+            "max_marginal_co2": 0.0,
+        }
+        for fill, eur in (pair.split(":") for pair in spec.split(","))
+    ]
+
+
+@when('I set the comfort curve for asset "{asset_id}" by total spend "{points}"')
+def step_set_comfort_spend(context, asset_id, points):
+    r = ven_post(f"/assets/{asset_id}/comfort_curve/spend", json=_parse_spend_points(points))
+    r.raise_for_status()
+    context.last_response = r
+
+
+@when('I try to set the comfort curve for asset "{asset_id}" by total spend "{points}"')
+def step_try_set_comfort_spend(context, asset_id, points):
+    context.last_response = ven_post(
+        f"/assets/{asset_id}/comfort_curve/spend", json=_parse_spend_points(points)
+    )
+
+
+@then('the stored comfort curve for asset "{asset_id}" reads back as total spend "{points}"')
+def step_comfort_spend_reads_back(context, asset_id, points):
+    stored = ven_get(f"/assets/{asset_id}/comfort_curve")
+    stored.raise_for_status()
+    cost = ven_post(f"/assets/{asset_id}/comfort_curve/cost", json=stored.json()["rates"])
+    cost.raise_for_status()
+    view = cost.json()["spend_points"]
+    assert view, f"no spend points reported: {cost.json()}"
+    # The EV's charge may move a little between the two calls; five cents is far inside what
+    # separates one entered total from the next.
+    for want in _parse_spend_points(points):
+        got = next((p for p in view if abs(p["fill"] - want["fill"]) < 1e-6), None)
+        assert got is not None, f"no point at {want['fill']}: {view}"
+        assert abs(got["cumulative_max_cost_eur"] - want["cumulative_max_cost_eur"]) < 0.05, (
+            f"expected {want}, got {got}"
+        )

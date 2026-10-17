@@ -20,6 +20,7 @@ use crate::entities::asset::{AssetCapabilityView, ComfortRate};
 use crate::entities::asset_params::AssetRequestSlice;
 use crate::entities::capacity_curve::CapacityCurves;
 use crate::entities::comfort::EnergyBand;
+use crate::entities::comfort_spend::ComfortFillSpan;
 use crate::entities::device_session::ShiftableLoad;
 use crate::entities::ev_usage::EvUsageSimState;
 use crate::entities::plan::{Plan, SiteHeadroom};
@@ -138,6 +139,12 @@ impl SimReadPort for SimHandle {
         let sim = self.sim.lock().await;
         let (entry, cfg) = sim.find_asset(asset_id)?;
         cfg.comfort_bands(&entry.state, rates)
+    }
+
+    async fn comfort_fill_span(&self, asset_id: &str) -> Option<ComfortFillSpan> {
+        let sim = self.sim.lock().await;
+        let (entry, cfg) = sim.find_asset(asset_id)?;
+        cfg.comfort_fill_span(&entry.state)
     }
 
     async fn usage_schedule_view(
@@ -306,6 +313,21 @@ mod tests {
         assert!(handle.comfort_bands("nope", &rates).await.is_none());
         assert!(handle
             .comfort_bands(crate::ids::ASSET_HEATER, &rates)
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn comfort_fill_span_is_the_evs_own_and_none_for_other_assets() {
+        let (handle, _sim) = handle_with(&all_kinds());
+        let span = handle
+            .comfort_fill_span(crate::ids::ASSET_EV)
+            .await
+            .expect("the EV declares a span");
+        assert!(span.capacity_kwh > 0.0 && span.limit_fill > span.from_fill - 1.0);
+        assert!(handle.comfort_fill_span("nope").await.is_none());
+        assert!(handle
+            .comfort_fill_span(crate::ids::ASSET_HEATER)
             .await
             .is_none());
     }

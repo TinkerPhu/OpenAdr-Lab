@@ -199,6 +199,7 @@ vi.mock("../api/hooks", () => ({
   useComfortCurve: () => ({ data: { source: "default", rates: [] } }),
   useComfortCurveCost: () => ({ data: undefined }),
   useSetComfortCurve: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useSetComfortCurveSpend: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteComfortCurve: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePutEvSettings: () => ({
     mutate: mockPutEvSettings,
