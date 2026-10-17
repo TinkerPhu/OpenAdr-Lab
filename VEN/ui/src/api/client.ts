@@ -11,7 +11,7 @@ import type {
   HistoryTickSample, HistoryGridSample, HistoryEventReceived, HistoryReportSent, HistoryPage,
   ForecastAccuracyRow, ForecastAccuracySample, PlanHistoryRow, PlanHistorySample,
   TickSample, GridSample, EventReceived, ReportSent,
-  UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, SignalsState,
+  UserNotification, UserNotificationSeverity, ComfortRate, ComfortCurveResponse, ComfortCurveCost, SignalsState,
   HealthResponse, VtnStatusResponse, TaskStatusEntry, EventLogEntry,
   OadrReportObligation, AssetCapabilityView, AssetForecast,
   MeasurementResponse,
@@ -143,6 +143,14 @@ export class VenApi {
         .catch(() => null);
       throw new Error(detail ?? `comfort_curve ${r.status}`);
     }
+    return r.json();
+  }
+
+  /** What the curve can cost for the energy ahead and what the plan spends on the asset;
+   *  a preview, nothing is stored. A refused curve throws with the server's reason. */
+  async comfortCurveCost(assetId: string, rates: ComfortRate[]): Promise<ComfortCurveCost> {
+    const r = await this.jsonReq("POST", `/assets/${assetId}/comfort_curve/cost`, rates);
+    if (!r.ok) throw new Error(`comfort_curve_cost ${r.status}`);
     return r.json();
   }
 

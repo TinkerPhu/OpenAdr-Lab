@@ -53,6 +53,31 @@ pub async fn get_comfort_curve(
     Json(ComfortCurveResponse { source, rates }).into_response()
 }
 
+/// POST /assets/:id/comfort_curve/cost: what the given curve can cost for the energy ahead and
+/// what the active plan spends on the asset. A preview: nothing is stored, so the card can
+/// show it for rows that are not saved yet.
+pub async fn post_comfort_curve_cost(
+    State(sim_read): State<SimRead>,
+    State(state): State<AppState>,
+    Path(asset_id): Path<String>,
+    Json(rates): Json<Vec<ComfortRate>>,
+) -> impl IntoResponse {
+    if default_rates(sim_read.as_ref(), &asset_id).await.is_none() {
+        return crate::routes::error::unknown_asset(&asset_id);
+    }
+    if let Err(e) = crate::entities::comfort::validate_curve(&rates) {
+        return crate::routes::error::error_response(StatusCode::UNPROCESSABLE_ENTITY, e);
+    }
+    let bands = sim_read.comfort_bands(&asset_id, &rates).await;
+    let plan = state.active_plan().await;
+    Json(crate::entities::comfort::comfort_curve_cost(
+        bands.as_deref(),
+        plan.as_ref(),
+        &asset_id,
+    ))
+    .into_response()
+}
+
 /// POST /assets/:id/comfort_curve
 pub async fn post_comfort_curve(
     State(sim_read): State<SimRead>,

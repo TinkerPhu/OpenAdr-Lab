@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 
 use crate::entities::asset::{AssetCapabilityView, ComfortRate};
 use crate::entities::asset_params::AssetRequestSlice;
+use crate::entities::comfort::EnergyBand;
 use crate::entities::ev_usage::EvUsageSimState;
 use crate::entities::timeline::TimelineSnapshot;
 
@@ -23,6 +24,11 @@ pub trait SimReadPort: Send + Sync {
 
     /// The asset's built-in comfort curve; `None` = unknown asset.
     async fn default_comfort_rates(&self, asset_id: &str) -> Option<Vec<ComfortRate>>;
+
+    /// The energy the asset would price by `rates`, from its current state to its limit, as
+    /// bands; `None` = unknown asset, or an asset that does not price energy by a comfort curve.
+    async fn comfort_bands(&self, asset_id: &str, rates: &[ComfortRate])
+        -> Option<Vec<EnergyBand>>;
 
     /// The EV's configured usage schedule; `None` when there is no EV or no schedule.
     async fn usage_schedule_view(

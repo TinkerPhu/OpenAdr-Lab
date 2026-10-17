@@ -21,6 +21,7 @@ import type { CapacityCurveStep } from "./generated/CapacityCurveStep";
 import type { CapacityCurves } from "./generated/CapacityCurves";
 import type { CapacitySnapshot } from "./generated/CapacitySnapshot";
 import type { ClashingSession } from "./generated/ClashingSession";
+import type { ComfortCurveCost } from "./generated/ComfortCurveCost";
 import type { ComfortCurveResponse } from "./generated/ComfortCurveResponse";
 import type { ComfortCurveSource } from "./generated/ComfortCurveSource";
 import type { ComfortRate } from "./generated/ComfortRate";
@@ -140,6 +141,7 @@ export type {
   CapacityCurves,
   CapacitySnapshot,
   ClashingSession,
+  ComfortCurveCost,
   ComfortCurveResponse,
   ComfortCurveSource,
   ComfortRate,

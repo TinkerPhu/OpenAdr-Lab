@@ -152,6 +152,30 @@ pub(super) fn ev_energy_segments(
     merged
 }
 
+/// The EV's own answer to "what does this curve price, from here to my charge limit": the
+/// bands from the current state of charge up to `soc_target_frac` (the BMS ceiling
+/// `capability_inner` enforces), priced by the curve's money bid alone. CO2 is left out so the
+/// sum is euros comparable with a bill. `rates` is never empty here (a curve is validated
+/// non-empty), so the profile's two-step defaults, which only fill an empty curve, are 0.
+pub(super) fn ev_comfort_bands(
+    charger: &super::ev::EvCharger,
+    soc_frac: f64,
+    rates: &[ComfortRate],
+) -> Vec<crate::entities::comfort::EnergyBand> {
+    ev_energy_segments(
+        rates,
+        EvBandRange {
+            init: soc_frac,
+            target: charger.soc_target_frac,
+            max: charger.soc_target_frac,
+        },
+        charger.battery_kwh,
+        0.0,
+        0.0,
+        0.0,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,5 +418,51 @@ mod tests {
         assert!(segments_limited(&[], 0.85, 0.85, 0.85).is_empty());
         // And above it — a limit lowered under a fuller pack — is not negative energy.
         assert!(segments_limited(&[], 0.92, 0.85, 0.85).is_empty());
+    }
+
+    // ── comfort-curve-cost-and-spend-input: the asset reports its own bands ──
+
+    fn charger(battery_kwh: f64, soc_target_frac: f64) -> crate::assets::ev::EvCharger {
+        let mut c = crate::assets::ev::EvCharger::from_params(
+            &crate::entities::asset_params::EvParams::default(),
+        );
+        c.battery_kwh = battery_kwh;
+        c.soc_target_frac = soc_target_frac;
+        c
+    }
+
+    #[test]
+    fn ev_comfort_bands_run_from_the_current_charge_to_the_charge_limit() {
+        let bands = ev_comfort_bands(
+            &charger(50.0, 0.80),
+            0.40,
+            &[pt(0.0, 0.20, 0.0), pt(1.0, 0.20, 0.0)],
+        );
+        let cost = crate::entities::comfort::max_cost_eur(&bands);
+        assert!((cost - 4.0).abs() < 1e-9, "0.20 x 20 kWh, got {cost}");
+        let kwh = crate::entities::comfort::bands_energy_kwh(&bands);
+        assert!((kwh - 20.0).abs() < 1e-9, "{kwh}");
+    }
+
+    #[test]
+    fn ev_comfort_bands_of_a_ramp_equal_the_area_under_it() {
+        let bands = ev_comfort_bands(
+            &charger(50.0, 1.0),
+            0.0,
+            &[pt(0.0, 0.40, 0.0), pt(1.0, 0.0, 0.0)],
+        );
+        let cost = crate::entities::comfort::max_cost_eur(&bands);
+        assert!((cost - 10.0).abs() < 1e-6, "triangle area, got {cost}");
+    }
+
+    #[test]
+    fn ev_comfort_bands_leave_the_co2_bid_out_of_the_euros() {
+        let bands = ev_comfort_bands(
+            &charger(50.0, 1.0),
+            0.0,
+            &[pt(0.0, 0.10, 500.0), pt(1.0, 0.10, 500.0)],
+        );
+        let cost = crate::entities::comfort::max_cost_eur(&bands);
+        assert!((cost - 5.0).abs() < 1e-9, "0.10 x 50 kWh, got {cost}");
     }
 }

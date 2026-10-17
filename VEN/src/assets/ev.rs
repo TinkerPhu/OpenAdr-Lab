@@ -326,6 +326,15 @@ impl Asset for EvCharger {
         ]
     }
 
+    fn comfort_bands(
+        &self,
+        state: &AssetState,
+        rates: &[ComfortRate],
+    ) -> Option<Vec<crate::entities::comfort::EnergyBand>> {
+        let s: &EvState = own(state);
+        Some(super::ev_comfort::ev_comfort_bands(self, s.soc_frac, rates))
+    }
+
     fn default_completion_policy(&self) -> CompletionPolicy {
         crate::entities::asset::CompletionPolicy::Stop
     }

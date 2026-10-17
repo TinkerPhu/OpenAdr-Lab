@@ -9,6 +9,7 @@ use crate::entities::asset::{
     AssetHistoryView, AssetKind, ComfortRate, CompletionPolicy, EmergencyWhatIfs,
 };
 use crate::entities::capacity_curve::{CommitmentDirection, LimitTier};
+use crate::entities::comfort::EnergyBand;
 use crate::entities::device_session::EvSession;
 use crate::entities::ev_usage::EvUsageSimState;
 
@@ -186,6 +187,17 @@ pub trait Asset: Send + Sync {
         unimplemented!(
             "Asset::default_comfort_rates() only applies to AssetConfig-backed asset kinds"
         )
+    }
+
+    /// The energy this asset would price by `rates`, from its current state to its limit, as
+    /// bands (kWh, €/kWh): what the comfort-curve card sums into a curve's maximum cost. `None`
+    /// (the default) for an asset that does not price energy by a comfort curve.
+    fn comfort_bands(
+        &self,
+        _state: &AssetState,
+        _rates: &[ComfortRate],
+    ) -> Option<Vec<EnergyBand>> {
+        None
     }
 
     /// What happens once this asset's MILP objective is satisfied (stop vs.

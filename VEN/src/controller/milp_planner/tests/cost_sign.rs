@@ -3,7 +3,7 @@ use chrono::TimeZone;
 
 // ── BL-40: AssetAllocation.cost_eur must price PV-surplus consumption as
 // forgone export revenue (opportunity cost, `+`), matching
-// session_flexibility.rs::solved_session_cost()'s convention — not as a credit (`-`).
+// entities/plan_cost.rs::asset_planned_cost()'s convention — not as a credit (`-`).
 
 fn noon() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 4, 11, 12, 0, 0).unwrap()
@@ -205,7 +205,7 @@ fn battery_charging_allocation_cost_eur_prices_pv_surplus_as_opportunity_cost() 
 }
 
 /// Cross-check per BL-40's own Verify note: the decision matrix's summed
-/// `cost_eur` and the session flexibility `solved_session_cost()`-style total (recomputed
+/// `cost_eur` and the session flexibility `asset_planned_cost()`-style total (recomputed
 /// directly from grid/surplus power, the reference convention) must agree in sign
 /// for a plan spanning multiple asset types with PV-surplus-covered slots.
 #[test]
@@ -277,7 +277,7 @@ fn decision_matrix_and_session_flexibility_totals_agree_in_sign_across_asset_typ
         .sum();
 
     // Reference total: recomputed directly from grid/surplus power using the
-    // opportunity-cost convention (mirrors session_flexibility.rs::solved_session_cost()).
+    // opportunity-cost convention (mirrors entities/plan_cost.rs::asset_planned_cost()).
     let reference_total: f64 = plan
         .slots
         .iter()

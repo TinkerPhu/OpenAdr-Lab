@@ -349,14 +349,7 @@ pub fn battery_future_state(e_kwh: f64, capacity_kwh: f64) -> HashMap<String, f6
 /// Bids are non-increasing across the bands (enforced at the API boundary by
 /// `entities::comfort::validate_curve`), which is what keeps the valuation
 /// concave and therefore solvable with continuous variables only — no binary.
-#[derive(Debug, Clone, PartialEq)]
-pub struct EvEnergySegment {
-    /// Energy in this band [kWh].
-    pub kwh: f64,
-    /// What the user bids for each kWh in it [€/kWh], CO2 bid already
-    /// monetized in.
-    pub eur_per_kwh: f64,
-}
+pub use crate::entities::comfort::EnergyBand as EvEnergySegment;
 
 /// One charging obligation: "this EV must hold this much energy by this step".
 ///
