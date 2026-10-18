@@ -343,7 +343,8 @@ mod tests {
     /// says `net_export_kw: 0`, not `-2`.
     #[test]
     fn plan_body_states_import_and_export_as_separate_non_negative_kw() {
-        let body = plan_body("ven-4", &plan_with_flows());
+        let plan = plan_with_flows();
+        let body = plan_body("ven-4", &plan);
         assert!(body
             .slots
             .iter()
