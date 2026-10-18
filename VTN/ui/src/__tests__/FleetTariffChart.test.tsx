@@ -113,6 +113,55 @@ describe("FleetTariffChart", () => {
     expect(screen.getByTestId("fleet-tariff-disagree")).toHaveTextContent("ven-3");
   });
 
+  it("adds a solid draft series beside the live tariff when given a draft", () => {
+    render(
+      <FleetTariffChart
+        signals={fleet(20)}
+        windowMinutes={120}
+        tickMinutes={10}
+        nowMs={NOW}
+        draftBands={[band({ value: 0.55, eventID: "draft" })]}
+      />,
+    );
+    const series = chartProps[0].series as Series[];
+    expect(series.map((s) => s.key)).toEqual([
+      IMPORT_KEY,
+      EXPORT_KEY,
+      "Import tariff (draft)",
+      "Export tariff (draft)",
+    ]);
+    const draft = series[2];
+    expect(draft.strokeDasharray).toBeUndefined(); // the live ones are dashed
+    expect(draft.color).toBe("#f44336"); // same colour as the live import line
+  });
+
+  it("draws a draft even when the fleet has been sent no tariff yet", () => {
+    render(
+      <FleetTariffChart
+        signals={signals([{ venName: "ven-1", bands: [] }])}
+        windowMinutes={120}
+        tickMinutes={10}
+        nowMs={NOW}
+        draftBands={[band({ value: 0.3 })]}
+      />,
+    );
+    expect(screen.queryByTestId("fleet-tariff-empty")).not.toBeInTheDocument();
+    expect(chartProps).toHaveLength(1);
+  });
+
+  it("runs the axis past now when asked to look ahead", () => {
+    render(
+      <FleetTariffChart
+        signals={fleet(20)}
+        windowMinutes={120}
+        tickMinutes={10}
+        nowMs={NOW}
+        aheadMinutes={600}
+      />,
+    );
+    expect(chartProps[0].tMax).toBe(NOW + 600 * 60_000);
+  });
+
   it("stays quiet when every VEN got the same tariff", () => {
     renderChart(fleet(20));
     expect(screen.queryByTestId("fleet-tariff-disagree")).not.toBeInTheDocument();

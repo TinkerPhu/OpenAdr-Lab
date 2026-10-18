@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from behave import given, when, then
 from features.helpers.api_client import get_token_value, vtn_post, ven_get
+from features.helpers.tariff import parse_ts, price_at
 from features.helpers.wait import poll_until
 
 
@@ -180,20 +181,8 @@ def _post_single_price_event(context, name, priority, start, duration, price):
     r.raise_for_status()
 
 
-def _parse_ts(s):
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
-
-
-def _price_at(rates, at):
-    """Forward-fill, as the /tariffs contract and the VEN UI read it (the API exposes
-    each segment's start only): the last snapshot starting at or before `at`."""
-    current = None
-    for s in sorted(rates, key=lambda r: _parse_ts(r["interval_start"])):
-        if _parse_ts(s["interval_start"]) <= at:
-            current = s.get("import_tariff_eur_kwh")
-        else:
-            break
-    return current
+_parse_ts = parse_ts
+_price_at = price_at
 
 
 @given("I create a priority-5 day-ahead PRICE event of 0.09 for one hour 30 hours from now")

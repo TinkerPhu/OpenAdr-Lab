@@ -8,6 +8,7 @@ mod fleet_signals;
 mod fleet_store;
 mod recorder;
 mod routes;
+mod signal_workbench;
 mod vtn_client;
 
 use axum::{
@@ -15,7 +16,7 @@ use axum::{
     http::{HeaderName, Method},
     middleware::{self, Next},
     response::Response,
-    routing::{delete, get, put},
+    routing::{delete, get, post, put},
     Router,
 };
 use metrics::{counter, histogram};
@@ -159,7 +160,27 @@ async fn main() -> anyhow::Result<()> {
 
     let x_request_id = HeaderName::from_static("x-request-id");
 
-    let app = Router::new()
+    let app = api_routes()
+        .route_layer(middleware::from_fn_with_state(
+            ctx.clone(),
+            metrics_middleware,
+        ))
+        .with_state(ctx)
+        .layer(PropagateRequestIdLayer::new(x_request_id.clone()))
+        .layer(TraceLayer::new_for_http())
+        .layer(SetRequestIdLayer::new(x_request_id, MakeRequestUuid))
+        .layer(cors);
+
+    let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;
+    info!("BFF listening on {}", cfg.listen_addr);
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+/// Every route the BFF serves, before state and layers. Kept out of `main` so adding a route does
+/// not grow a function that is already past the duplication ratchet's 100 lines.
+fn api_routes() -> Router<AppCtx> {
+    Router::new()
         .route("/api/health", get(routes::health::health))
         .route(
             "/api/programs",
@@ -185,20 +206,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/fleet/power", get(routes::fleet::fleet_power))
         .route("/api/fleet/reactions", get(routes::fleet::fleet_reactions))
         .route("/api/fleet/signals", get(routes::fleet::fleet_signals))
+        // The signal workbench: wire facts per payload type, and drafts resolved by
+        // the receivers' own interval rule.
+        .route("/api/signals/registry", get(routes::signals::registry))
+        .route("/api/signals/preview", post(routes::signals::preview))
         .route("/api/reports/:id", delete(routes::reports::delete_report))
         .route("/api/metrics", get(routes::metrics::get_metrics))
-        .route_layer(middleware::from_fn_with_state(
-            ctx.clone(),
-            metrics_middleware,
-        ))
-        .with_state(ctx)
-        .layer(PropagateRequestIdLayer::new(x_request_id.clone()))
-        .layer(TraceLayer::new_for_http())
-        .layer(SetRequestIdLayer::new(x_request_id, MakeRequestUuid))
-        .layer(cors);
-
-    let listener = tokio::net::TcpListener::bind(&cfg.listen_addr).await?;
-    info!("BFF listening on {}", cfg.listen_addr);
-    axum::serve(listener, app).await?;
-    Ok(())
 }

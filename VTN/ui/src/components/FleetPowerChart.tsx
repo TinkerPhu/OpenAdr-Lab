@@ -55,6 +55,7 @@ export function FleetPowerChart({
   tickMinutes,
   nowMs,
   reportingVens,
+  aheadMinutes = 0,
 }: {
   history: FleetHistory;
   windowMinutes: number;
@@ -64,8 +65,10 @@ export function FleetPowerChart({
   /** Tick spacing, chosen per window by the page so both charts agree. */
   tickMinutes: number;
   nowMs: number;
+  /** Minutes past now the axis runs, so this chart lines up under a tariff chart that looks ahead. */
+  aheadMinutes?: number;
 }) {
-  const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes);
+  const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes, aheadMinutes);
   const ticks = fleetChartTicks(tMin, tMax, tickMinutes);
 
   // Memoised: one React element plus one DOM rect per band, rebuilt on every

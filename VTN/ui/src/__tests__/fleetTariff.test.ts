@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { sharedTariff, tariffRows, priceBands, IMPORT_KEY, EXPORT_KEY } from "../utils/fleetTariff";
+import {
+  sharedTariff,
+  tariffRows,
+  priceBands,
+  IMPORT_KEY,
+  EXPORT_KEY,
+  DRAFT_IMPORT_KEY,
+  DRAFT_EXPORT_KEY,
+} from "../utils/fleetTariff";
 import type { FleetSignals, SignalBand } from "../api/types";
 
 const T0 = Date.parse("2026-09-23T09:00:00Z");
@@ -145,5 +153,33 @@ describe("tariffRows", () => {
 
   it("has nothing to draw with no bands", () => {
     expect(tariffRows([], tMin, tMax)).toEqual([]);
+  });
+
+  it("carries a draft beside the live tariff in the same rows, under its own keys", () => {
+    const draft = [
+      band({ payloadType: "PRICE", value: 0.55, eventID: "draft" }),
+      band({
+        from: new Date(T0 + HOUR).toISOString(),
+        to: new Date(T0 + 2 * HOUR).toISOString(),
+        payloadType: "PRICE",
+        value: 0.05,
+        eventID: "draft",
+      }),
+    ];
+    const rows = tariffRows(LAB_BANDS, T0, tMax, draft);
+    const atStart = rows.find((r) => r.ts === T0);
+    expect(atStart?.values?.[IMPORT_KEY]).toBe(0.4);
+    expect(atStart?.values?.[DRAFT_IMPORT_KEY]).toBe(0.55);
+    const atNext = rows.find((r) => r.ts === T0 + HOUR);
+    expect(atNext?.values?.[DRAFT_IMPORT_KEY]).toBe(0.05);
+    // No draft export was given, so there is nothing under that key.
+    expect(atStart?.values?.[DRAFT_EXPORT_KEY]).toBeUndefined();
+  });
+
+  it("draws a draft even when there is no live tariff", () => {
+    const rows = tariffRows([], T0, tMax, [band({ value: 0.3 })]);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0].values?.[DRAFT_IMPORT_KEY]).toBe(0.3);
+    expect(rows[0].values?.[IMPORT_KEY]).toBeUndefined();
   });
 });

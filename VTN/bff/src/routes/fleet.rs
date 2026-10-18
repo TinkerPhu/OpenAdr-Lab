@@ -265,15 +265,7 @@ pub async fn fleet_signals(
     // GB-50: a band's value is read the way a VEN reads it, through what the event and its
     // program declare. Without the programs the reader still has each event's own descriptors
     // and the profile default, so a failed listing costs the program tier, not the bands.
-    let programs = ctx
-        .business
-        .get_all_pages("/programs", None)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "fleet signals: could not list programs; reading without them");
-            Vec::new()
-        });
-    let reader = lab_core::wire_contract::PayloadReader::from_program_rows(&programs);
+    let reader = crate::fleet_signals::payload_reader(&ctx.business).await;
 
     // Every VEN the feed knows about, so a targeted VEN that has published
     // nothing still shows its bands rather than vanishing.

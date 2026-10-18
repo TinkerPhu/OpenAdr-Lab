@@ -85,21 +85,30 @@ pub fn report_quantity_of(payload_type: &str) -> Option<Quantity> {
 /// `None` = the profile does not define the type: its value is passed through as written and
 /// is neither an assumption nor a refusal, because nothing here acts on it.
 pub fn event_quantity_of(payload_type: &str) -> Option<Quantity> {
-    Some(match payload_type {
-        "SIMPLE" => Quantity::Dimensionless,
-        "IMPORT_CAPACITY_LIMIT" | "EXPORT_CAPACITY_LIMIT" => Quantity::PowerKw,
-        "CHARGE_STATE_SETPOINT" => Quantity::Percent,
-        "PRICE" | "EXPORT_PRICE" => Quantity::PricePerKwhEur,
-        "GHG" => Quantity::EmissionGPerKwh,
-        // Profile v2: the types the VEN read without the profile ever deciding their unit.
-        "DISPATCH_SETPOINT" => Quantity::PowerKw,
-        "IMPORT_CAPACITY_SUBSCRIPTION"
-        | "EXPORT_CAPACITY_SUBSCRIPTION"
-        | "IMPORT_CAPACITY_RESERVATION"
-        | "EXPORT_CAPACITY_RESERVATION" => Quantity::PowerKw,
-        _ => return None,
-    })
+    EVENT_QUANTITIES
+        .iter()
+        .find(|(name, _)| *name == payload_type)
+        .map(|(_, quantity)| *quantity)
 }
+
+/// The table behind [`event_quantity_of`], public so a caller that must list the types (the
+/// BFF's signal registry, `GET /api/signals/registry`) reads the same rows the VEN resolves
+/// against instead of keeping its own list of names.
+pub const EVENT_QUANTITIES: &[(&str, Quantity)] = &[
+    ("SIMPLE", Quantity::Dimensionless),
+    ("IMPORT_CAPACITY_LIMIT", Quantity::PowerKw),
+    ("EXPORT_CAPACITY_LIMIT", Quantity::PowerKw),
+    ("CHARGE_STATE_SETPOINT", Quantity::Percent),
+    ("PRICE", Quantity::PricePerKwhEur),
+    ("EXPORT_PRICE", Quantity::PricePerKwhEur),
+    ("GHG", Quantity::EmissionGPerKwh),
+    // Profile v2: the types the VEN read without the profile ever deciding their unit.
+    ("DISPATCH_SETPOINT", Quantity::PowerKw),
+    ("IMPORT_CAPACITY_SUBSCRIPTION", Quantity::PowerKw),
+    ("EXPORT_CAPACITY_SUBSCRIPTION", Quantity::PowerKw),
+    ("IMPORT_CAPACITY_RESERVATION", Quantity::PowerKw),
+    ("EXPORT_CAPACITY_RESERVATION", Quantity::PowerKw),
+];
 
 /// Who said what unit a value is in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

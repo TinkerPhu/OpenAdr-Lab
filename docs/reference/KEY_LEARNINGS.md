@@ -3563,3 +3563,20 @@ everything. The first draft of the goal ("UI-only skips E2E") was a rule about w
 and the code said otherwise: E2E builds both UIs and drives them. Read the compose files and Dockerfiles
 (what each suite copies and builds) before writing a rule, and keep a scheduled full run of `main` to catch the
 rule that was wrong anyway.
+
+## A limit that every case reaches is not a warning (tariff editor, 2026-10-18)
+
+A cap that is always hit tells the reader nothing, and warning on it trains them to ignore the one case
+where it matters. The receivers' 2000-interval expansion cap is reached by every `P9999Y` series (2000
+hourly intervals is 83 days), so "the expansion hit the cap" fired for the seeded tariff. The condition
+that is a fault is "the cap stopped the expansion *inside the window the reader asked about*". Write the
+warning against what the reader would miss, and let the first test of the happy path try it.
+
+## Make the shared function public before writing a second one (tariff editor, 2026-10-18)
+
+An editor needs "when does interval i run" for events it did not write (intervals may omit a start or a
+duration). The easy path is a TypeScript port; the GB-48 path is making the Rust function the editor
+needs `pub` and asking the server. The same applies to a table: `event_quantity_of` was a `match`, so
+nothing could list the types without a second list; turning it into a public table that the function reads
+meant the registry endpoint cost no new data. Look at what the shared function hides before copying it.
+
