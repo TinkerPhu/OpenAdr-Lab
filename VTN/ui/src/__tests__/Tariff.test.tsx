@@ -72,6 +72,7 @@ vi.mock("../api/hooks", () => ({
 
 const chartProps: Record<string, unknown>[] = [];
 vi.mock("../components/FleetTariffChart", () => ({
+  TARIFF_AXIS_ID: "tariff",
   FleetTariffChart: (props: Record<string, unknown>) => {
     chartProps.push(props);
     return <div data-testid="tariff-chart-stub" />;
@@ -114,21 +115,38 @@ describe("TariffPage", () => {
   it("draws the previewed draft beside the live tariff, and looks ahead", async () => {
     render(<TariffPage />);
     chooseSeed();
-    await waitFor(() => expect(chartProps.length).toBeGreaterThan(0));
+    // The preview is debounced, so the draft's bands arrive a moment after the chart first renders.
+    await waitFor(() => {
+      const latest = chartProps[chartProps.length - 1];
+      expect((latest?.draftBands as unknown[] | undefined)?.length).toBe(1);
+    });
     const last = chartProps[chartProps.length - 1];
-    expect((last.draftBands as unknown[]).length).toBe(1);
     expect(last.aheadMinutes).toBeGreaterThan(0);
+    // The chart is also where the draft is edited with the pointer.
+    expect(last.overlay).toBeTruthy();
   });
 
   it("asks for a preview only while the draft is publishable", async () => {
     render(<TariffPage />);
     chooseSeed();
     await waitFor(() => expect(screen.getAllByTestId(/^cell-PRICE-/)).toHaveLength(24));
-    expect(previewArgs[previewArgs.length - 1]).not.toBeNull();
+    await waitFor(() => expect(previewArgs[previewArgs.length - 1]).not.toBeNull());
     fireEvent.change(screen.getByTestId("cell-PRICE-0"), { target: { value: "" } });
     await waitFor(() => expect(previewArgs[previewArgs.length - 1]).toBeNull());
     expect(screen.getByTestId("tariff-issues")).toBeVisible();
     expect(screen.getByTestId("tariff-publish-btn")).toBeDisabled();
+  });
+
+  it("shapes the whole series with an operator and keeps it a repeating tariff", async () => {
+    render(<TariffPage />);
+    chooseSeed();
+    await waitFor(() => expect(screen.getAllByTestId(/^cell-PRICE-/)).toHaveLength(24));
+    fireEvent.change(screen.getByTestId("op-param-factor"), { target: { value: "2" } });
+    fireEvent.click(screen.getByTestId("operator-apply"));
+    await waitFor(() =>
+      expect((screen.getByTestId("cell-PRICE-0") as HTMLInputElement).value).toBe("0.16"),
+    );
+    expect(screen.getByTestId("recurrence-kind")).toHaveValue("forever");
   });
 
   it("discards edits back to the loaded series", async () => {

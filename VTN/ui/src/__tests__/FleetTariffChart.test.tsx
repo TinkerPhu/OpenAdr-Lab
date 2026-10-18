@@ -149,6 +149,25 @@ describe("FleetTariffChart", () => {
     expect(chartProps).toHaveLength(1);
   });
 
+  it("hands an overlay to the chart as an extra element, and none when not given one", () => {
+    render(
+      <FleetTariffChart signals={fleet(20)} windowMinutes={120} tickMinutes={10} nowMs={NOW} />,
+    );
+    expect(chartProps[0].extraReferenceAreas).toBeUndefined();
+    chartProps.length = 0;
+    const overlay = <g data-testid="the-overlay" />;
+    render(
+      <FleetTariffChart
+        signals={fleet(20)}
+        windowMinutes={120}
+        tickMinutes={10}
+        nowMs={NOW}
+        overlay={overlay}
+      />,
+    );
+    expect(chartProps[0].extraReferenceAreas).toEqual([overlay]);
+  });
+
   it("runs the axis past now when asked to look ahead", () => {
     render(
       <FleetTariffChart

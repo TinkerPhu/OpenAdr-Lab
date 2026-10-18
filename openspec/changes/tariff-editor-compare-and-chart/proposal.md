@@ -9,8 +9,10 @@ curve; dragging steps on the chart is the natural second input mode over the sam
 
 ## What Changes
 
-- Before/after comparison: on publish, freeze the fleet import/export power of the preceding
-  window as a faint reference, and show the delta after the VENs replan.
+- Before/after comparison of the fleet's *planned* import and export: the plan as of just before the
+  publish instant (faint) against the plan as of now (solid), with a per-direction delta and "n of m
+  VENs replanned". Read from the new fleet plan feed (`fleet-plan-feed`), so nothing is stored by the
+  page and a reload reproduces it.
 - Drag-on-chart editing: drag a step's value, drag a band edge, with snap to the registry's grid
   and a numeric readout, editing the same draft as the grid.
 - Templates and operators over the draft (flat, 2-tier, 3-tier; scale, shift, cap, paint range).
@@ -32,5 +34,5 @@ curve; dragging steps on the chart is the natural second input mode over the sam
 
 - `VTN/ui/src/`: chart overlay layer for pointer editing (recharts has no draggable series),
   operator module, snapshot storage; `Tariff.tsx` gains the comparison panel.
-- `VTN/bff/`: possibly a history query for fleet power at a past window (design decides).
-- Depends on: `tariff-editor-workbench` applied first.
+- `VTN/bff/`: none; it reads `GET /api/fleet/plan?at=` from `fleet-plan-feed`.
+- Depends on: `tariff-editor-workbench` (merged) and, for the comparison only, `fleet-plan-feed`.
