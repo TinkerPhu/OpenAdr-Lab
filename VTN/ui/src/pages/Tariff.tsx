@@ -10,13 +10,17 @@ import {
   useSignalRegistry,
 } from "../api/hooks";
 import type { PatternInterval, VtnEvent } from "../api/types";
+import { Customized } from "recharts";
+import { DraftEditLayer } from "../components/DraftEditLayer";
 import { fleetChartWindow } from "../components/fleetChartWindow";
 import { FleetPowerChart } from "../components/FleetPowerChart";
-import { FleetTariffChart } from "../components/FleetTariffChart";
+import { FleetTariffChart, TARIFF_AXIS_ID } from "../components/FleetTariffChart";
+import { OperatorToolbar } from "../components/OperatorToolbar";
 import { PublishDialog } from "../components/PublishDialog";
 import { RecurrenceControl } from "../components/RecurrenceControl";
 import { TariffGrid } from "../components/TariffGrid";
 import { crossesUtcOffsetChange } from "../utils/recurrence";
+import { useDebouncedValue } from "../utils/useDebouncedValue";
 import {
   draftFromPattern,
   eventPayloadTypes,
@@ -30,6 +34,7 @@ const BACK_MINUTES = 360;
 const AHEAD_MINUTES = 1080;
 const TICK_MINUTES = 180;
 const POWER_STEP_SECONDS = 300;
+const PREVIEW_DEBOUNCE_MS = 150;
 
 /** The clock, refreshed each minute, so a query keyed on it does not refetch on every render. */
 function useMinuteClock(): number {
@@ -82,10 +87,12 @@ export function TariffPage() {
 
   // The preview is asked for only while the draft is publishable: a half-typed cell has no
   // event to expand, and the last good preview stays on screen meanwhile.
-  const previewEvent = useMemo(
+  const wantedPreview = useMemo(
     () => (draft && registry && issues.length === 0 ? toEventInput(draft, registry, []) : null),
     [draft, registry, issues],
   );
+  // Debounced: a drag changes the draft on every pointer move, and each distinct body is a request.
+  const previewEvent = useDebouncedValue(wantedPreview, PREVIEW_DEBOUNCE_MS);
   const preview = useSignalPreview(
     previewEvent,
     new Date(tMin).toISOString(),
@@ -193,6 +200,16 @@ export function TariffPage() {
               tickMinutes={TICK_MINUTES}
               nowMs={nowMs}
               draftBands={draftBands}
+              overlay={
+                <Customized
+                  component={DraftEditLayer}
+                  axisId={TARIFF_AXIS_ID}
+                  draft={draft}
+                  registry={registry}
+                  bands={draftBands}
+                  onChange={setDraft}
+                />
+              }
             />
             <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1 }}>
               Fleet power
@@ -242,6 +259,8 @@ export function TariffPage() {
                   {issues.length > 3 && <div>… and {issues.length - 3} more</div>}
                 </Alert>
               )}
+
+              <OperatorToolbar draft={draft} registry={registry} onChange={setDraft} />
 
               <TariffGrid draft={draft} registry={registry} issues={issues} onChange={setDraft} />
 

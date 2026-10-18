@@ -1,30 +1,44 @@
 ## ADDED Requirements
 
-### Requirement: Frozen reference at publish
-When a draft is published, the workbench SHALL keep the fleet's import and export power over the
-comparison window as it was planned just before the publish and draw it as a reference series.
+### Requirement: Before and after are the fleet's plans around the publish instant
+After a draft is published, the workbench SHALL show the fleet's planned import and export power as of
+just before the publish instant (the reference) and as of now (the result), both read from the fleet
+plan feed (`fleet-plan-feed`), with the publish instant being the published event's `createdDateTime`.
 
-#### Scenario: Reference after publish
-- **WHEN** the user publishes a draft
-- **THEN** the fleet power chart shows the pre-publish series faintly and the live series solid
+#### Scenario: Reference and result drawn
+- **WHEN** a tariff has been published and at least one VEN has replanned
+- **THEN** the chart shows the planned import and export from before the publish faintly, and from now
+  solid, on the same axis
 
-### Requirement: Delta is shown once the fleet has replanned
-The workbench SHALL show per-direction (import, export) energy and peak differences between the
-reference and the live series, and SHALL say while VENs have not yet replanned that the delta is
-not final.
+#### Scenario: Survives a reload
+- **WHEN** the page is reloaded after a publish
+- **THEN** the same reference and result are shown, because both are read from the stored plans and the
+  event's creation time, not from page memory
+
+### Requirement: Replan progress is stated
+The workbench SHALL say how many of the targeted VENs now contribute a plan adopted after the publish
+instant, and SHALL mark the delta provisional until all of them do.
 
 #### Scenario: Not yet replanned
-- **WHEN** fewer than all targeted VENs have a plan newer than the publish time
-- **THEN** the delta is labelled "n of m VENs replanned"
+- **WHEN** 3 of 5 targeted VENs contribute a plan adopted after the publish
+- **THEN** the delta is labelled "3 of 5 VENs replanned"
 
 #### Scenario: Settled
-- **WHEN** all targeted VENs have replanned
+- **WHEN** all targeted VENs contribute a plan adopted after the publish
 - **THEN** the delta is shown without the provisional label
 
-### Requirement: Reference survives a reload
-The reference SHALL be recoverable after the page is reloaded from stored data, not only from
-browser memory.
+### Requirement: The delta is stated per direction
+The workbench SHALL show, for import and for export separately, the change in planned energy over the
+plan horizon and in planned peak power between the reference and the result.
 
-#### Scenario: Reload
-- **WHEN** the page is reloaded after a publish
-- **THEN** the same reference and publish time are shown
+#### Scenario: Energy and peak
+- **WHEN** the result plans 12 kWh less evening import and a 4 kW lower peak than the reference
+- **THEN** the panel shows -12 kWh and -4 kW for import, and the export figures independently
+
+### Requirement: No plan feed, no comparison
+When the fleet plan feed has no plan for the reference instant (a VEN or the store is missing it), the
+workbench SHALL say which part is missing rather than draw a zero reference.
+
+#### Scenario: Store unavailable
+- **WHEN** `GET /api/fleet/plan` reports no plan history
+- **THEN** the comparison panel says so and the rest of the page still works

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactElement } from "react";
 import { Alert, Typography } from "@mui/material";
 import { TimeSeriesChart } from "@lab/ui/TimeSeriesChart";
 import type { TimeSeriesSeriesSpec } from "@lab/ui/TimeSeriesChart";
@@ -25,7 +25,9 @@ import { renderDayNightShading } from "@lab/ui/DayNightShading";
 import { LAB_LOCATION } from "../utils/labLocation";
 
 
-const AXIS_ID = "tariff";
+/** The tariff y axis; an overlay (the workbench's drag layer) reads its scale by this id. */
+export const TARIFF_AXIS_ID = "tariff";
+const AXIS_ID = TARIFF_AXIS_ID;
 
 /** Twice the standard cell height, as asked for — deliberately the literal 2x
  *  rather than the existing CELL_CHART_HEIGHT_TALL, which is 2.5x. */
@@ -50,6 +52,7 @@ export function FleetTariffChart({
   nowMs,
   aheadMinutes = 0,
   draftBands = [],
+  overlay,
 }: {
   signals?: FleetSignals;
   windowMinutes: number;
@@ -61,6 +64,8 @@ export function FleetTariffChart({
   aheadMinutes?: number;
   /** An unpublished tariff (the signal workbench's draft), drawn solid beside the live one. */
   draftBands?: SignalBand[];
+  /** Painted over the plot (recharts `<Customized>`): the workbench's pointer-editing layer. */
+  overlay?: ReactElement;
 }) {
   const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes, aheadMinutes);
   const ticks = fleetChartTicks(tMin, tMax, tickMinutes);
@@ -171,6 +176,7 @@ export function FleetTariffChart({
         nowMs={nowMs}
         referenceAxisId={AXIS_ID}
         backgroundAreas={dayNight}
+        extraReferenceAreas={overlay ? [overlay] : undefined}
         xAxisTicks={ticks}
         xAxisInterval={FLEET_TICK_INTERVAL}
         height={CHART_HEIGHT}
