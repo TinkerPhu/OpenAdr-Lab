@@ -42,6 +42,16 @@ if [ ! -f "$CI_ROOT/web.env" ]; then
 ' "$(head -c 24 /dev/urandom | base64 | tr -d '/+=')" > "$CI_ROOT/web.env" )
     echo "board token written to $CI_ROOT/web.env (ssh in and read it once to use the clear buttons)"
 fi
+# Lanes (ci/lanes.sh): the full tier also runs on these hosts when no session holds them. Written once,
+# never overwritten; with CI_LANE_HOSTS empty the runner uses this host alone.
+if [ ! -f "$CI_ROOT/runner.env" ]; then
+    printf '%s
+' '# How this host is named in tickets and lanes (its ssh alias elsewhere).' '#CI_HOME_NAME=Node3'         '# Extra hosts for the full tier, in priority order; each needs passwordless ssh as this user.'         '#CI_LANE_HOSTS="Node2 Node1"' > "$CI_ROOT/runner.env"
+fi
+LANES="$(sed -n 's/^CI_LANE_HOSTS=//p' "$CI_ROOT/runner.env" | tr -d '"')"
+for h in $LANES; do
+    ssh -o BatchMode=yes -o ConnectTimeout=8 "$h" true 2>/dev/null || echo "WARNING: lane host $h does not answer over ssh as $ME: the runner will skip it"
+done
 sudo systemctl daemon-reload
 sudo systemctl enable --now ci-runner.timer ci-web.service
 sudo systemctl restart ci-web.service

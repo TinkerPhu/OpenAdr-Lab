@@ -30,6 +30,8 @@
 #   tests what is checked out in this directory and never pulls: the caller owns the
 #   checkout. LOCK_HELD_BY_CALLER=1 skips taking and releasing the lock, for a caller
 #   that already holds it for a longer sequence.
+#   TREE_PREPARED_BY_CALLER=1 skips the `git pull` on a remote host, for a caller that
+#   put the host on a detached commit itself (the CI runner's lanes, ci/lanes.sh).
 #
 set -euo pipefail
 
@@ -326,7 +328,7 @@ fi
 if $RUN_COVERAGE; then
     header "VEN Coverage (cargo-tarpaulin, docker: $_DOCKER_LABEL)"
     if can_reach_docker; then
-        if ! $_DOCKER_IS_LOCAL; then
+        if ! $_DOCKER_IS_LOCAL && [[ "${TREE_PREPARED_BY_CALLER:-}" != 1 ]]; then
             echo "  Syncing latest code to $_DOCKER_LABEL..."
             run_docker_cmd "cd $DOCKER_DIR && git pull --recurse-submodules" 2>&1
         fi
@@ -348,7 +350,7 @@ fi
 if $RUN_E2E; then
     header "5. E2E Integration Tests (behave, docker: $_DOCKER_LABEL)"
     if can_reach_docker; then
-        if ! $_DOCKER_IS_LOCAL; then
+        if ! $_DOCKER_IS_LOCAL && [[ "${TREE_PREPARED_BY_CALLER:-}" != 1 ]]; then
             echo "  Syncing latest code to $_DOCKER_LABEL..."
             run_docker_cmd "cd $DOCKER_DIR && git pull --recurse-submodules" 2>&1
         fi

@@ -130,6 +130,30 @@ class WebApi(unittest.TestCase):
         self.assertEqual(1, s["queued"])
         self.assertEqual("20261017T0710Z_cccccccc_c", s["running"])
 
+    def test_lanes_file_is_read(self):
+        name = "20261017T0700Z_09fb9c63_fix-lanes"
+        make_ticket(self.board, name, "running", extra={"lanes": (
+            "Node3|e2e|running||\n" "Node2|resilience rust-vtn|ok|1300|\n"
+            "skipped|Node1|load 3.1, 900 MB free\n")})
+        t = ci_web.read_ticket(name)
+        self.assertEqual([{"host": "Node3", "suites": ["e2e"], "state": "running", "seconds": None, "note": ""},
+                          {"host": "Node2", "suites": ["resilience", "rust-vtn"], "state": "ok", "seconds": 1300, "note": ""}],
+                         t["lanes"])
+        self.assertEqual([{"host": "Node1", "why": "load 3.1, 900 MB free"}], t["lanes_skipped"])
+
+    def test_a_ticket_without_lanes_has_none(self):
+        name = "20261017T0701Z_09fb9c63_fix-nolanes"
+        make_ticket(self.board, name, "red")
+        t = ci_web.read_ticket(name)
+        self.assertEqual(([], []), (t["lanes"], t["lanes_skipped"]))
+
+    def test_a_lane_log_can_be_read_but_not_any_file(self):
+        name = "20261017T0702Z_09fb9c63_fix-lanelog"
+        make_ticket(self.board, name, "red", extra={"full.Node2.log": "a\nb\n"})
+        self.assertEqual("b\n", ci_web.read_log(name, "full.Node2", 1))
+        self.assertIsNone(ci_web.read_log(name, "full.../x", 1))
+        self.assertIsNone(ci_web.read_log(name, "lanes", 1))
+
     def test_log_tail_is_limited_and_whitelisted(self):
         name = "20261017T0700Z_09fb9c63_fix-x"
         make_ticket(self.board, name, "red", extra={"quick.log": "\n".join(str(i) for i in range(100)) + "\n"})

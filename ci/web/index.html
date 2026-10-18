@@ -101,6 +101,9 @@ const colorVar = st => `var(--${["merged","deployed","green","red","conflict","s
 const suiteChips = t => t.suites_run == null ? "" :
   t.suites_run.map(x => `<span class="chip" title="run">${esc(x)}</span>`).join("") +
   t.suites_skipped.map(x => `<span class="chip skip" title="skipped: the change cannot affect it">${esc(x)}</span>`).join("");
+const laneChips = t => (t.lanes || []).map(l =>
+  `<span class="chip" title="${esc(l.note || l.state)}">${esc(l.host)}: ${esc(l.suites.join(" "))} - ${esc(l.state)}${l.seconds != null ? " " + dur(l.seconds) : ""}</span>`).join("") +
+  (t.lanes_skipped || []).map(l => `<span class="chip skip" title="${esc(l.why)}">${esc(l.host)}: not used</span>`).join("");
 const badge = st => `<span class="badge s-${esc(st)}">${esc(st)}</span>`;
 
 function etaCell(t) {
@@ -204,6 +207,10 @@ function select(name) {
   $("dtitle").innerHTML = `${esc(t.branch)} ${badge(t.status)}`;
   $("dmeta").textContent = `${t.name} - sha ${(t.sha || "").slice(0, 8)} - ${t.kind}, tiers ${t.tiers}, attempt ${t.attempt}`;
   if (t.suites_run != null) $("dmeta").innerHTML += `<br>suites: ${suiteChips(t)}`;
+  if ((t.lanes || []).length) $("dmeta").innerHTML += `<br>lanes: ${laneChips(t)}`;
+  const logs = ["run", "quick", "full"].concat((t.lanes || []).filter(l => l.host !== t.lanes[0].host).map(l => "full." + l.host));
+  const sel = $("logsel"), cur = sel.value;
+  sel.innerHTML = logs.map(x => `<option>${esc(x)}</option>`).join(""); sel.value = logs.includes(cur) ? cur : "run";
   renderSteps(t);
   loadLog();
 }

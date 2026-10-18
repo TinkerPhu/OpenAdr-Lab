@@ -169,6 +169,43 @@ board_suites_why() {
     done
 }
 
+# suite_flags <suites> - the run_all_tests.sh flags of the full-tier suites among them (cargo is the quick tier's)
+suite_flags() {
+    local s
+    for s in $1; do
+        case "$s" in rust-vtn) echo "--rust" ;; e2e|resilience) echo "--$s" ;; esac
+    done
+}
+
+# Seconds a suite is assumed to take where no finished ticket has timed it (a full run of 4893 s
+# less E2E's ~3300 s is about 1600 s for the other two).
+BOARD_SUITE_FALLBACK_S="e2e=3300 resilience=1000 rust-vtn=600"
+
+board_median() { printf '%s
+' "$@" | sort -n | awk '{ a[NR] = $1 } END { print a[int((NR + 1) / 2)] }'; }
+
+# board_suite_seconds <suite> <host> - the median seconds of the suite's passing rows
+# ("| run_all_tests.sh --e2e [Node3] | 0 | 3300 |") in the last 10 finished tickets: on that host
+# when it has at least 3, else on any host, else the fallback.
+board_suite_seconds() {
+    local suite="$1" host="$2" flag t n=0 mine="" all="" h s fb
+    flag="$(suite_flags "$suite")"
+    for t in $(board_tickets | sort -r); do
+        case " $BOARD_FINISHED " in *" $(board_status "$t") "*) ;; *) continue ;; esac
+        [ -f "$BOARD_DIR/$t/result.md" ] || continue
+        n=$((n + 1)); [ "$n" -le 10 ] || break
+        while read -r h s; do
+            [ -n "$s" ] || continue
+            all="$all $s"; [ "$h" != "$host" ] || mine="$mine $s"
+        done < <(sed -n "s/^| run_all_tests.sh $flag \[\(.*\)\] | 0 | \([0-9]*\) |\$/\1 \2/p" "$BOARD_DIR/$t/result.md")
+    done
+    if [ "$(wc -w <<<"$mine")" -ge 3 ]; then board_median $mine
+    elif [ -n "${all// /}" ]; then board_median $all
+    else
+        for fb in $BOARD_SUITE_FALLBACK_S; do [ "${fb%%=*}" = "$suite" ] && echo "${fb#*=}"; done
+    fi
+}
+
 # ── Command line (only when run, not when sourced) ───────────────────────────
 
 board_main() {
