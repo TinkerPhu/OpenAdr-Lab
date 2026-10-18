@@ -16197,3 +16197,41 @@ Tests: `ci/test_wait.sh`.
 `ci-next` round trip was the weak point of the hand-off. A background poll in the session's own shell costs no
 model turns, whatever the queue length. It consumes nothing: status and `result.md` stay in the ticket, and
 without `--ack` `ci-next` still lists it, so a closed session or a dead laptop loses no result.
+## Tariff editor part 2: operators, drag editing, and a fleet plan feed (2026-10-18)
+
+**What.** The Tariff page gained whole-series operators (scale, shift, cap, add-to-range, flat / two- /
+three-tier templates, a table in `signalOperators.ts` rendered by `OperatorToolbar`) and editing on the
+chart: `DraftEditLayer` (a recharts `Customized` layer) drags a band's value or a row boundary, snapped
+to the signal's step and grid (`chartEdit.ts`), and a drag on any repetition of a repeating tariff edits
+the one pattern row. For the before/after comparison it needed what the fleet *plans*, which the VTN
+could not see, so a new change `fleet-plan-feed` was added and built first: the VEN publishes each
+adopted plan (`tasks/fleet_plan.rs`, a bridge off the controller trace), the BFF stores them
+(`fleet_plan.rs`, `lab_recorder.fleet_plan`, 7 days) and answers `GET /api/fleet/plan?at=`; the Fleet page
+shows it and `PlanComparison` draws the plan as of just before a publish against now, with the change per
+direction and "n of m VENs replanned".
+
+**Why.** The point of an editor is watching the fleet's planning react. Actual power reacts only when the
+affected hours arrive; plans react in minutes. Task 1.1 of the compare change found that no plan reaches
+the VTN (the `plan` topic was reserved in phase 0 and published by nobody), which changed the design, so
+the question went to the user before any code.
+
+**Issues.**
+- The planner is not hooked. `adopt_if_warranted` pushes a `PlanCycle` after deciding, and the active plan
+  only changes on adoption, so the bridge publishes the active plan when its id changes. A rejected cycle
+  publishes nothing without the bridge knowing what rejection is; `run_plan_cycle` (17 parameters, R-71)
+  gained no 18th.
+- Telemetry, trace and now plan writers were the same batching loop twice; the third copy was written as
+  one generic `batch_write_loop` and one `queue` helper instead (`one-concept-one-function`).
+- The reference needs no storage: "before" is `GET /api/fleet/plan?at=<createdDateTime − 1 s>`, so a reload
+  reproduces it. Plans are 7-day, not the decisions' 90, because each is large; the broker/store size is
+  still to be measured (`fleet-plan-feed` 4.2).
+- A recharts overlay must be a stable component type. An inline `component={(p) => ...}` is a new type every
+  render, remounts the layer and drops the drag in progress; `Customized` with a fixed component and the
+  data as props keeps it.
+- Preview requests are debounced (150 ms); every pointer move changes the draft and each distinct body is a
+  request.
+- `scripts/gen_module_graph.py` could not import `audit_ven_architecture` since the CI audits moved to
+  `ci/audits/`; fixed with a path insert (the module-graph audit had been failing silently on main).
+- Not seen: a drag on the real chart in a real browser. The layer is tested with stand-in scales and
+  pointer events; the first look at it is the screenshot task of `tariff-editor-workbench` (4.4).
+

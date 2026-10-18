@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# The ring audit lives with the other audits since the CI reorganisation (`ci/audits/`).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ci" / "audits"))
 from audit_ven_architecture import REPO_ROOT, VEN_SRC, code_lines, rust_files  # noqa: E402
 
 DOC = REPO_ROOT / "docs" / "architecture" / "module_dependency_graph.md"

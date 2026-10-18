@@ -244,7 +244,7 @@ already serves the same data (DTO passthrough — no new vocabulary).
 | `telemetry` | yes | 0 | every 5 s (configurable) | `ts`, `grid.net_power_kw` (signed), per asset `power_kw`/`soc` — as `/sim` snapshot |
 | `signals` | yes | 1 | on change | `GET /signals` |
 | `trace` | no | 1 | on every `ControllerEvent` | one `/trace/events` entry |
-| `plan` | yes | 1 | on adoption | `GET /plan` (later views; cheap to add now) |
+| `plan` | yes | 1 | when the active plan changes | a projection of `GET /plan`: `id`, `created_at`, `trigger`, and per slot `start`, `end`, `net_import_kw`, `net_export_kw`, `import_tariff_eur_kwh`, `export_tariff_eur_kwh` under the plan's own names. Published by `tasks/fleet_plan.rs` (a bridge off the controller trace, like `trace`); stored by the BFF in `lab_recorder.fleet_plan` (7 days) and served as `GET /api/fleet/plan?at=` |
 
 Publishing is one outbound port in the VEN (`TelemetryPort`, no-op when
 `FLEET_MQTT_HOST` is unset — same two-gate pattern as `real_measurement_mqtt.md`), fed from the

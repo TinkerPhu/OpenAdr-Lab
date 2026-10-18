@@ -3572,6 +3572,22 @@ hourly intervals is 83 days), so "the expansion hit the cap" fired for the seede
 that is a fault is "the cap stopped the expansion *inside the window the reader asked about*". Write the
 warning against what the reader would miss, and let the first test of the happy path try it.
 
+## Find out what the instrument can see before designing the view on it (fleet plan feed, 2026-10-18)
+
+A "before/after" panel was designed on the assumption that the VTN could read the fleet's plans. It could
+read actual power and per-event reactions; the plan topic had been reserved in an early design and
+published by nobody. The first task of the change was a search for where the data lives, and it turned a
+UI task into a VEN + BFF + UI feature, with the decision (build the feed or settle for telemetry) put to
+the user before any code. When a view needs data, trace it to its producer first; a spec that says "read
+the plan" is not evidence that anyone sends it.
+
+## A drawing layer's component type must not change between renders (tariff editor, 2026-10-18)
+
+A recharts `<Customized component={(props) => <Layer .../>}>` builds a new function every render, which
+React treats as a new component type: the layer unmounts and remounts on every update and loses its
+state, here the drag in progress. Pass a module-level component and give it its data as props. The same
+holds for any overlay that keeps local state while its parent re-renders at pointer speed.
+
 ## Make the shared function public before writing a second one (tariff editor, 2026-10-18)
 
 An editor needs "when does interval i run" for events it did not write (intervals may omit a start or a

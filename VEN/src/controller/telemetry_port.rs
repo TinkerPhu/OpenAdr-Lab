@@ -291,7 +291,9 @@ mod tests {
         let start = chrono::Utc::now();
         let mut plan = crate::services::test_support::plans::flat_plan(300, 4, start);
         for (slot, (import_kw, export_kw)) in
-            plan.slots.iter_mut().zip([(2.0, 0.0), (0.0, 1.5), (3.25, 0.0), (0.0, 0.0)])
+            plan.slots
+                .iter_mut()
+                .zip([(2.0, 0.0), (0.0, 1.5), (3.25, 0.0), (0.0, 0.0)])
         {
             slot.net_import_kw = import_kw;
             slot.net_export_kw = export_kw;
