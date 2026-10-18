@@ -248,3 +248,18 @@ pub fn spawn_fleet_trace(
 ) {
     tasks::fleet_trace::spawn(state.subscribe_controller_trace(), telemetry, ven_name);
 }
+
+/// The adopted plan on the fleet channel (§6.2, `plan`). Same footing as `spawn_fleet_trace`: a
+/// bridge off the controller broadcast, not supervised and not part of `spawn_all`.
+pub fn spawn_fleet_plan(
+    state: &crate::state::AppState,
+    telemetry: Arc<dyn crate::controller::telemetry_port::TelemetryPort>,
+    ven_name: String,
+) {
+    tasks::fleet_plan::spawn(
+        state.subscribe_controller_trace(),
+        state.clone(),
+        telemetry,
+        ven_name,
+    );
+}

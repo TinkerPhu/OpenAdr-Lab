@@ -1,4 +1,4 @@
-import type { EventInput, FleetHistory, FleetLive, FleetReactions, FleetSignals, HealthStatus, Program, PatternInterval, ProgramInput, Report, SignalPreview, VtnEvent, Ven, WireSignalFacts } from "./types";
+import type { EventInput, FleetHistory, FleetLive, FleetPlan, FleetReactions, FleetSignals, HealthStatus, Program, PatternInterval, ProgramInput, Report, SignalPreview, VtnEvent, Ven, WireSignalFacts } from "./types";
 import { debugLog } from "@lab/ui/debugLog";
 
 let reqCounter = 0;
@@ -83,6 +83,14 @@ export class BffApi {
     const to = toIso ? `&to=${encodeURIComponent(toIso)}` : "";
     const r = await this.getReq(`/api/fleet/signals?from=${encodeURIComponent(fromIso)}${to}`);
     if (!r.ok) throw new Error(`fleet signals ${r.status}`);
+    return r.json();
+  }
+
+  /** What the fleet planned to import and export as of `atIso` (now when omitted). */
+  async fleetPlan(atIso?: string): Promise<FleetPlan> {
+    const at = atIso ? `?at=${encodeURIComponent(atIso)}` : "";
+    const r = await this.getReq(`/api/fleet/plan${at}`);
+    if (!r.ok) throw new Error(`fleet plan ${r.status}`);
     return r.json();
   }
 

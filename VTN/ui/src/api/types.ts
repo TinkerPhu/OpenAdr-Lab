@@ -201,6 +201,25 @@ export type WireSignalFacts = {
   currency: string | null;
 };
 
+/** `GET /api/fleet/plan?at=`: what the fleet planned to import and export, as of an instant. */
+export type FleetPlanPoint = {
+  ts: string;
+  netImportKw: number;
+  netExportKw: number;
+  /** How many VENs this total is built from; a VEN past its plan's horizon is absent, not zero. */
+  contributingVens: number;
+};
+
+export type FleetPlan = {
+  at: string;
+  stepSeconds: number;
+  points: FleetPlanPoint[];
+  /** The plan each contributing VEN was working to at `at`. */
+  plans: { venName: string; planId: string; createdAt: string }[];
+  /** Known VENs with no plan at `at`. */
+  vensWithoutPlan: string[];
+};
+
 /** One declared interval of an event, timed but not repeated (`POST /api/signals/preview`, `pattern`). */
 export type PatternInterval = {
   start: string;

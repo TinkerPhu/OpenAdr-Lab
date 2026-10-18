@@ -121,6 +121,7 @@ impl World {
         let ports = Ports::build(cfg, &profile, &data_dir);
 
         background::spawn_fleet_trace(&state, ports.telemetry.clone(), cfg.ven_name.clone());
+        background::spawn_fleet_plan(&state, ports.telemetry.clone(), cfg.ven_name.clone());
         seed_from_store(&state, &ports).await;
 
         // Asset configs are always rebuilt from the profile, so profile
