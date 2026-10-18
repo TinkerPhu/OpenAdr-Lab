@@ -33,9 +33,13 @@ No logic is copied; the only new concepts are lane planning and lane preparation
 
 ## Decisions
 
-**D1 Lanes and order.** Home lane = the runner's own host. Extra lanes = `CI_LANE_HOSTS` in order (default empty; our
-lab: `Node2 Node1`, set in `/srv/ci/runner.env`, which `ci-runner.service` reads through `EnvironmentFile=-`). Node2
-first because Node1 serves the live stack. Node1 additionally needs `loadavg1 <= CI_LANE_MAX_LOAD` (default 2.0) and
+**D1 Lanes and order.** One lane per docker host, in the priority order of `CI_LANE_HOSTS` (default `localhost`, so a
+fresh clone has one lane; our lab: `Node3 Node2 Node1` in `/srv/ci/runner.env`, which `ci-runner.service` reads through
+`EnvironmentFile=-`). All hosts use the same `ci/locks/docker_host_lock.sh` and the same lock path, Node3 included; a
+session locks Node3 with `LOCK_HOST=Node3` exactly like Node2 (checked 2026-10-18: `status` answers on all three). Node3
+differs only in that the runner lives there: its lock is taken first and for the whole ticket (the quick tier and the merge
+need Node3's docker and checkout anyway), so it is always lane 1; if a session holds it, the ticket is requeued as today.
+Node1 serves the live stack, so it comes last and additionally needs `loadavg1 <= CI_LANE_MAX_LOAD` (default 2.0) and
 `MemAvailable >= 1500 MB` when it is acquired, else it is skipped like a busy host.
 
 **D2 Acquire once, at the start of the full tier.** For each host in order, until suites-1 extra lanes are held:
@@ -45,11 +49,12 @@ A heartbeat in each lane job runs `refresh -l 45` every 15 minutes, so a dead ru
 minutes. The lock is released on every exit path (trap in the lane job).
 *Rejected:* waiting for a busy host. A session run can hold a host for hours; waiting would make a ticket slower than today.
 
-**D3 Planning.** `lane_plan` is a pure function: suites, lane hosts and median seconds per suite in, `host: suites` out.
-Longest processing time first onto the lane with the earliest projected end. The home lane is the first lane, so the
-longest suite (e2e) lands on Node3, the host without a resident fleet. Medians come from `board_suite_seconds <suite>`
-(last 10 finished tickets; rows are named `run_all_tests.sh --<suite> [<host>]`); the fallbacks are the numbers measured in task 1.1.
-Host speed differences are ignored in v1 (the row keeps the host, so a per-host median can follow).
+**D3 Planning.** `lane_plan` is a pure function: suites, lane hosts and seconds per suite and host in, `host: suites` out.
+Longest processing time first onto the lane with the earliest projected end. Node3 is the first lane, so the longest
+suite (e2e) lands on Node3, the host without a resident fleet. Seconds come from `board_suite_seconds <suite> <host>`:
+the median of that suite on that host over the last 10 finished tickets (rows are named
+`run_all_tests.sh --<suite> [<host>]`); with fewer than 3 rows for the host, the suite's median over all hosts; with none,
+the fallbacks measured in task 1.1. A suite's length for ordering is its median on the first lane.
 
 **D4 Getting the commit to a lane host.** The tested commit is Node3's rebased local commit and exists on no other
 machine. The runner pushes it to `refs/ci/<ticket>` on origin (the deploy key already has write access; the ref lives
@@ -65,9 +70,12 @@ log (`full.log` for the home lane, `full.<host>.log` for the others) and a resul
 to `STEPS` named `run_all_tests.sh --e2e [Node3]`, so `step_class` still sees `full`. With one lane the code path is
 the existing `full_tier` (no subshell, no behaviour change).
 
-**D6 Failures.** A test failure (suite exit 1) makes the ticket red; the other lanes continue (all failures in one run;
-killing a compose run orphans the `test-runner` container, see KEY_LEARNINGS "E2E teardown leaves the runner").
-An infrastructure failure of an extra lane (ssh 255, dirty or unreachable host, `run_all_tests.sh` exit 3/4/5, tree
+**D6 Failures.** A test failure (suite exit 1) makes the ticket red and cancels the other lanes at once. Cancelling
+must be safe, because killing a compose run orphans the `test-runner` container (KEY_LEARNINGS "E2E teardown leaves the
+runner"): each lane job runs in its own process group (`setsid`); the cancel sends TERM to that group, then runs the lane's
+tidy (D7: remove the project's containers by label, `compose down -v`, verify none are left), and only then releases the
+lock. The cancelled suites are listed in `## Lanes` as `cancelled`. Tidy is the same function a finished lane uses, so
+cancel has no code of its own beyond the TERM. An infrastructure failure of an extra lane (ssh 255, dirty or unreachable host, `run_all_tests.sh` exit 3/4/5, tree
 preparation failed) appends its unfinished suites to the home lane, where they run afterwards; `## Lanes` records
 "moved from <host>: <reason>". A home-lane infrastructure failure stays `error`, as today.
 
@@ -94,7 +102,12 @@ log endpoint accepts `full.<host>`.
 Merge with `CI_LANE_HOSTS` unset (nothing changes). On Node3 write `/srv/ci/runner.env` with `CI_LANE_HOSTS="Node2"`,
 run `ci/install.sh`, watch one ticket, then add `Node1`.
 
+## Decisions taken with the user (2026-10-18)
+
+Cancel the other lanes on the first failing suite; Node1 is a lane, last (Node3, Node2, Node1); an infrastructure failure
+reruns the suite on Node3 afterwards; durations are medians per suite and host. Node3 is locked by the same script as the
+others, as one lane among three.
+
 ## Open Questions
 
-- Should a red lane cancel the others once a suite fails early? Left out (D6); revisit with real data.
-- Per-host medians (Node2 against Node3) once ten tickets carry the host in their rows.
+None.

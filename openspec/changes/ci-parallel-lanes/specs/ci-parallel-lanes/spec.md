@@ -1,9 +1,14 @@
 ## ADDED Requirements
 
-### Requirement: Extra lanes are taken through the host lock, never waited for
-The runner SHALL acquire an extra lane host with `ci/locks/docker_host_lock.sh` (the lock sessions use) in the
-order `CI_LANE_HOSTS` gives, trying each once without waiting, and SHALL NOT take a host whose lock another owner
-holds.
+### Requirement: Every lane host, Node3 included, is locked by the same script
+The runner SHALL take every lane host, its own host included, with `ci/locks/docker_host_lock.sh` and the lock file
+sessions use (one fixed path per machine), in the priority order Node3, Node2, Node1 given by `CI_LANE_HOSTS`. A session
+can therefore lock Node3 exactly as it locks Node2 or Node1. Hosts other than the runner's own SHALL be tried once without
+waiting, and SHALL NOT be taken when another owner holds the lock.
+
+#### Scenario: A session holds Node3
+- **WHEN** a session holds Node3's lock when a ticket is picked up
+- **THEN** the runner does not touch Node3, requeues the ticket without counting an attempt (as today) and shows "host lock busy" on the board
 
 #### Scenario: First host busy, second free
 - **GIVEN** `CI_LANE_HOSTS="Node2 Node1"`, a session holds Node2's lock, Node1's lock is free, three suites are selected
@@ -25,9 +30,10 @@ The runner SHALL acquire at most one extra lane per selected suite beyond the fi
 - **WHEN** only `e2e` is selected
 - **THEN** no extra host is locked
 
-### Requirement: Suites are spread longest first
+### Requirement: Suites are spread longest first, by what they take on that host
 The runner SHALL assign each selected suite, longest first, to the acquired lane whose projected finish is earliest, using
-the median seconds of that suite over the last finished tickets and a documented fallback for a suite never timed.
+the median seconds of that suite on that lane's host over the last finished tickets, the suite's median over all hosts when
+the host has too few rows, and a documented fallback for a suite never timed.
 
 #### Scenario: Three suites, three lanes
 - **GIVEN** medians e2e 3300 s, resilience 900 s, rust-vtn 600 s
@@ -35,6 +41,10 @@ the median seconds of that suite over the last finished tickets and a documented
 
 #### Scenario: Three suites, two lanes
 - **THEN** e2e runs alone on Node3 and resilience then rust-vtn run on the extra lane
+
+#### Scenario: A host is slower for a suite
+- **GIVEN** resilience medians Node3 900 s, Node2 1300 s and rust-vtn medians Node3 600 s, Node2 650 s
+- **THEN** the projected finish on each lane uses that host's own median
 
 ### Requirement: A lane host is prepared and returned under its lock
 Before running on an extra host the runner SHALL fetch the tested commit from `refs/ci/<ticket>` on origin and check it
@@ -58,13 +68,18 @@ the runner SHALL run its suites on the home lane after the home lane's own and r
 - **WHEN** the connection to Node2 fails with exit 255 during its suite
 - **THEN** that suite is rerun on Node3 and `result.md` records "moved from Node2: infrastructure"
 
-### Requirement: Any suite failing makes the ticket red, and every lane finishes
-The verdict SHALL be red when any suite fails on any lane, and the runner SHALL let the other lanes finish so one run
-reports all failures.
+### Requirement: A failing suite makes the ticket red and cancels the other lanes
+The verdict SHALL be red when any suite fails a test on any lane. The runner SHALL then stop the other lanes at once,
+remove their test containers, verify none are left, return their checkouts to `main` and release their locks, and
+`result.md` SHALL mark the cancelled suites as cancelled, not as passed or failed.
 
-#### Scenario: One lane red, one green
-- **WHEN** resilience fails on Node2 while e2e passes on Node3
-- **THEN** the verdict is red, `result.md` shows both outcomes, and nothing merges
+#### Scenario: One lane red while another is mid-suite
+- **WHEN** resilience fails on Node2 after 10 minutes while e2e is running on Node3
+- **THEN** e2e is stopped, the verdict is red, nothing merges, both hosts are clean and unlocked, and `result.md` lists e2e as cancelled
+
+#### Scenario: Cancel leaves no orphan
+- **WHEN** a lane is cancelled during `docker compose run test-runner`
+- **THEN** no container of the `openadr-test` project is left on that host before its lock is released
 
 ### Requirement: Locks cannot outlive the runner
 A lane lock SHALL carry a short lease that a heartbeat renews while the lane runs, and SHALL be released on every exit path.

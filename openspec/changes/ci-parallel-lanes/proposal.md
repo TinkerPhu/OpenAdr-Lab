@@ -7,16 +7,19 @@ Second of four sequenced CI-speed changes (suite selection is merged; batching a
 
 ## What Changes
 
-- The full tier runs its suites on **lanes**: Node3 (home, always) plus extra hosts taken in the order
-  `CI_LANE_HOSTS` lists them (our lab: `Node2 Node1`). A lane is one host that runs its share of the suites one
-  after the other, as today, under that host's lease lock.
+- The full tier runs its suites on **lanes**: one per docker host, in the priority order Node3, Node2, Node1
+  (`CI_LANE_HOSTS`). All three are locked with the same lease-lock script and the same lock file path; Node3 is a
+  lane like the others and additionally hosts the CI runner. A lane runs its share of the suites one after the
+  other, as today.
 - Extra lanes are taken with the **same lease lock the sessions use** (`ci/locks/docker_host_lock.sh`), without
   waiting and without ever preempting: a host a session holds is simply not used for this ticket.
-- The suites are spread over the lanes that were acquired, longest first, by the median durations of past runs.
+- The suites are spread over the lanes that were acquired, longest first, by the median duration of each suite
+  on each host (falling back to the suite's median over all hosts).
 - The tested commit reaches a lane host as `refs/ci/<ticket>` on origin; the host is put on it under the lock
   and returned to `main` afterwards, as the one-checkout-per-host rule asks.
 - A lane failing the infrastructure (host dirty, ssh drop, pre-flight abort) moves its suites to the home lane;
-  a lane failing a test makes the ticket red. The other lanes always finish, so one run reports every failure.
+  a suite failing a test makes the ticket red and the other lanes are cancelled at once (their hosts are tidied
+  and their locks released), so a red ticket frees the hosts early.
 - `result.md` gets a `## Lanes` block; the web board shows where each suite runs and ran.
 - `CI_LANE_HOSTS` unset (a fresh clone, a lab with only Node3) means one lane: today's behaviour, unchanged.
 
