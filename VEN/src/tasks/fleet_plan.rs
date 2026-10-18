@@ -170,7 +170,9 @@ mod tests {
     async fn other_controller_events_do_not_publish_a_plan() {
         let state = AppState::new();
         let port = running(&state);
-        state.set_active_plan(Some(flat_plan(300, 4, chrono::Utc::now()))).await;
+        state
+            .set_active_plan(Some(flat_plan(300, 4, chrono::Utc::now())))
+            .await;
 
         state
             .push_controller_event(ControllerEvent::OpenAdrArrived {

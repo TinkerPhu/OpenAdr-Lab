@@ -36,6 +36,7 @@ graph TB
               T_BACKOFF["spawn_backoff_poll()"]
               T_PROGRESS["spawn_progress_ticker()"]
               T_FLEETTRACE["fleet_trace::spawn()\npublishes controller trace"]
+              T_FLEETPLAN["fleet_plan::spawn()\npublishes the adopted plan"]
               T_SUPERVISE["supervised_spawn()\nrestarts any loop that dies"]
               T_BASELOAD["spawn_base_load_window()\nhourly base-load window\nfrom HistoryPort"]
               T_DAILY["daily_gate.rs\nDailyGate — one UTC-day gate,\nshared by history_sampler + heuristics_job"]
@@ -139,6 +140,7 @@ graph TB
       T_BASELOAD --> HSTORE
       T_SIMTICK --> C_PORT_TELEM
       T_FLEETTRACE --> C_PORT_TELEM
+      T_FLEETPLAN --> C_PORT_TELEM
       FLEET_PUB -. "impl TelemetryPort" .-> C_PORT_TELEM
       C_REPORTER --> C_ACCUM
       C_ACCUM --> RPTWIN
@@ -172,7 +174,7 @@ graph TB
       class C_PORT_SIM,C_PORT_VTN,C_PORT_MILP,C_PORT_TELEM,ASSETS_MOD port
       class E_PLAN,E_ASSET,E_CAP,E_SESSION,E_TARIFF,E_PARAMS entity
       class SIM_STATE,VTN_CLIENT,PROFILE,HSTORE,LABCORE,FLEET_PUB,VTN_REPORTS,A_BAT,A_EV,A_HTR,A_PV,A_BASE,A_GRID infra
-      class R_HEMS,R_SIM,R_TL,R_ASSETS,R_REPORTS,R_TRACE,T_EVENTS,T_REPORTS,T_OBLIG,T_PERSIST,T_PROGRAMS,T_HISTORY,T_HEURISTICS,T_BACKOFF,T_PROGRESS,T_FLEETTRACE,T_SUPERVISE,T_BASELOAD adapter
+      class R_HEMS,R_SIM,R_TL,R_ASSETS,R_REPORTS,R_TRACE,T_EVENTS,T_REPORTS,T_OBLIG,T_PERSIST,T_PROGRAMS,T_HISTORY,T_HEURISTICS,T_BACKOFF,T_PROGRESS,T_FLEETTRACE,T_FLEETPLAN,T_SUPERVISE,T_BASELOAD adapter
 ```
 
 ## Module import graph (generated)

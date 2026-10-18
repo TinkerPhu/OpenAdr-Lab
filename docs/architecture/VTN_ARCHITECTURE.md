@@ -135,6 +135,22 @@ fixed elapsed time, so it does not follow local clock time across a daylight-sav
 here publishes: the UI posts the finished event to `/api/events`. Tests:
 `VTN/bff/src/signal_workbench.rs` (`mod tests`), `tests/features/tariff_editor.feature`.
 
+### Fleet plan feed
+
+The fleet telemetry shows what sites *did*; the plan feed shows what they *intend*, which is where a
+price change appears within minutes. Each VEN publishes the plan it has adopted
+(`openadr-lab/fleet/<ven>/plan`, a projection of `GET /plan`; `VEN/src/tasks/fleet_plan.rs`). The BFF
+(`VTN/bff/src/fleet_plan.rs`) stores every one in `lab_recorder.fleet_plan` for 7 days and answers
+`GET /api/fleet/plan?at=<instant>` (now by default): per VEN the latest plan adopted at or before `at`,
+resampled with `lab_core::time_series` and summed with `fleet_store::sum_over_grid`, as planned fleet
+import and export per grid point with `contributingVens`, the contributing plan ids, and the known VENs
+with no plan. "Now" and "an earlier instant" are one function, so the tariff editor's before/after
+comparison (`PlanComparison`) cannot add the two sides up differently; the publish instant is the
+published event's own `createdDateTime`, so nothing is stored by the page. A VEN is absent past its
+plan's horizon, never zero. The telemetry, trace and plan writers share one batch loop
+(`fleet_store::batch_write_loop`). Tests: `fleet_plan.rs` (`mod tests`),
+`tests/features/fleet_plan_feed.feature`.
+
 ---
 
 ## 4. OpenADR Message Sequences
