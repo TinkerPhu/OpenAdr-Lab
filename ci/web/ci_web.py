@@ -142,6 +142,24 @@ def planned_class(request):
     return "full" if "full" in tiers.split(",") else "quick"
 
 
+def read_lanes(d):
+    """The runner's lanes file: "host|suites|state|seconds|note" per lane, "skipped|host|why" per unused host."""
+    lanes, skipped = [], []
+    try:
+        text = (d / "lanes").read_text()
+    except OSError:
+        return lanes, skipped
+    for line in text.splitlines():
+        f = line.split("|")
+        if f[0] == "skipped" and len(f) >= 3:
+            skipped.append({"host": f[1], "why": f[2]})
+        elif len(f) >= 3:
+            f += [""] * (5 - len(f))
+            lanes.append({"host": f[0], "suites": f[1].split(), "state": f[2],
+                          "seconds": int(f[3]) if f[3].isdigit() else None, "note": f[4]})
+    return lanes, skipped
+
+
 def read_ticket(name):
     d = BOARD_DIR / name
     n = parse_name(name)
@@ -162,6 +180,7 @@ def read_ticket(name):
         attempt = int((d / "attempt").read_text().strip() or 0)
     except (OSError, ValueError):
         attempt = 0
+    lanes, lanes_skipped = read_lanes(d)
     created = parse_iso(n["created"])
     start, step, since = parse_run_log(log_text, created)
     finished = parse_iso(result["finished"]) if result["finished"] else None
@@ -175,6 +194,7 @@ def read_ticket(name):
         "duration_s": int((finished - start).total_seconds()) if start and finished else None,
         "note": result["note"], "steps": result["steps"],
         "suites_run": result["suites_run"], "suites_skipped": result["suites_skipped"],
+        "lanes": lanes, "lanes_skipped": lanes_skipped,
         "class": step_class(result["steps"]) if result["steps"] else planned_class(req),
         "current_step": step if running else None,
         "current_step_since": iso(since) if running else None,
@@ -183,7 +203,7 @@ def read_ticket(name):
 
 
 def read_log(name, which, tail):
-    if which not in LOGS or not safe_name(name):
+    if (which not in LOGS and not re.fullmatch(r"full\.[A-Za-z0-9_-]+", which)) or not safe_name(name):
         return None
     try:
         lines = (BOARD_DIR / name / f"{which}.log").read_text(errors="replace").splitlines(keepends=True)

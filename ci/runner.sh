@@ -8,7 +8,8 @@
 #      in the repo's unit-test harness (tests/docker-compose.ven-unit-test.yml);
 #   3. full tier (TIERS contains "full"): run_all_tests.sh --rust --e2e --resilience here;
 #   4. KIND=merge and everything green: fast-forwards origin/main to the tested commit.
-# A change the suites cannot see (docs, .claude/, ci/) runs the audits and the CI mechanism tests only. The verdict goes into the ticket (status, result.md)
+# The full tier runs its suites on lanes: this host plus the hosts in CI_LANE_HOSTS that no session holds
+# (ci/lanes.sh). A change the suites cannot see (docs, .claude/, ci/) runs the audits and the CI mechanism tests only. The verdict goes into the ticket (status, result.md)
 # Nothing here resumes a session: the user does that with ci/ci-next.sh.
 #
 # Installed by ci/install.sh into /srv/ci/bin, so a ticket that changes these very
@@ -24,6 +25,8 @@ PY="$CI_ROOT/venv/bin/python3"; [ -x "$PY" ] || PY=python3
 export BOARD_DIR="${BOARD_DIR:-$CI_ROOT/board}" BOARD_NO_MAIN=1
 # shellcheck source=board.sh
 source "$HERE/board.sh"
+# shellcheck source=lanes.sh
+source "$HERE/lanes.sh"
 
 UNIT_TEST="docker compose -f tests/docker-compose.ven-unit-test.yml"   # the harness's cargo caches are volumes
 MAX_ATTEMPTS=3
@@ -80,7 +83,7 @@ quick_tier() { # $1 = the selected suites (board_suites); the audits and self-te
         run_step "$s" "$PY" "ci/audits/$s.py" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     done
     # The CI mechanism has no other test: a change to it skips the suites, so these always run.
-    for s in test_board test_runner test_handoff test_wait test_deploy test_web; do
+    for s in test_board test_runner test_lanes test_handoff test_wait test_deploy test_web; do
         run_step "ci/$s" bash "ci/$s.sh" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     done
     # Flaky versus red is decided by tests/retry_failed.sh inside the E2E image; its test needs no stack.
@@ -97,32 +100,6 @@ quick_tier() { # $1 = the selected suites (board_suites); the audits and self-te
     run_step "cargo test" $UNIT_TEST run --rm ven-unit-test cargo test --locked --jobs 2 >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     run_step "cargo audit (VEN)" $UNIT_TEST run --rm ven-unit-test cargo audit >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     run_step "cargo audit (BFF)" $UNIT_TEST run --rm -v "$CI_REPO/VTN/bff:/bff:ro" -w /bff ven-unit-test cargo audit >>"$TICKET_DIR/quick.log" 2>&1 || return 1
-}
-
-# suite_flags <suites> - the run_all_tests.sh flags of the full-tier suites among them (cargo is the quick tier's)
-suite_flags() {
-    local s
-    for s in $1; do
-        case "$s" in rust-vtn) echo "--rust" ;; e2e|resilience) echo "--$s" ;; esac
-    done
-}
-
-full_tier() { # $1 = the selected suites
-    local flags; flags="$(suite_flags "$1" | tr '\n' ' ')"
-    [ -n "$flags" ] || return 0
-    run_step "run_all_tests.sh ${flags% }" \
-        env -u DOCKER_HOST OPENADR_LAB_HOST=localhost LOCK_HELD_BY_CALLER=1 \
-        bash run_all_tests.sh $flags >"$TICKET_DIR/full.log" 2>&1
-}
-
-# After a run, leave no test containers behind and the checkout on main, as the lock rules ask.
-tidy_host() {
-    cd "$CI_REPO" || return 0
-    docker ps -aq --filter name=openadr-test | xargs -r docker rm -f >/dev/null 2>&1
-    docker compose -f tests/docker-compose.test.yml down -v >/dev/null 2>&1
-    git rebase --abort >/dev/null 2>&1
-    git reset -q --hard; git clean -fdq
-    git checkout -q main && git reset -q --hard origin/main
 }
 
 push_main() { # $1 = tested sha — fast-forward only
@@ -156,24 +133,25 @@ write_result() { # $1 = ticket
             [ -n "$s" ] || continue
             IFS='|' read -r name rc secs <<<"$s"; echo "| $name | $rc | $secs |"
         done
-        if [ -s "$TICKET_DIR/full.log" ] && grep -q '^FLAKY_SCENARIO:' "$TICKET_DIR/full.log"; then
+        lanes_result_block
+        if cat "$TICKET_DIR"/full*.log 2>/dev/null | grep -q '^FLAKY_SCENARIO:'; then
             echo; echo "## Flaky: failed once, passed on its own retry (look at these)"; echo; echo '```'
-            grep -h '^FLAKY_SCENARIO:' "$TICKET_DIR/full.log" | sort -u
+            cat "$TICKET_DIR"/full*.log | grep -h '^FLAKY_SCENARIO:' | sort -u
             echo '```'
         fi
         if [ -n "$FAILED_STEP" ]; then
             echo; echo "## Failed: $FAILED_STEP"; echo
-            if [ -s "$TICKET_DIR/full.log" ] && grep -q "Failing scenarios" "$TICKET_DIR/full.log" 2>/dev/null; then
-                echo '```'; grep -A40 "Failing scenarios" "$TICKET_DIR/full.log" | head -50; echo '```'
+            if cat "$TICKET_DIR"/full*.log 2>/dev/null | grep -q "Failing scenarios"; then
+                echo '```'; cat "$TICKET_DIR"/full*.log | grep -A40 "Failing scenarios" | head -50; echo '```'
             else
                 echo '```'
-                for f in quick.log full.log; do
+                for f in quick.log full*.log; do
                     [ -s "$TICKET_DIR/$f" ] && { echo "--- $f (last lines)"; tail -n 40 "$TICKET_DIR/$f" | cut -c1-240; }
                 done
                 echo '```'
             fi
         fi
-        echo; echo "Logs: $TICKET_DIR/{run,quick,full}.log on Node3"
+        echo; echo "Logs: $TICKET_DIR/{run,quick,full}.log (and full.<host>.log per extra lane) on Node3"
     } > "$TICKET_DIR/result.md.tmp" && mv "$TICKET_DIR/result.md.tmp" "$TICKET_DIR/result.md"
 }
 
@@ -239,10 +217,11 @@ deploy_flow() { # $1 = ticket
 
 process_ticket() {
     local t="$1" attempt rc
-    TICKET_DIR="$BOARD_DIR/$t"; STEPS=(); FAILED_STEP=""; VERDICT=""; NOTE=""; TESTED_SHA=""; unset CHANGED_WHY; SUITES_RUN=""; SUITES_SKIPPED=""; SUITES_UNRUN=""
+    TICKET_DIR="$BOARD_DIR/$t"; TICKET_NAME="$t"; STEPS=(); FAILED_STEP=""; VERDICT=""; NOTE=""; TESTED_SHA=""; unset CHANGED_WHY; SUITES_RUN=""; SUITES_SKIPPED=""; SUITES_UNRUN=""
     BRANCH="$(board_get "$t" BRANCH)"; SHA="$(board_get "$t" SHA)"
     TIERS="$(board_get "$t" TIERS)"; KIND="$(board_get "$t" KIND)"
     TIERS="${TIERS:-quick,full}"; KIND="${KIND:-merge}"
+    rm -f "$TICKET_DIR/lanes" "$TICKET_DIR"/lane.*   # a retry starts without the last attempt's lanes
     attempt=$(board_bump_attempt "$t")
     board_set_status "$t" running
     exec 8>>"$TICKET_DIR/run.log"

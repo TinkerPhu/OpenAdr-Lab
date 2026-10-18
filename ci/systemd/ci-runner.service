@@ -6,6 +6,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=@USER@
+# CI_HOME_NAME and CI_LANE_HOSTS (see ci/README.md); the file is optional
+EnvironmentFile=-/srv/ci/runner.env
 ExecStart=/srv/ci/bin/ci/runner.sh
 # A full suite takes about an hour; leave room for a cold toolchain build and a retry.
 TimeoutStartSec=5h
