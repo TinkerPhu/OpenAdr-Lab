@@ -116,7 +116,8 @@ lane_run_suite() {
     echo "start $h $s" >> "$CALLS"
     [ "$nap" -eq 0 ] || sleep "$nap"
     echo "=== $s on $h" >> "$log"
-    [ "$rc" -ne 0 ] || echo "  PASS  $s" >> "$log"
+    [ "$rc" -ne 0 ] || printf '  [0;32mPASS[0m  %s
+' "$s" >> "$log"
     echo "end $h $s $rc" >> "$CALLS"
     return "$rc"
 }

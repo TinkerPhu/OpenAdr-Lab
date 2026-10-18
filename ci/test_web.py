@@ -141,6 +141,17 @@ class WebApi(unittest.TestCase):
                          t["lanes"])
         self.assertEqual([{"host": "Node1", "why": "load 3.1, 900 MB free"}], t["lanes_skipped"])
 
+    def test_nodes_are_where_the_work_is_now(self):
+        two = "20261017T0702Z_09fb9c63_nodes-two"
+        make_ticket(self.board, two, "running", extra={"lanes": "Node3|e2e|ok|900|\nNode2|resilience|running||\n"})
+        one = "20261017T0703Z_09fb9c63_nodes-home"
+        make_ticket(self.board, one, "running")
+        done = "20261017T0704Z_09fb9c63_nodes-done"
+        make_ticket(self.board, done, "red", extra={"lanes": "Node3|e2e|running||\n"})
+        self.assertEqual(["Node2"], ci_web.read_ticket(two)["nodes"])
+        self.assertEqual([ci_web.HOME_NAME], ci_web.read_ticket(one)["nodes"])
+        self.assertEqual([], ci_web.read_ticket(done)["nodes"])
+
     def test_a_ticket_without_lanes_has_none(self):
         name = "20261017T0701Z_09fb9c63_fix-nolanes"
         make_ticket(self.board, name, "red")
