@@ -25,7 +25,11 @@ sudo install -d -o "$ME" -g "$(id -gn)" "$CI_ROOT" "$CI_ROOT/board" "$CI_ROOT/ar
 rm -rf "$CI_ROOT/bin/ci.new" && mkdir -p "$CI_ROOT/bin/ci.new"
 cp -r "$ROOT/ci/." "$CI_ROOT/bin/ci.new/"
 find "$CI_ROOT/bin/ci.new" -name __pycache__ -prune -exec rm -rf {} +
-rm -rf "$CI_ROOT/bin/ci.old" && { [ ! -d "$CI_ROOT/bin/ci" ] || mv "$CI_ROOT/bin/ci" "$CI_ROOT/bin/ci.old"; }
+# A leftover ci.old that cannot be removed (root-owned from an install run under sudo) would make the
+# next mv put the new tree INSIDE the old one: stop instead.
+rm -rf "$CI_ROOT/bin/ci.old"
+[ ! -e "$CI_ROOT/bin/ci.old" ] || { echo "install: cannot remove $CI_ROOT/bin/ci.old (owned by root? run install.sh as $ME, not with sudo)" >&2; exit 1; }
+[ ! -d "$CI_ROOT/bin/ci" ] || mv "$CI_ROOT/bin/ci" "$CI_ROOT/bin/ci.old"
 mv "$CI_ROOT/bin/ci.new" "$CI_ROOT/bin/ci"
 
 for unit in ci-runner.service ci-web.service; do
