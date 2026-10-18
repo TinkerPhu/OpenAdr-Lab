@@ -6,3 +6,5 @@ VEN/tests/fixtures/*.json text eol=lf
 VEN/ui/src/api/generated/** text eol=lf
 # Two branches each append a journal entry, which conflicts on every rebase; keep both sides.
 docs/history/project_journal.md merge=union
+# ci/suites.map is read by bash on the CI host; a CRLF checkout turns every suite name into "all".
+ci/suites.map text eol=lf
