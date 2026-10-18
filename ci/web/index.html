@@ -77,7 +77,7 @@ button, select { background: var(--panel); color: var(--text); border: 1px solid
     <h2>Tickets <button id="clearall" hidden title="Move every finished ticket to the archive">clear all finished</button></h2>
     <div class="tablewrap">
     <table>
-      <thead><tr><th>Status</th><th>Branch</th><th>Queued (local)</th><th>Started</th><th>Duration</th><th>ETA finish</th><th>Step / note</th><th>Done</th><th></th></tr></thead>
+      <thead><tr><th>Status</th><th>Branch</th><th>Node</th><th>Queued (local)</th><th>Started</th><th>Duration</th><th>ETA finish</th><th>Step / note</th><th>Done</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
     </div>
@@ -132,7 +132,7 @@ function renderRows() {
   $("clearall").hidden = !clearEnabled;
   $("rows").innerHTML = tickets.filter(recent).map(t => `
     <tr data-n="${esc(t.name)}">
-      <td>${badge(t.status)}</td><td>${esc(t.branch)}</td><td>${hm(t.created)}</td>
+      <td>${badge(t.status)}</td><td>${esc(t.branch)}</td><td>${esc((t.nodes || []).join(" "))}</td><td>${hm(t.created)}</td>
       <td>${hm(t.started)}</td><td>${t.status === "running" && t.started ? dur((Date.now() - dt(t.started)) / 1000) + " so far" : dur(t.duration_s)}</td>
       <td>${etaCell(t)}</td>
       <td>${esc(t.status === "running" ? t.current_step || "starting" : t.note || "")} ${suiteChips(t)}</td>

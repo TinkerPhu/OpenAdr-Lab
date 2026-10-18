@@ -179,6 +179,8 @@ lane_close() {
 
 # run_lane <host> <rows file> <suites...> - rows: "suite|exit|seconds|kind|why", kind ok, test or
 # infra. A suite that reports no PASS (skipped, host unreachable) is not a pass.
+# run_all_tests.sh colours its verdict lines: ESC[0;32mPASS ESC[0m then two spaces.
+LANE_PASS_RE=$'PASS(\[[0-9;]*m)?  '
 run_lane() {
     local h="$1" rows="$2" s t0 rc kind why before log; shift 2
     : > "$rows"
@@ -191,14 +193,14 @@ run_lane() {
         LANE_HB=$!
     fi
     for s in "$@"; do
-        before="$(grep -c 'PASS  ' "$log" 2>/dev/null)"; before="${before:-0}"
+        before="$(grep -cE "$LANE_PASS_RE" "$log" 2>/dev/null)"; before="${before:-0}"
         t0=$(date +%s); why=""
         lane_run_suite "$h" "$s" "$log"; rc=$?
         kind=ok
         if [ "$rc" -ne 0 ]; then
             case "$rc" in 3) kind=infra; why="pre-flight: capacity" ;; 4) kind=infra; why="pre-flight: checkout incomplete" ;;
                           5) kind=infra; why="pre-flight: compose" ;; 255) kind=infra; why="ssh failed" ;; *) kind=test ;; esac
-        elif [ "$(grep -c 'PASS  ' "$log" 2>/dev/null)" -le "$before" ]; then
+        elif [ "$(grep -cE "$LANE_PASS_RE" "$log" 2>/dev/null)" -le "$before" ]; then
             kind=infra; why="no result (skipped or unreachable)"
         fi
         echo "$s|$rc|$(( $(date +%s) - t0 ))|$kind|$why" >> "$rows"

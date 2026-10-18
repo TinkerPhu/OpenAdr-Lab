@@ -37,6 +37,7 @@ OVERDUE_FLOOR_S = 60
 # without one the board stays read-only. Merged/deployed tickets leave by themselves after
 # CI_WEB_KEEP_MERGED_H hours (0 = never); anything else stays until someone clears it.
 ARCHIVE_DIR = Path(os.environ.get("ARCHIVE_DIR", str(BOARD_DIR.parent / "archive")))
+HOME_NAME = os.environ.get("CI_HOME_NAME", "Node3")   # the runner's own host: where a ticket without lanes runs
 TOKEN = os.environ.get("CI_WEB_TOKEN", "")
 KEEP_MERGED_H = float(os.environ.get("CI_WEB_KEEP_MERGED_H", "24"))
 SWEEP_EVERY_S = 600
@@ -195,6 +196,7 @@ def read_ticket(name):
         "note": result["note"], "steps": result["steps"],
         "suites_run": result["suites_run"], "suites_skipped": result["suites_skipped"],
         "lanes": lanes, "lanes_skipped": lanes_skipped,
+        "nodes": ([l["host"] for l in lanes if l["state"] == "running"] or [HOME_NAME]) if running else [],
         "class": step_class(result["steps"]) if result["steps"] else planned_class(req),
         "current_step": step if running else None,
         "current_step_since": iso(since) if running else None,
