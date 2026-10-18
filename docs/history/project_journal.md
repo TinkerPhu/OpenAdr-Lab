@@ -16432,3 +16432,23 @@ single-file bind mount and a pull replaces the file the container still holds. `
 Node1` passes all six probes (the BFF commands ven-1's objective; ven-1 can neither publish as nor
 read ven-2, nor command it; the BFF still cannot publish into the fleet), and all twenty VENs were
 publishing telemetry again within the minute.
+## CI: the full tier on lanes (refactor/ci-parallel-lanes)
+
+**What.** `ci/lanes.sh` (sourced by `runner.sh`) runs the selected full-tier suites on several docker hosts at once:
+the runner's own host plus the hosts in `CI_LANE_HOSTS` (lab: `Node2 Node1`) that no session holds. Extra hosts are
+taken with the sessions' lease lock, once and without waiting; the tested commit reaches them as `refs/ci/<ticket>`;
+suites are spread longest first by the median per suite and host (`board_suite_seconds`); the first suite that fails a
+test cancels the other lanes (they are tidied and unlocked first); a lane that fails the infrastructure has its suites
+rerun on the home host. `result.md` and the board show a Lanes block. `run_all_tests.sh` gained
+`TREE_PREPARED_BY_CALLER=1`. Tests: `ci/test_lanes.sh`, `ci/test_web.py`.
+
+**Why.** A full tier was 81 minutes on one host while two others idled, and E2E and resilience cannot share a host
+(one compose project), so the host is the unit of parallelism. Using the sessions' lock means a lane never fights a
+session for a host, and a runner that dies frees its hosts within the 45-minute lease.
+
+**Issues.** `ssh` inside a script read from stdin (`bash -s`) swallows the rest of the script: `lane_sh` uses `ssh -n`.
+`kill -0` on a finished-but-unreaped job is true, so lane completion is a `.done` file, not a pid check. A heartbeat
+`( while sleep N ... ) &` leaves an orphaned `sleep` that holds a pipe open for N seconds after it is killed: the
+heartbeat traps TERM and kills its own sleep. The home lane's tree must not be tidied while a remote lane still runs
+`run_all_tests.sh` from it (bash reads a script as it goes), so the home job removes containers only and the ticket
+returns the checkout to `main` last.

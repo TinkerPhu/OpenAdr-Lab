@@ -33,9 +33,10 @@ No logic is copied; the only new concepts are lane planning and lane preparation
 
 ## Decisions
 
-**D1 Lanes and order.** One lane per docker host, in the priority order of `CI_LANE_HOSTS` (default `localhost`, so a
-fresh clone has one lane; our lab: `Node3 Node2 Node1` in `/srv/ci/runner.env`, which `ci-runner.service` reads through
-`EnvironmentFile=-`). All hosts use the same `ci/locks/docker_host_lock.sh` and the same lock path, Node3 included; a
+**D1 Lanes and order.** One lane per docker host: the runner's own host (named by `CI_HOME_NAME`, default its hostname;
+lab: `Node3`) is always lane 1 and `CI_LANE_HOSTS` lists the others in priority order (default empty, so a fresh clone has
+one lane; lab: `CI_HOME_NAME=Node3`, `CI_LANE_HOSTS="Node2 Node1"` in `/srv/ci/runner.env`, which `ci-runner.service`
+reads through `EnvironmentFile=-`), giving the priority Node3, Node2, Node1. All hosts use the same `ci/locks/docker_host_lock.sh` and the same lock path, Node3 included; a
 session locks Node3 with `LOCK_HOST=Node3` exactly like Node2 (checked 2026-10-18: `status` answers on all three). Node3
 differs only in that the runner lives there: its lock is taken first and for the whole ticket (the quick tier and the merge
 need Node3's docker and checkout anyway), so it is always lane 1; if a session holds it, the ticket is requeued as today.
