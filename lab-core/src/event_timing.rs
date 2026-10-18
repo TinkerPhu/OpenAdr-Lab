@@ -87,7 +87,7 @@ pub fn numeric_value(value: &openleadr_wire::values_map::Value) -> Option<f64> {
 /// indefinitely repeating tariff cannot be materialised; expansion stops here.
 /// 2000 intervals covers any horizon this VEN reads -- the 288-slot 5-minute
 /// grid several times over -- and the planner only looks inside its own horizon.
-const MAX_LOOPED_INTERVALS: usize = 2000;
+pub const MAX_LOOPED_INTERVALS: usize = 2000;
 
 /// Every interval of `event`, in order, with its absolute `[start, end)`.
 ///
@@ -236,7 +236,10 @@ pub fn with_randomized_start(event: &OadrEvent, seed: &str) -> OadrEvent {
 }
 
 /// The interval list exactly as the event declares it, before any looping.
-fn base_intervals(event: &OadrEvent) -> Vec<TimedInterval<'_>> {
+///
+/// Public for the signal workbench, which edits the *pattern* of a repeating event and so needs
+/// the declared intervals timed by this one rule, not an expansion of them.
+pub fn base_intervals(event: &OadrEvent) -> Vec<TimedInterval<'_>> {
     let event_period = event.content.interval_period.as_ref();
     let default_duration = event_period.and_then(|p| p.duration.as_ref());
     // Where the next interval starts unless it says otherwise.

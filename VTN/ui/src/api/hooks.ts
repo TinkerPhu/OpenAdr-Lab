@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useBffContext } from "./bffContext";
 import type { EventInput, ProgramInput } from "./types";
 import { debugLog } from "@lab/ui/debugLog";
+import { buildSignalRegistry } from "../utils/signalRegistry";
 
 export function useHealth() {
   const { api } = useBffContext();
@@ -57,12 +58,46 @@ export function useFleetReactions(eventId: string) {
 }
 
 /** The signal bands over the same window the power chart is drawing. */
-export function useFleetSignals(minutes: number) {
+export function useFleetSignals(minutes: number, aheadMinutes = 0) {
   const { api } = useBffContext();
   return useQuery({
-    queryKey: ["fleet", "signals", minutes],
-    queryFn: () => api.fleetSignals(new Date(Date.now() - minutes * 60_000).toISOString()),
+    queryKey: ["fleet", "signals", minutes, aheadMinutes],
+    queryFn: () =>
+      api.fleetSignals(
+        new Date(Date.now() - minutes * 60_000).toISOString(),
+        // Without `to` the BFF stops at now; a tariff workbench also wants what is announced ahead.
+        aheadMinutes > 0 ? new Date(Date.now() + aheadMinutes * 60_000).toISOString() : undefined,
+      ),
     refetchInterval: 30_000,
+  });
+}
+
+/** An event's declared intervals, timed but not repeated: what the workbench loads into a draft. */
+export function useEventPattern() {
+  const { api } = useBffContext();
+  return useMutation({ mutationFn: (event: unknown) => api.eventPattern(event) });
+}
+
+/** A draft event as receivers expand it. Disabled while there is no valid draft to send. */
+export function useSignalPreview(event: unknown | null, fromIso: string, toIso: string) {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["signals", "preview", JSON.stringify(event), fromIso, toIso],
+    queryFn: () => api.signalPreview(event, fromIso, toIso),
+    enabled: event !== null,
+    // The previous preview stays on screen while the next one is computed.
+    placeholderData: (previous) => previous,
+  });
+}
+
+/** The signal types the workbench can edit, with the units the wire profile declares. */
+export function useSignalRegistry() {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["signals", "registry"],
+    queryFn: async () => buildSignalRegistry(await api.signalRegistry()),
+    // Compiled into the BFF; it changes only with a deploy.
+    staleTime: Infinity,
   });
 }
 

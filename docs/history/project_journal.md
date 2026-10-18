@@ -16150,3 +16150,36 @@ not merged. Without a token the board stays read-only. Tests: `ci/test_web.py`.
 **Why.** Only a person knows when a red ticket stopped mattering; the token keeps a LAN-readable page from
 becoming a LAN-writable one. The archive is the answer to "what happens to old tickets" that `install.sh` had
 promised and nothing implemented.
+## Tariff editor: a signal workbench in the VTN UI (2026-10-18)
+
+**What.** A **Tariff** page (`/tariff`) loads a tariff event into a draft, edits it in a grid (paste,
+fill-down, set selection), draws it solid beside the live dashed tariff and the fleet's power on one
+look-ahead axis, and publishes it as a new, higher-priority event. The most common declaration, one day of
+prices repeating forever (`event.duration = P9999Y`), is a first-class choice (once / for a span /
+forever) written and read only through `event.duration`. Everything signal-specific is a registry row, so
+GHG and the capacity envelope are rows later, not new pages. Two BFF routes (`/api/signals/registry`,
+`/api/signals/preview`) answer from `lab-core`: units from `EVENT_QUANTITIES`, repetition from
+`timed_intervals`, a stored event's declared pattern from `base_intervals`. UI: `utils/signalDraft.ts`
+(the one draft every input mode edits), `recurrence.ts`, `signalRegistry.ts`, `TariffGrid`,
+`RecurrenceControl`, `PublishDialog`, `pages/Tariff.tsx`.
+
+**Why.** Changing a price meant editing JSON or re-seeding, and then reading the fleet's response in another
+page. The tariff the lab runs on repeats forever, which the Events form cannot even author (R-145).
+
+**Issues.**
+- The first design kept unit text in the UI. Doing the search first (task 1.1) found the PRICE→KWH/EUR
+  table already in two places (`wire_contract.rs`, `seed_vtn.py`); a TypeScript copy would have been a third,
+  so the BFF serves it from the Rust table, now a public `EVENT_QUANTITIES` that `event_quantity_of` reads.
+  The seed script's copy stays and is filed (R-144).
+- Loading a foreign event needs "when does interval i run" for intervals that omit a start or duration.
+  Rather than port that rule, `base_intervals` was made public and `pattern: true` returns it.
+- The "expansion truncated" warning first fired for every forever series, because 2000 intervals is only
+  83 days of hourly ones and the cap is always reached. It now fires only when the cap falls inside the
+  asked-for window. Found by the first preview test, not by reading.
+- A repeating series repeats by elapsed time, so across a clock change it is an hour off local midnight.
+  Not fixable on the wire; the page shows the shifted preview and says so.
+- Dropping the 4 new route lines into `main()` failed the duplication ratchet (134→138 lines); the route
+  table moved into `api_routes()`.
+- The live-power chart is actual telemetry, not the fleet's plan: the VTN has no view of VEN plans, so the
+  "before/after" comparison and a true dry run are left to the follow-up change `tariff-editor-compare-and-chart`.
+

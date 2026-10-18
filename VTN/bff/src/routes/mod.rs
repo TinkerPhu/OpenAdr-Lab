@@ -4,6 +4,7 @@ pub mod health;
 pub mod metrics;
 pub mod programs;
 pub mod reports;
+pub mod signals;
 pub mod vens;
 
 use axum::http::HeaderMap;

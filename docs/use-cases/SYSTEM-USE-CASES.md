@@ -318,6 +318,29 @@ A VTN asks many VENs to respond to one event but does not want them all to act o
 
 ---
 
+## 13. Editing the Tariff and Watching the Fleet
+**Description:**
+An operator changes the price schedule the fleet is told about and wants to see what the fleet does with it, without writing JSON or re-seeding the lab. The VTN UI's **Tariff** page loads an existing tariff event into a draft, lets the operator edit it, shows it beside the live tariff and the fleet's power, and publishes it.
+
+**Characteristics:**
+- The most common declaration is *one day of prices that repeats forever*: the intervals are sent once and `event.duration = "P9999Y"` repeats them. `P7D` repeats for a week; a duration shorter than the day drops the surplus intervals.
+- The editor writes the recurrence only through `event.duration`, never a private field.
+- Publishing creates a new event with a higher priority than the ones carrying the same signal; existing events are left unchanged.
+- Every published price declares its unit and currency (`payloadDescriptors`).
+- A repeating series repeats by elapsed time, so across a clock change it no longer follows local midnight; the page says so.
+
+**Typical Signals:**
+- `PRICE`, `EXPORT_PRICE` (later `GHG` and capacity envelopes use the same workbench)
+
+**What to test:**
+- The wire profile declares `PRICE` as per-kWh in EUR (`GET /api/signals/registry`)
+- A draft that repeats forever previews as repeating, resolved by the interval rule the VEN uses
+- A tariff published with a recurrence is in force on the second day on the VEN
+- A stored repeating tariff loads as its 24-interval pattern, not as an expansion
+- `tests/features/tariff_editor.feature`; the unit behaviour is in `VTN/ui/src/__tests__/signalDraft.test.ts`, `recurrence.test.ts` and `Tariff.test.tsx`
+
+---
+
 ## Notes
 If the system can reliably handle all use cases above, it already matches the majority of real-world OpenADR deployments. More complex scenarios (stacked markets, transactive energy, multi-program arbitration) typically build on these fundamentals.
 

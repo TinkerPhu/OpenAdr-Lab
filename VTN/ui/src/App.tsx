@@ -11,6 +11,7 @@ import { EventsPage } from "./pages/Events";
 import { VensPage } from "./pages/Vens";
 import { FleetPage } from "./pages/Fleet";
 import { SignalsPage } from "./pages/Signals";
+import { TariffPage } from "./pages/Tariff";
 import { ReportsPage } from "./pages/Reports";
 import { MetricsPage } from "./pages/Metrics";
 import { debugLog } from "@lab/ui/debugLog";
@@ -89,6 +90,9 @@ export default function App() {
             <Button component={Link} to="/signals" data-testid="nav-signals">
               Signals
             </Button>
+            <Button component={Link} to="/tariff" data-testid="nav-tariff">
+              Tariff
+            </Button>
             <Button component={Link} to="/reports" data-testid="nav-reports">
               Reports
             </Button>
@@ -104,6 +108,7 @@ export default function App() {
             <Route path="/vens" element={<VensPage />} />
             <Route path="/fleet" element={<FleetPage />} />
             <Route path="/signals" element={<SignalsPage />} />
+            <Route path="/tariff" element={<TariffPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/metrics" element={<MetricsPage />} />
           </Routes>

@@ -118,6 +118,23 @@ is what lets it read and delete reports across the fleet. A report carries `even
 object link — 3.1 removed `programID` — and `clientID`, which the VTN fills in from the token, so
 a report always identifies the VEN that submitted it.
 
+### Signal workbench routes
+
+The VTN UI's Tariff page (`/tariff`) edits a signal as a draft and publishes it as an event. Two
+BFF routes serve it, both thin over `lab-core` so the UI holds no copy of a rule:
+
+| Route | Answers | Source of truth |
+|---|---|---|
+| `GET /api/signals/registry` | each payload type's `units` and `currency` | `lab_core::wire_contract::EVENT_QUANTITIES`, the table the VEN resolves against |
+| `POST /api/signals/preview` | a draft event expanded over `[from, to)` as receivers expand it, plus `truncated` when the 2000-interval expansion cap falls inside the window | `lab_core::event_timing::timed_intervals` |
+| `POST /api/signals/preview` with `pattern: true` | a stored event's declared intervals, timed but not repeated | `lab_core::event_timing::base_intervals` |
+
+Logic is in `VTN/bff/src/signal_workbench.rs`. A recurrence is only `event.duration` (`P9999Y` =
+forever); the UI maps it to once / span / forever in `VTN/ui/src/utils/recurrence.ts`. Repetition is by
+fixed elapsed time, so it does not follow local clock time across a daylight-saving change. Nothing
+here publishes: the UI posts the finished event to `/api/events`. Tests:
+`VTN/bff/src/signal_workbench.rs` (`mod tests`), `tests/features/tariff_editor.feature`.
+
 ---
 
 ## 4. OpenADR Message Sequences

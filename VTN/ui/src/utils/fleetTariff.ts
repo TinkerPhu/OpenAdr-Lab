@@ -17,6 +17,9 @@ import { compareVenNames } from "./venOrder";
 /** Series keys, which are also the legend labels. */
 export const IMPORT_KEY = "Import tariff";
 export const EXPORT_KEY = "Export tariff";
+/** The signal workbench's unpublished draft, drawn beside the live tariff. */
+export const DRAFT_IMPORT_KEY = "Import tariff (draft)";
+export const DRAFT_EXPORT_KEY = "Export tariff (draft)";
 
 const PRICE_TYPES = new Set(["PRICE", "EXPORT_PRICE"]);
 
@@ -105,18 +108,26 @@ export function tariffRows(
   bands: SignalBand[],
   tMin: number,
   tMax: number,
+  draftBands: SignalBand[] = [],
 ): TimestampedRow[] {
-  if (bands.length === 0) return [];
+  if (bands.length === 0 && draftBands.length === 0) return [];
 
-  const samples: NamedSample[] = bands.map((b) => ({
-    ts: Date.parse(b.from),
-    key: b.payloadType === "PRICE" ? IMPORT_KEY : EXPORT_KEY,
-    value: b.value as number,
-  }));
+  // A draft rides in the same rows under its own keys, for the same reason import and
+  // export share one array: the tooltip resolves by index.
+  const toSamples = (bs: SignalBand[], importKey: string, exportKey: string): NamedSample[] =>
+    bs.map((b) => ({
+      ts: Date.parse(b.from),
+      key: b.payloadType === "PRICE" ? importKey : exportKey,
+      value: b.value as number,
+    }));
+  const samples = [
+    ...toSamples(bands, IMPORT_KEY, EXPORT_KEY),
+    ...toSamples(draftBands, DRAFT_IMPORT_KEY, DRAFT_EXPORT_KEY),
+  ];
 
   const merged = mergeTimestampedSeries([{ ts: tMax, values: {} }], samples);
   // Fill before clipping, so the row clipping pins to tMin carries both series
   // even when import and export were announced on different timestamps.
-  const filled = locfFillKeys(merged, [IMPORT_KEY, EXPORT_KEY]);
+  const filled = locfFillKeys(merged, [IMPORT_KEY, EXPORT_KEY, DRAFT_IMPORT_KEY, DRAFT_EXPORT_KEY]);
   return clipRowsToWindow(filled, tMin, tMax);
 }

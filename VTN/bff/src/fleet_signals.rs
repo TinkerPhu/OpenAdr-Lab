@@ -48,6 +48,19 @@ pub struct SignalBand {
 // around a type's own encapsulation for. When overlapping events need ranking
 // here, the accessor belongs upstream.
 
+/// The reader every band is valued through: what each event and its program declare, plus the
+/// profile default (GB-50). A failed program listing costs the program tier, not the bands.
+pub async fn payload_reader(business: &crate::vtn_client::VtnClient) -> PayloadReader {
+    let programs = business
+        .get_all_pages("/programs", None)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "could not list programs; reading without them");
+            Vec::new()
+        });
+    PayloadReader::from_program_rows(&programs)
+}
+
 /// Does this VEN match the object's target list?
 ///
 /// An empty list means "every VEN" in OpenADR 3.1 — not "no VEN", which is the

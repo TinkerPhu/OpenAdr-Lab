@@ -6,8 +6,15 @@ import { tightSpanDomain, MIN_TARIFF_SPAN_EUR_KWH } from "@lab/ui/axisDomain";
 import { EmptyState } from "@lab/ui/EmptyState";
 import { CELL_CHART_HEIGHT } from "@lab/ui/chartLayout";
 import { COLOR_IMPORT_TARIFF, COLOR_EXPORT_TARIFF, TARIFF_LINE_STYLE } from "@lab/ui/types";
-import type { FleetSignals } from "../api/types";
-import { sharedTariff, tariffRows, IMPORT_KEY, EXPORT_KEY } from "../utils/fleetTariff";
+import type { FleetSignals, SignalBand } from "../api/types";
+import {
+  sharedTariff,
+  tariffRows,
+  IMPORT_KEY,
+  EXPORT_KEY,
+  DRAFT_IMPORT_KEY,
+  DRAFT_EXPORT_KEY,
+} from "../utils/fleetTariff";
 import {
   fleetChartWindow,
   fleetChartTicks,
@@ -41,14 +48,21 @@ export function FleetTariffChart({
   windowMinutes,
   tickMinutes,
   nowMs,
+  aheadMinutes = 0,
+  draftBands = [],
 }: {
   signals?: FleetSignals;
   windowMinutes: number;
   /** Tick spacing, chosen per window by the page so both charts agree. */
   tickMinutes: number;
   nowMs: number;
+  /** Minutes past now the axis runs. The Fleet page looks back only; the tariff workbench
+   *  looks ahead, because the interesting part of a tariff is the part that has not happened. */
+  aheadMinutes?: number;
+  /** An unpublished tariff (the signal workbench's draft), drawn solid beside the live one. */
+  draftBands?: SignalBand[];
 }) {
-  const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes);
+  const { tMin, tMax } = fleetChartWindow(nowMs, windowMinutes, aheadMinutes);
   const ticks = fleetChartTicks(tMin, tMax, tickMinutes);
 
   // Memoised: one React element plus one DOM rect per band, rebuilt on every
@@ -66,13 +80,13 @@ export function FleetTariffChart({
 
   const { rows, values, agreeingVens, dissentingVens, knownVens } = useMemo(() => {
     const shared = sharedTariff(signals);
-    const rows = tariffRows(shared.bands, tMin, tMax);
+    const rows = tariffRows(shared.bands, tMin, tMax, draftBands);
     return {
       rows,
       values: rows.flatMap((row) => Object.values(row.values ?? {})),
       ...shared,
     };
-  }, [signals, tMin, tMax]);
+  }, [signals, tMin, tMax, draftBands]);
 
   const series: TimeSeriesSeriesSpec[] = [
     {
@@ -92,6 +106,24 @@ export function FleetTariffChart({
       color: COLOR_EXPORT_TARIFF,
       ...TARIFF_LINE_STYLE,
     },
+    // The draft is solid where the live tariff is dashed, so the two read apart even
+    // where they share a colour and a value.
+    ...(draftBands.length > 0
+      ? [
+          { key: DRAFT_IMPORT_KEY, color: COLOR_IMPORT_TARIFF },
+          { key: DRAFT_EXPORT_KEY, color: COLOR_EXPORT_TARIFF },
+        ].map(
+          ({ key, color }): TimeSeriesSeriesSpec => ({
+            key,
+            axisId: AXIS_ID,
+            dataKey: (row) => row.values?.[key] ?? null,
+            color,
+            strokeWidth: 2.5,
+            connectNulls: TARIFF_LINE_STYLE.connectNulls,
+            formatter: TARIFF_LINE_STYLE.formatter,
+          }),
+        )
+      : []),
   ];
 
   if (rows.length === 0) {

@@ -27,8 +27,10 @@ import { roundedTimeTicks } from "@lab/ui/axisDomain";
 export function fleetChartWindow(
   nowMs: number,
   windowMinutes: number,
+  /** Minutes past now. Zero for the Fleet page; the tariff workbench looks ahead. */
+  aheadMinutes = 0,
 ): { tMin: number; tMax: number } {
-  return { tMin: nowMs - windowMinutes * 60_000, tMax: nowMs };
+  return { tMin: nowMs - windowMinutes * 60_000, tMax: nowMs + aheadMinutes * 60_000 };
 }
 
 /**

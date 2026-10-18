@@ -1,4 +1,4 @@
-import type { EventInput, FleetHistory, FleetLive, FleetReactions, FleetSignals, HealthStatus, Program, ProgramInput, Report, VtnEvent, Ven } from "./types";
+import type { EventInput, FleetHistory, FleetLive, FleetReactions, FleetSignals, HealthStatus, Program, PatternInterval, ProgramInput, Report, SignalPreview, VtnEvent, Ven, WireSignalFacts } from "./types";
 import { debugLog } from "@lab/ui/debugLog";
 
 let reqCounter = 0;
@@ -83,6 +83,26 @@ export class BffApi {
     const to = toIso ? `&to=${encodeURIComponent(toIso)}` : "";
     const r = await this.getReq(`/api/fleet/signals?from=${encodeURIComponent(fromIso)}${to}`);
     if (!r.ok) throw new Error(`fleet signals ${r.status}`);
+    return r.json();
+  }
+
+  async signalRegistry(): Promise<WireSignalFacts[]> {
+    const r = await this.getReq("/api/signals/registry");
+    if (!r.ok) throw new Error(`signal registry ${r.status}`);
+    return r.json();
+  }
+
+  /** The event's declared intervals, timed by the shared rule and not repeated. */
+  async eventPattern(event: unknown): Promise<PatternInterval[]> {
+    const r = await this.jsonReq("POST", "/api/signals/preview", { event, pattern: true });
+    if (!r.ok) throw new Error(`event pattern ${r.status}`);
+    return (await r.json()).pattern;
+  }
+
+  /** A draft event expanded the way receivers expand it, over [from, to). */
+  async signalPreview(event: unknown, fromIso: string, toIso: string): Promise<SignalPreview> {
+    const r = await this.jsonReq("POST", "/api/signals/preview", { event, from: fromIso, to: toIso });
+    if (!r.ok) throw new Error(`signal preview ${r.status}`);
     return r.json();
   }
 

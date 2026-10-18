@@ -194,6 +194,28 @@ export type ProgramInput = {
   targets?: Targets | null;
 };
 
+/** `GET /api/signals/registry`: what a number of this payload type means on the wire. */
+export type WireSignalFacts = {
+  payloadType: string;
+  units: string | null;
+  currency: string | null;
+};
+
+/** One declared interval of an event, timed but not repeated (`POST /api/signals/preview`, `pattern`). */
+export type PatternInterval = {
+  start: string;
+  end: string;
+  payloads: { type: string; value: number | null }[];
+};
+
+/** A draft event expanded the way receivers expand it (`POST /api/signals/preview`). */
+export type SignalPreview = {
+  bands: SignalBand[];
+  /** The receivers' expansion cap falls inside the asked-for window. */
+  truncated: boolean;
+  maxLoopedIntervals: number;
+};
+
 export type EventInput = {
   programID: string;
   eventName: string;
@@ -202,6 +224,14 @@ export type EventInput = {
   intervalPeriod?: IntervalPeriod | null;
   targets?: Targets | null;
   intervals?: unknown[];
+  /** What each payload type's numbers mean (`wire-contracts`). */
+  payloadDescriptors?: EventPayloadDescriptor[];
+};
+
+export type EventPayloadDescriptor = {
+  payloadType: string;
+  units?: string | null;
+  currency?: string | null;
 };
 
 export type Report = {
