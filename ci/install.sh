@@ -32,6 +32,12 @@ for unit in ci-runner.service ci-web.service; do
     sed "s/@USER@/$ME/" "$ROOT/ci/systemd/$unit" | sudo tee "/etc/systemd/system/$unit" >/dev/null
 done
 sudo install -m 0644 "$ROOT/ci/systemd/ci-runner.timer" /etc/systemd/system/ci-runner.timer
+# The board's clear buttons need a token; generated once, kept in a root-readable-by-us file.
+if [ ! -f "$CI_ROOT/web.env" ]; then
+    ( umask 077; printf 'CI_WEB_TOKEN=%s
+' "$(head -c 24 /dev/urandom | base64 | tr -d '/+=')" > "$CI_ROOT/web.env" )
+    echo "board token written to $CI_ROOT/web.env (ssh in and read it once to use the clear buttons)"
+fi
 sudo systemctl daemon-reload
 sudo systemctl enable --now ci-runner.timer ci-web.service
 sudo systemctl restart ci-web.service

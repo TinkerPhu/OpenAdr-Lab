@@ -4,7 +4,9 @@ After=network-online.target
 
 [Service]
 User=@USER@
-Environment=BOARD_DIR=/srv/ci/board CI_WEB_PORT=8480
+Environment=BOARD_DIR=/srv/ci/board ARCHIVE_DIR=/srv/ci/archive CI_WEB_PORT=8480
+# CI_WEB_TOKEN (written by install.sh) switches the clear buttons on; without it the board is read-only
+EnvironmentFile=-/srv/ci/web.env
 ExecStart=/usr/bin/python3 /srv/ci/bin/ci/web/ci_web.py
 Restart=on-failure
 RestartSec=5

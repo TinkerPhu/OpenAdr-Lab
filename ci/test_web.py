@@ -8,7 +8,12 @@ import re
 import sys
 import tempfile
 import time
+import json
+import threading
 import unittest
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -175,6 +180,101 @@ class WebApi(unittest.TestCase):
         t = ci_web.list_tickets(limit=10, now=now)[0]
         self.assertTrue(t["overdue"])
         self.assertGreater(ci_web.parse_iso(t["eta"]), now)
+
+
+class Clearing(unittest.TestCase):
+    """Archiving finished tickets: the sweep, the token-guarded POST routes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.board = Path(self.tmp.name) / "board"
+        self.archive = Path(self.tmp.name) / "archive"
+        self.board.mkdir()
+        ci_web.BOARD_DIR, ci_web.ARCHIVE_DIR = self.board, self.archive
+        ci_web.TOKEN, ci_web.KEEP_MERGED_H = "s3cret", 24.0
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), ci_web.Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def post(self, path, token="s3cret"):
+        req = urllib.request.Request(self.base + path, method="POST", data=b"{}")
+        if token is not None:
+            req.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def test_clear_moves_a_finished_ticket_to_the_archive(self):
+        name = "20261017T0700Z_09fb9c63_fix-x"
+        make_ticket(self.board, name, "red", result=RESULT)
+        code, body = self.post(f"/api/tickets/{name}/clear")
+        self.assertEqual(200, code)
+        self.assertFalse((self.board / name).exists())
+        self.assertTrue((self.archive / name / "result.md").exists())
+
+    def test_running_and_queued_tickets_cannot_be_cleared(self):
+        for status, name in (("running", "20261017T0700Z_aaaaaaaa_a"), ("queued", "20261017T0701Z_bbbbbbbb_b")):
+            make_ticket(self.board, name, status)
+            self.assertEqual(409, self.post(f"/api/tickets/{name}/clear")[0])
+            self.assertTrue((self.board / name).exists())
+
+    def test_wrong_or_missing_token_is_refused(self):
+        name = "20261017T0700Z_09fb9c63_fix-x"
+        make_ticket(self.board, name, "red")
+        self.assertEqual(401, self.post(f"/api/tickets/{name}/clear", token="nope")[0])
+        self.assertEqual(401, self.post(f"/api/tickets/{name}/clear", token=None)[0])
+        self.assertTrue((self.board / name).exists())
+
+    def test_clearing_is_off_without_a_configured_token(self):
+        ci_web.TOKEN = ""
+        name = "20261017T0700Z_09fb9c63_fix-x"
+        make_ticket(self.board, name, "red")
+        code, body = self.post(f"/api/tickets/{name}/clear", token="")
+        self.assertEqual(403, code)
+        self.assertIn("CI_WEB_TOKEN", body["error"])
+        self.assertTrue((self.board / name).exists())
+
+    def test_unknown_and_malformed_names(self):
+        self.assertEqual(404, self.post("/api/tickets/20261017T0700Z_09fb9c63_nope/clear")[0])
+        self.assertEqual(404, self.post("/api/tickets/..%2Fx/clear")[0])
+
+    def test_clear_finished_leaves_open_work(self):
+        make_ticket(self.board, "20261017T0600Z_aaaaaaaa_a", "red")
+        make_ticket(self.board, "20261017T0601Z_bbbbbbbb_b", "merged")
+        make_ticket(self.board, "20261017T0602Z_cccccccc_c", "running")
+        make_ticket(self.board, "20261017T0603Z_dddddddd_d", "queued")
+        code, body = self.post("/api/clear-finished")
+        self.assertEqual(200, code)
+        self.assertEqual(2, body["cleared"])
+        self.assertEqual(["20261017T0602Z_cccccccc_c", "20261017T0603Z_dddddddd_d"],
+                         sorted(p.name for p in self.board.iterdir()))
+
+    def test_summary_tells_the_page_whether_clearing_is_on(self):
+        self.assertTrue(ci_web.summary()["clear_enabled"])
+        ci_web.TOKEN = ""
+        self.assertFalse(ci_web.summary()["clear_enabled"])
+
+    def test_sweep_archives_old_merged_but_keeps_unmerged_and_recent(self):
+        now = ci_web.parse_iso("2026-10-18T12:00:00Z")
+        for name, status in (("20261017T0700Z_aaaaaaaa_a", "merged"),   # 29h old
+                             ("20261017T0701Z_bbbbbbbb_b", "deployed"),  # 29h old
+                             ("20261017T0702Z_cccccccc_c", "red"),       # old, not merged
+                             ("20261018T0900Z_dddddddd_d", "merged")):   # 3h old
+            make_ticket(self.board, name, status)
+        moved = ci_web.sweep(now)
+        self.assertEqual(2, moved)
+        self.assertEqual(["20261017T0702Z_cccccccc_c", "20261018T0900Z_dddddddd_d"],
+                         sorted(p.name for p in self.board.iterdir()))
+
+    def test_sweep_can_be_switched_off(self):
+        ci_web.KEEP_MERGED_H = 0
+        make_ticket(self.board, "20261017T0700Z_aaaaaaaa_a", "merged")
+        self.assertEqual(0, ci_web.sweep(ci_web.parse_iso("2026-10-18T12:00:00Z")))
 
 
 if __name__ == "__main__":

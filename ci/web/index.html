@@ -74,10 +74,10 @@ button, select { background: var(--panel); color: var(--text); border: 1px solid
   </div>
 
   <div class="panel">
-    <h2>Tickets</h2>
+    <h2>Tickets <button id="clearall" hidden title="Move every finished ticket to the archive">clear all finished</button></h2>
     <div class="tablewrap">
     <table>
-      <thead><tr><th>Status</th><th>Branch</th><th>Queued (local)</th><th>Started</th><th>Duration</th><th>ETA finish</th><th>Step / note</th><th>Done</th></tr></thead>
+      <thead><tr><th>Status</th><th>Branch</th><th>Queued (local)</th><th>Started</th><th>Duration</th><th>ETA finish</th><th>Step / note</th><th>Done</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
     </div>
@@ -85,7 +85,11 @@ button, select { background: var(--panel); color: var(--text); border: 1px solid
 </main>
 <script>
 "use strict";
-let tickets = [], selected = null;
+let tickets = [], selected = null, clearEnabled = false;
+const DAY_MS = 24 * 3600 * 1000;
+const isOpen = t => t.status === "queued" || t.status === "running";
+// The timeline and the table show the last 24 h; a finished ticket that did not merge stays until cleared.
+const recent = t => isOpen(t) || !["merged", "deployed"].includes(t.status) || Date.now() - dt(t.finished || t.created) < DAY_MS;
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const dt = s => s ? new Date(s) : null;
@@ -122,19 +126,22 @@ function renderCards(s) {
 }
 
 function renderRows() {
-  $("rows").innerHTML = tickets.map(t => `
+  $("clearall").hidden = !clearEnabled;
+  $("rows").innerHTML = tickets.filter(recent).map(t => `
     <tr data-n="${esc(t.name)}">
       <td>${badge(t.status)}</td><td>${esc(t.branch)}</td><td>${hm(t.created)}</td>
       <td>${hm(t.started)}</td><td>${t.status === "running" && t.started ? dur((Date.now() - dt(t.started)) / 1000) + " so far" : dur(t.duration_s)}</td>
       <td>${etaCell(t)}</td>
       <td>${esc(t.status === "running" ? t.current_step || "starting" : t.note || "")} ${suiteChips(t)}</td>
-      <td>${t.acked ? "yes" : (["queued", "running"].includes(t.status) ? "" : "no")}</td></tr>`).join("");
+      <td>${t.acked ? "yes" : (["queued", "running"].includes(t.status) ? "" : "no")}</td>
+      <td>${clearEnabled && !isOpen(t) ? `<button class="clr" data-n="${esc(t.name)}" title="Move to the archive">clear</button>` : ""}</td></tr>`).join("");
+  document.querySelectorAll(".clr").forEach(b => b.onclick = e => { e.stopPropagation(); clearTickets(`api/tickets/${encodeURIComponent(b.dataset.n)}/clear`); });
   document.querySelectorAll("#rows tr").forEach(r => r.onclick = () => select(r.dataset.n));
 }
 
 function renderTimeline() {
   const svg = $("timeline"), W = Math.max(svg.parentElement.clientWidth, 600), rowH = 18, left = 190, top = 20;
-  const shown = tickets.filter(t => t.started || t.eta).slice(0, 24).reverse();
+  const shown = tickets.filter(t => (t.started || t.eta) && (isOpen(t) || Date.now() - dt(t.finished || t.started) < DAY_MS)).slice(0, 24).reverse();
   if (!shown.length) { svg.setAttribute("height", 30); svg.innerHTML = '<text x="4" y="18" class="lbl">no runs yet</text>'; return; }
   const now = Date.now();
   const ends = t => t.finished ? dt(t.finished) : (t.status === "running" ? new Date(now) : null);
@@ -201,16 +208,29 @@ function select(name) {
   loadLog();
 }
 
+// Clearing needs the board's token (CI_WEB_TOKEN); it is asked once and kept in this browser.
+async function clearTickets(path) {
+  let token = ""; try { token = localStorage.getItem("ciToken") || ""; } catch (e) {}
+  if (!token) { token = prompt("Board token (CI_WEB_TOKEN):") || ""; if (!token) return; }
+  const r = await fetch(path, { method: "POST", headers: { Authorization: "Bearer " + token } });
+  if (r.status === 401) { try { localStorage.removeItem("ciToken"); } catch (e) {} alert("Wrong token."); return; }
+  try { localStorage.setItem("ciToken", token); } catch (e) {}
+  if (!r.ok) { const body = await r.json().catch(() => ({})); alert(body.error || body.result || "Could not clear."); }
+  if (selected && path.includes(encodeURIComponent(selected))) { selected = null; $("detail").hidden = true; }
+  refresh();
+}
+
 async function refresh() {
   try {
     const [s, ts] = await Promise.all([fetch("api/summary").then(r => r.json()), fetch("api/tickets?limit=200").then(r => r.json())]);
-    tickets = ts;
+    tickets = ts; clearEnabled = !!s.clear_enabled;
     renderCards(s); renderRows(); renderTimeline();
     if (selected) select(selected);
   } catch (e) { $("sub").textContent = "API unreachable: " + e; }
 }
 $("logbtn").onclick = loadLog;
 $("logsel").onchange = loadLog;
+$("clearall").onclick = () => { if (confirm("Move every finished ticket (queued and running stay) to the archive?")) clearTickets("api/clear-finished"); };
 $("close").onclick = () => { selected = null; $("detail").hidden = true; };
 window.onresize = renderTimeline;
 refresh();

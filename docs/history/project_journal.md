@@ -16139,3 +16139,14 @@ tier or resilience. Everything else ran anyway, at about 67 minutes a ticket.
 **Learnings.** The planning premise "a UI change skips E2E" was wrong: E2E builds both UIs and drives them with
 browser steps. The saving is the suites that are independent, not the UI. The runner has never run the UI unit
 tests (R-126). The old `full.log` files had no per-suite timing, so the measured baseline starts with this change.
+
+## CI board: clear buttons, archive, 24-hour view (refactor/ci-suite-selection)
+
+**What.** The board was read-only and never removed anything, so it filled up. `ci/web/ci_web.py` now moves
+finished tickets to an archive (rename, nothing deleted) on a token-guarded POST (`CI_WEB_TOKEN`, per ticket or
+all finished) and sweeps merged/deployed tickets after 24 h; the timeline and table show 24 h plus anything
+not merged. Without a token the board stays read-only. Tests: `ci/test_web.py`.
+
+**Why.** Only a person knows when a red ticket stopped mattering; the token keeps a LAN-readable page from
+becoming a LAN-writable one. The archive is the answer to "what happens to old tickets" that `install.sh` had
+promised and nothing implemented.

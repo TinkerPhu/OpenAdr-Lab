@@ -270,6 +270,8 @@ merged: a suite the change needs did not run. Because a wrong skip would pass un
 to see what a skipped suite would have cost. Behaviour is pinned by `ci/test_board.sh` (map and
 selection), `ci/test_runner.sh` (runner and `result.md`) and `ci/test_web.py` (board).
 
+The board can clear tickets: see "Clearing" in `ci/README.md` (token, archive, 24-hour rule). Pinned by `ci/test_web.py`.
+
 ### Picking the result up
 
 ```bash

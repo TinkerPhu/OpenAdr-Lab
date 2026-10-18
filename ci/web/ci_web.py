@@ -3,7 +3,9 @@
 
 Owns: turning the board's plain files (request.env, status, attempt, result.md, run.log) into
 JSON, and serving the single-page view next to it. Reads: BOARD_DIR (default /srv/ci/board).
-Must never: write to the board, run a ticket, or open a log that is not run/quick/full.log.
+Writes only by moving a FINISHED ticket to the archive (never a queued or running one), on request
+(token-guarded POST) or by the sweep of old merged tickets. Must never: run a ticket, or open a log
+that is not run/quick/full.log.
 The set of finished statuses is the board's own (BOARD_FINISHED in board.sh), read, not copied.
 
 Estimates (`eta`, `expected_s`) are the median duration of finished tickets of the same class
@@ -11,12 +13,15 @@ Estimates (`eta`, `expected_s`) are the median duration of finished tickets of t
 
     python3 ci_web.py            # listens on 0.0.0.0:$CI_WEB_PORT (default 8480)
 """
+import hmac
 import json
 import os
 import re
 import statistics
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -28,6 +33,13 @@ BOARD_SH = HERE.parent / "board.sh"
 NAME_RE = re.compile(r"^(\d{8}T\d{4}Z)_([A-Za-z0-9]{0,8})_([A-Za-z0-9._-]*)$")
 LOGS = ("run", "quick", "full")
 OVERDUE_FLOOR_S = 60
+# Clearing: a finished ticket moves to the archive (rename, nothing deleted). It needs CI_WEB_TOKEN;
+# without one the board stays read-only. Merged/deployed tickets leave by themselves after
+# CI_WEB_KEEP_MERGED_H hours (0 = never); anything else stays until someone clears it.
+ARCHIVE_DIR = Path(os.environ.get("ARCHIVE_DIR", str(BOARD_DIR.parent / "archive")))
+TOKEN = os.environ.get("CI_WEB_TOKEN", "")
+KEEP_MERGED_H = float(os.environ.get("CI_WEB_KEEP_MERGED_H", "24"))
+SWEEP_EVERY_S = 600
 # Statuses where a run went through every step it was going to, so its duration is a fair sample.
 COMPLETE = ("merged", "deployed", "green")
 
@@ -220,6 +232,50 @@ def add_estimates(tickets, now):
         t["eta"] = iso(cursor)
 
 
+# -- archiving ----------------------------------------------------------------
+
+def archive_ticket(name):
+    """Move a finished ticket to the archive: "ok", "missing", "busy" (not finished) or "exists"."""
+    if not safe_name(name) or not (BOARD_DIR / name).is_dir():
+        return "missing"
+    try:
+        status = (BOARD_DIR / name / "status").read_text().strip()
+    except OSError:
+        return "missing"
+    if status not in FINISHED:
+        return "busy"
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        os.rename(BOARD_DIR / name, ARCHIVE_DIR / name)
+    except OSError:
+        return "exists"
+    return "ok"
+
+
+def sweep(now=None):
+    """Archive merged/deployed tickets older than KEEP_MERGED_H; returns how many moved."""
+    if KEEP_MERGED_H <= 0:
+        return 0
+    now = now or utcnow()
+    moved = 0
+    for t in (read_ticket(n) for n in board_names()):
+        if t["status"] not in ("merged", "deployed"):
+            continue
+        done = parse_iso(t["finished"] or t["created"])
+        if (now - done).total_seconds() > KEEP_MERGED_H * 3600 and archive_ticket(t["name"]) == "ok":
+            moved += 1
+    return moved
+
+
+def _sweep_forever():
+    while True:
+        try:
+            sweep()
+        except Exception as e:  # the sweep must never take the board down
+            print(f"ci-web: sweep failed: {e}", flush=True)
+        time.sleep(SWEEP_EVERY_S)
+
+
 # -- board-wide views ---------------------------------------------------------
 
 def board_names():
@@ -258,6 +314,7 @@ def summary(now=None):
         "queue_done_eta": max(etas) if etas else None,
         "unacked_finished": [t["name"] for t in tickets if t["status"] in FINISHED and not t["acked"]],
         "runner_timer": _systemctl("ci-runner.timer"),
+        "clear_enabled": bool(TOKEN),
         "expected_s": {c: expected_duration_s(c, tickets) for c in ("audits", "quick", "full")},
     }
 
@@ -307,13 +364,33 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "bad request"}, 400)
         return self._json({"error": "not found"}, 404)
 
+    def do_POST(self):  # noqa: N802
+        parts = [p for p in urlparse(self.path).path.split("/") if p]
+        if not TOKEN:
+            return self._json({"error": "clearing is disabled: set CI_WEB_TOKEN on the board service"}, 403)
+        given = self.headers.get("Authorization", "")
+        if not given.startswith("Bearer ") or not hmac.compare_digest(given[7:], TOKEN):
+            return self._json({"error": "bad or missing token"}, 401)
+        if parts == ["api", "clear-finished"]:
+            cleared = sum(1 for n in board_names() if archive_ticket(n) == "ok")
+            print(f"ci-web: cleared {cleared} finished tickets", flush=True)
+            return self._json({"cleared": cleared})
+        if len(parts) == 4 and parts[:2] == ["api", "tickets"] and parts[3] == "clear":
+            result = archive_ticket(parts[2])
+            code = {"ok": 200, "missing": 404, "busy": 409, "exists": 409}[result]
+            if result == "ok":
+                print(f"ci-web: cleared {parts[2]}", flush=True)
+            return self._json({"result": result, "ticket": parts[2]}, code)
+        return self._json({"error": "not found"}, 404)
+
     def log_message(self, *args):
         pass
 
 
 def main():
     port = int(os.environ.get("CI_WEB_PORT", "8480"))
-    print(f"ci-web: board {BOARD_DIR}, port {port}", flush=True)
+    print(f"ci-web: board {BOARD_DIR}, port {port}, clearing {'on' if TOKEN else 'off'}", flush=True)
+    threading.Thread(target=_sweep_forever, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
 
 
