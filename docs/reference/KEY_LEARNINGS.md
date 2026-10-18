@@ -3702,3 +3702,13 @@ meant the registry endpoint cost no new data. Look at what the shared function h
   objective), not for the request to be accepted.
 - When a poll times out, read what it last saw before raising the timeout: UC-11c's last result
   showed a battery that had not moved at all, not one that moved late.
+
+## A script that SSHes inside a `bash -s` session eats its own script; background jobs outlive `kill` of their parent (CI lanes, 2026-10-18)
+
+Run as `ssh host "bash -s" < script`, every `ssh` in the script that has no `-n` reads the rest of the script as its
+stdin, so the script silently stops after the first remote call. Three more traps from the same piece of work:
+`kill -0 $pid` is true for a finished job that was not `wait`ed for, so use a done-file; killing the subshell of a
+`( while sleep N; do ...; done ) &` heartbeat leaves its `sleep` running and holding the caller's pipe (a test piped
+through `tail` hung for the full N seconds); and a lane that tidies the shared checkout while another lane still runs a
+script from it can corrupt that script, since bash reads scripts incrementally. Tidy containers per lane, the tree
+once at the end.

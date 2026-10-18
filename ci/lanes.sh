@@ -31,7 +31,7 @@ lane_target() { if [ "$1" = "$CI_HOME_NAME" ]; then echo localhost; else echo "$
 # lane_sh <host> <command> - a shell command on the host (here for the home lane)
 lane_sh() {
     if [ "$(lane_target "$1")" = localhost ]; then bash -c "$2"
-    else ssh -o BatchMode=yes -o ConnectTimeout=10 "$1" "$2"; fi
+    else ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$1" "$2"; fi
 }
 
 # lane_lock <op> <host> [lock args] - the sessions' lock script, one owner per ticket

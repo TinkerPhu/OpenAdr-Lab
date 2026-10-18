@@ -275,6 +275,41 @@ selection), `ci/test_runner.sh` (runner and `result.md`) and `ci/test_web.py` (b
 
 The board can clear tickets: see "Clearing" in `ci/README.md` (token, archive, 24-hour rule). Pinned by `ci/test_web.py`.
 
+### Lanes: the full tier on several hosts
+
+The selected full-tier suites (`e2e`, `resilience`, `rust-vtn`) run on **lanes**: Node3 itself (always
+lane 1; its lock is held for the whole ticket) plus the hosts in `CI_LANE_HOSTS`, in that priority
+order (our lab: `Node2 Node1` in `/srv/ci/runner.env`, with `CI_HOME_NAME=Node3`). With none configured
+there is one lane and the suites run one after the other. The mechanism is `ci/lanes.sh`.
+
+- **Same lock as the sessions.** An extra host is taken with `ci/locks/docker_host_lock.sh`, once and
+  without waiting. A host a session holds (`status` shows the holder) is skipped for this ticket and never
+  taken over; the board and `result.md` list it under "Not used". Node3, Node2 and Node1 are locked by the same
+  script and the same lock path, so a session locks Node3 exactly as it locks the others. One caveat: a
+  session holding Node3 makes the ticket wait ("host lock busy"), as before.
+- **How many.** At most one extra lane per selected suite beyond the first; one selected suite touches no
+  other host. Node1 serves the live stack, so it is last and is skipped when its load is above
+  `CI_LANE_MAX_LOAD` (2.0) or its free memory is under `CI_LANE_MIN_MEM_MB` (1500).
+- **Who runs what.** Longest suite first, onto the lane that would finish earliest, by the median of that
+  suite on that host over the last 10 finished tickets (`board_suite_seconds`; any host's median with fewer than
+  3 rows, then a fixed fallback). So E2E lands on Node3, the host without a resident fleet.
+- **The commit.** The tested commit is Node3's rebased local commit, so the runner pushes it to
+  `refs/ci/<ticket>` on origin (deleted after the ticket); an extra host fetches it and checks it out
+  detached under its lock, and is returned to `main` afterwards. A host whose checkout has uncommitted
+  changes is skipped, never reset.
+- **Failures.** A suite failing a test makes the ticket red and stops the other lanes at once; they are
+  tidied (only containers of the `openadr-test` and `openadr-cargo-test` compose projects are removed, never
+  production or fleet containers) and unlocked, and `result.md` marks them `cancelled`. A lane that fails
+  the infrastructure (ssh drop, pre-flight abort, a suite that reports no PASS) has its suites rerun on
+  Node3 afterwards, noted as "moved".
+- **Locks cannot outlive the runner.** An extra lane's lease is 45 minutes and is renewed every 15 while the
+  lane runs; a runner that dies frees its hosts within 45 minutes.
+- **Seeing it.** `result.md` has a `## Lanes` table; the board shows a chip per lane and a log per extra lane
+  (`full.<host>.log`). `ci/install.sh` leaves an example `/srv/ci/runner.env` and warns when a configured
+  lane host does not answer over ssh as the CI user.
+
+Pinned by `ci/test_lanes.sh` (planning, acquisition, cancel, infrastructure move, `result.md`) and `ci/test_web.py`.
+
 ### Picking the result up
 
 Automatic, while the session lives: `bash ci/ci-wait.sh <ticket> --ack` run in the background polls the

@@ -8,6 +8,7 @@ Node1/Node2/Node3 are one lab's deployment, named only through environment varia
 |---|---|
 | `runner.sh`, `board.sh` | the runner (rebase, quick tier, full tier, fast-forward main) and the handoff board it works through |
 | `ci-handoff.sh`, `ci-wait.sh`, `ci-next.sh` | a session hands a branch over / waits for the verdict in the background / picks it up later by hand (`CI_HOST` required; `ci-lib.sh` is what they share) |
+| `lanes.sh` | the full tier on several hosts: lane planning, the sessions' lock, cancel on red (sourced by `runner.sh`) |
 | `deploy.sh` | build release images of `origin/main` and switch a production host over |
 | `install.sh`, `systemd/` | install the runner timer and the web board on the CI host |
 | `web/` | read-only JSON API and single-page view of the board (`ci_web.py`, stdlib only) |
@@ -32,6 +33,7 @@ Nothing here needs a second host. Using one is opt-in:
 |---|---|---|
 | `OPENADR_LAB_HOST` / `DOCKER_HOST` | ssh name of the docker host the suites and lock use | this machine |
 | `CI_HOST` | ssh name of the CI host `ci-handoff.sh` / `ci-next.sh` talk to | the scripts refuse to run |
+| `CI_LANE_HOSTS` / `CI_HOME_NAME` | extra docker hosts for the full tier, in priority order (`"Node2 Node1"`) / this host's name in tickets (`Node3`); both in `/srv/ci/runner.env` on the CI host | one lane: the suites run on the CI host alone |
 | `BOARD_DIR` | the board directory (`/srv/ci/board` on the CI host) | `/srv/ci/board` |
 | `CI_WEB_PORT` | port of the web board | `8480` |
 | `CI_WEB_TOKEN` | enables the clear buttons | read-only board |
