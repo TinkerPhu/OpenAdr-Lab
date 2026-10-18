@@ -130,7 +130,8 @@ export function EventFormDialog(props: EventFormDialogProps) {
           />
           <TextField
             margin="dense"
-            label="Duration (ISO 8601)"
+            label="Interval duration (ISO 8601)"
+            helperText="Length of each interval. It does not repeat or end the event."
             fullWidth
             value={duration}
             onChange={(e) => setDuration(e.target.value)}

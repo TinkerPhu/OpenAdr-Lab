@@ -189,6 +189,15 @@ describe("EventsPage", () => {
     );
   });
 
+  // R-145: the field writes intervalPeriod.duration, so its label must not promise event.duration.
+  it("labels the duration field as the length of an interval", async () => {
+    renderEvents();
+    await userEvent.click(screen.getByTestId("edit-event-e1"));
+    expect(screen.getByLabelText("Interval duration (ISO 8601)")).toBe(
+      screen.getByTestId("event-duration-input"),
+    );
+  });
+
   it("saves updated duration on edit", async () => {
     renderEvents();
     await userEvent.click(screen.getByTestId("edit-event-e1"));
