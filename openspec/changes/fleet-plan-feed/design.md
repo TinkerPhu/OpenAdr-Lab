@@ -40,10 +40,15 @@ slot only the six fields in the spec, under the names `GET /plan` uses. Alternat
 rejected for broker and store size. Alternative: pre-summed at the VEN — impossible, the sum is across
 VENs.
 
-**D2 Publish from the planning task, after adoption.** The adapter ring (`tasks/planning.rs`) already
-holds the adopted plan and the app context; it calls `publish_plan` fire-and-forget. `services/` stays
-free of the broker. Alternative: publish from a `ControllerEvent` via the trace path — rejected: a
-plan is state (retained), a trace entry is an event (not).
+**D2 A bridge task publishes the active plan when it changes (decided while applying 1.1).**
+`tasks/fleet_plan.rs`, shaped like `tasks/fleet_trace.rs`: subscribe to the controller-trace broadcast,
+and on each `PlanCycle` (pushed by `adopt_if_warranted` right after `set_active_plan`, adopted or not)
+read `AppState::active_plan()` and publish it when its id differs from the last one published. A
+rejected cycle leaves the active plan unchanged, so nothing is published; an adopted one does. The
+planning loop, `run_plan_cycle` (already 17 parameters) and `services/` stay untouched and free of the
+broker. Alternative: call `publish_plan` from `run_plan_cycle` — rejected: another parameter on a
+function R-71 already lists, and the planner would know a broker exists. Alternative: a new
+`PlannerEvent` — rejected: it is serialised to the UI over SSE and would carry the plan.
 
 **D3 Store every adopted plan.** Table `lab_recorder.fleet_plan(ven_name, plan_id, created_at,
 received_at, slots jsonb)`, unique on (ven_name, plan_id), retention 30 days like decisions.

@@ -90,6 +90,45 @@ async fn live(ctx: AppCtx) -> Json<serde_json::Value> {
     }))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PlanQuery {
+    /// The instant the answer is "as of". Defaults to now; an earlier one reproduces the plan
+    /// the fleet was working to then, which is what a before/after comparison reads.
+    pub at: Option<DateTime<Utc>>,
+}
+
+/// `GET /api/fleet/plan?at=` — what the fleet planned to import and export, as of an instant.
+///
+/// The latest plan each VEN had adopted at or before `at`, summed on a common grid
+/// (`fleet_plan::fleet_plan`). "Now" and "then" are the same call with a different `at`, so the
+/// two sides of a comparison cannot be added up differently.
+pub async fn fleet_plan(
+    State(ctx): State<AppCtx>,
+    Query(q): Query<PlanQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let at = q.at.unwrap_or_else(Utc::now);
+    let pool = ctx.fleet_store.read().await.clone();
+    let Some(pool) = pool else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "fleet telemetry store is not connected"})),
+        ));
+    };
+    let plans = crate::fleet_plan::latest_plans_at(&pool, at)
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, "fleet plan query failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": "fleet plan query failed"})),
+            )
+        })?;
+    let known: Vec<String> = ctx.fleet.read().await.keys().cloned().collect();
+    Ok(Json(json!(crate::fleet_plan::fleet_plan(
+        &plans, &known, at
+    ))))
+}
+
 /// Per-VEN series over a window, plus the fleet sum on the same grid.
 async fn history(
     ctx: AppCtx,

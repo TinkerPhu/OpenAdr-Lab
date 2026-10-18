@@ -56,7 +56,29 @@ vi.mock("../components/FleetTariffChart", () => ({
   ),
 }));
 
+const mockPlan = {
+  at: "2026-09-22T09:30:00Z",
+  stepSeconds: 300,
+  points: [
+    { ts: "2026-09-22T09:30:00Z", netImportKw: 4, netExportKw: 0, contributingVens: 2 },
+    { ts: "2026-09-22T09:35:00Z", netImportKw: 0, netExportKw: 1.5, contributingVens: 2 },
+  ],
+  plans: [
+    { venName: "ven-1", planId: "a", createdAt: "2026-09-22T09:00:00Z" },
+    { venName: "ven-2", planId: "b", createdAt: "2026-09-22T09:20:00Z" },
+  ],
+  vensWithoutPlan: ["ven-3"],
+};
+const useFleetPlanMock = vi.fn(() => ({ data: mockPlan, isError: false }));
+
+vi.mock("../components/FleetPlanChart", () => ({
+  FleetPlanChart: ({ plan }: { plan: { points: unknown[] } }) => (
+    <div data-testid="fleet-plan-chart-stub">{plan.points.length}</div>
+  ),
+}));
+
 vi.mock("../api/hooks", () => ({
+  useFleetPlan: () => useFleetPlanMock(),
   useFleetPower: vi.fn(() => ({ data: mockLive, isError: false })),
   useFleetHistory: vi.fn(() => ({ data: mockHistory, isError: false })),
   // The page also hosts the reactions card; it has its own test file, so here
@@ -77,6 +99,26 @@ function renderFleet() {
 }
 
 describe("FleetPage", () => {
+  /* What the fleet intends, beside what it did: the plan feed would otherwise be a server-side
+   * capability with no surface (ui-transparency). */
+  it("shows the planned fleet import and export, and how many VENs have a plan", () => {
+    renderFleet();
+    expect(screen.getByTestId("fleet-plan-chart-stub")).toHaveTextContent("2");
+    expect(screen.getByTestId("fleet-plan-contributors")).toHaveTextContent("2 of 3 VENs have a plan");
+  });
+
+  it("says when the newest plan was adopted", () => {
+    renderFleet();
+    expect(screen.getByTestId("fleet-plan-contributors")).toHaveTextContent("newest adopted");
+  });
+
+  it("says so when there is no plan history, like the other fleet cards", () => {
+    useFleetPlanMock.mockReturnValueOnce({ data: undefined as never, isError: true });
+    renderFleet();
+    expect(screen.getByTestId("fleet-plan-error")).toHaveTextContent("telemetry store is not connected");
+    expect(screen.queryByTestId("fleet-plan-chart-stub")).toBeNull();
+  });
+
   it("shows the fleet total in kW", () => {
     renderFleet();
     expect(screen.getByTestId("fleet-total")).toHaveTextContent("2.50 kW");

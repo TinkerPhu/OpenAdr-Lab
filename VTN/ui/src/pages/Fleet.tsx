@@ -3,7 +3,8 @@ import {
   Alert, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow,
   TextField, Typography,
 } from "@mui/material";
-import { useFleetHistory, useFleetPower, useFleetSignals } from "../api/hooks";
+import { useFleetHistory, useFleetPlan, useFleetPower, useFleetSignals } from "../api/hooks";
+import { FleetPlanChart } from "../components/FleetPlanChart";
 import { FleetPowerChart } from "../components/FleetPowerChart";
 import { FleetTariffChart } from "../components/FleetTariffChart";
 import { FleetReactions } from "../components/FleetReactions";
@@ -30,7 +31,11 @@ export function FleetPage() {
   const live = useFleetPower();
   const history = useFleetHistory(chosen.minutes, chosen.stepSeconds);
   const signals = useFleetSignals(chosen.minutes);
+  const plan = useFleetPlan();
   const now = new Date();
+  const newestPlan = plan.data?.plans
+    .map((p) => p.createdAt)
+    .reduce<string | undefined>((a, b) => (a === undefined || b > a ? b : a), undefined);
 
   return (
     <Stack spacing={2}>
@@ -109,6 +114,30 @@ export function FleetPage() {
             nowMs={now.getTime()}
             reportingVens={live.data?.fleet.contributingVens ?? 0}
           />
+        )}
+      </Paper>
+
+      <Paper sx={{ p: 2 }} data-testid="fleet-plan-card">
+        <Typography variant="h6">Fleet plan</Typography>
+        <Typography variant="body2" color="text.secondary">
+          What the VENs plan to import and export, from the plans they last adopted. Where the
+          fleet response above shows what sites did, this shows what they intend.
+        </Typography>
+        {plan.isError && (
+          <Alert severity="info" data-testid="fleet-plan-error">
+            No plan history — the telemetry store is not connected.
+          </Alert>
+        )}
+        {plan.data && (
+          <>
+            {/* A total over eleven VENs and over twenty look the same once drawn; say which. */}
+            <Typography variant="body2" data-testid="fleet-plan-contributors">
+              {plan.data.plans.length} of {plan.data.plans.length + plan.data.vensWithoutPlan.length}{" "}
+              VENs have a plan
+              {newestPlan && <> · newest adopted {formatAge(newestPlan, now)}</>}
+            </Typography>
+            <FleetPlanChart plan={plan.data} nowMs={now.getTime()} />
+          </>
         )}
       </Paper>
 

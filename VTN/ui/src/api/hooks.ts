@@ -90,6 +90,21 @@ export function useSignalPreview(event: unknown | null, fromIso: string, toIso: 
   });
 }
 
+/**
+ * What the fleet planned to import and export. With `atIso` it is the plan current at that instant
+ * (a past plan does not change, so it is not polled); without, it is now and follows the fleet.
+ */
+export function useFleetPlan(atIso?: string) {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["fleet", "plan", atIso ?? "now"],
+    queryFn: () => api.fleetPlan(atIso),
+    refetchInterval: atIso ? false : 30_000,
+    // A 503 means the store is not connected; the card says so, so do not hammer it.
+    retry: false,
+  });
+}
+
 /** The signal types the workbench can edit, with the units the wire profile declares. */
 export function useSignalRegistry() {
   const { api } = useBffContext();

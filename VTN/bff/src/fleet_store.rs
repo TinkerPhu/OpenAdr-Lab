@@ -30,6 +30,8 @@ use sqlx::PgPool;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
+use crate::fleet_plan::PlanRow;
+
 /// How many rows may wait to be written before samples are dropped.
 ///
 /// At 20 VENs on a 5 s cadence this is roughly twenty minutes of backlog: long
@@ -141,6 +143,7 @@ impl TraceRow {
 pub struct TelemetryWriter {
     tx: mpsc::Sender<TelemetryRow>,
     trace_tx: mpsc::Sender<TraceRow>,
+    plan_tx: mpsc::Sender<PlanRow>,
     dropped: Arc<AtomicU64>,
 }
 
@@ -150,12 +153,17 @@ impl TelemetryWriter {
     /// `try_send` rather than `send`: awaiting here would put database latency
     /// on the broker's event loop, and the next sample is seconds away anyway.
     pub fn offer(&self, row: TelemetryRow) {
-        if self.tx.try_send(row).is_err() {
+        self.queue(&self.tx, row, "telemetry");
+    }
+
+    /// The one place a full queue is counted and reported, for every kind of row.
+    fn queue<T>(&self, tx: &mpsc::Sender<T>, row: T, what: &str) {
+        if tx.try_send(row).is_err() {
             let n = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
             // Once per thousand: enough to see a persistent problem in the
             // log, not enough to become the problem.
             if n % 1000 == 1 {
-                warn!(dropped = n, "fleet telemetry store queue full, dropping");
+                warn!(dropped = n, what, "fleet store queue full, dropping");
             }
         }
     }
@@ -166,12 +174,14 @@ impl TelemetryWriter {
     /// happens once -- which is why it shares the same counter: the number
     /// being non-zero is the signal, and the log line says which queue.
     pub fn offer_trace(&self, row: TraceRow) {
-        if self.trace_tx.try_send(row).is_err() {
-            let n = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
-            if n % 1000 == 1 {
-                warn!(dropped = n, "fleet trace store queue full, dropping");
-            }
-        }
+        self.queue(&self.trace_tx, row, "trace");
+    }
+
+    /// Queue one adopted plan, or drop it. A plan is state the next one replaces, but the plan
+    /// at a past instant is what a before/after comparison reads, so a drop is counted like the
+    /// others and not hidden.
+    pub fn offer_plan(&self, row: PlanRow) {
+        self.queue(&self.plan_tx, row, "plan");
     }
 
     /// How many samples have been dropped, for `/api/health`.
@@ -292,6 +302,27 @@ pub async fn init_schema(pool: &PgPool) -> Result<()> {
     )
     .execute(pool)
     .await?;
+    // One row per adopted plan. (ven_name, plan_id) makes a re-published retained message
+    // idempotent, as the telemetry key does; `created_at` is when the VEN adopted it and is what
+    // "the plan current at an instant" is decided on.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS lab_recorder.fleet_plan (
+            ven_name TEXT NOT NULL,
+            plan_id TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL,
+            received_at TIMESTAMPTZ NOT NULL,
+            payload_json JSONB NOT NULL,
+            PRIMARY KEY (ven_name, plan_id)
+        )",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS fleet_plan_ven_created_idx
+         ON lab_recorder.fleet_plan (ven_name, created_at DESC)",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -304,9 +335,11 @@ pub async fn init_schema(pool: &PgPool) -> Result<()> {
 pub fn spawn(database_url: String) -> (TelemetryWriter, SharedPool) {
     let (tx, rx) = mpsc::channel(QUEUE_CAPACITY);
     let (trace_tx, trace_rx) = mpsc::channel(QUEUE_CAPACITY);
+    let (plan_tx, plan_rx) = mpsc::channel(QUEUE_CAPACITY);
     let writer = TelemetryWriter {
         tx,
         trace_tx,
+        plan_tx,
         dropped: Arc::new(AtomicU64::new(0)),
     };
     let shared: SharedPool = Arc::new(tokio::sync::RwLock::new(None));
@@ -325,8 +358,21 @@ pub fn spawn(database_url: String) -> (TelemetryWriter, SharedPool) {
         info!("fleet telemetry store connected");
         *task_pool.write().await = Some(pool.clone());
         tokio::spawn(retention_loop(pool.clone()));
-        tokio::spawn(trace_write_loop(pool.clone(), trace_rx));
-        write_loop(pool, rx).await;
+        let trace_pool = pool.clone();
+        tokio::spawn(batch_write_loop(trace_rx, "fleet trace", move |rows| {
+            let pool = trace_pool.clone();
+            async move { insert_trace_batch(&pool, &rows).await }
+        }));
+        let plan_pool = pool.clone();
+        tokio::spawn(batch_write_loop(plan_rx, "fleet plan", move |rows| {
+            let pool = plan_pool.clone();
+            async move { crate::fleet_plan::insert_plan_batch(&pool, &rows).await }
+        }));
+        batch_write_loop(rx, "fleet telemetry", move |rows| {
+            let pool = pool.clone();
+            async move { insert_batch(&pool, &rows).await }
+        })
+        .await;
     });
     (writer, shared)
 }
@@ -339,10 +385,17 @@ pub fn spawn(database_url: String) -> (TelemetryWriter, SharedPool) {
 /// worth retrying.
 pub type SharedPool = Arc<tokio::sync::RwLock<Option<PgPool>>>;
 
-async fn write_loop(pool: PgPool, mut rx: mpsc::Receiver<TelemetryRow>) {
-    let mut batch: Vec<TelemetryRow> = Vec::with_capacity(MAX_BATCH);
+/// Drain one queue into the database, a batch at a time, until every sender is gone.
+///
+/// One loop for every kind of row (telemetry, decisions, plans): they differ only in the insert,
+/// and three copies of the batching were three places for it to go wrong differently.
+async fn batch_write_loop<T, F, Fut>(mut rx: mpsc::Receiver<T>, what: &'static str, insert: F)
+where
+    F: Fn(Vec<T>) -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
+    let mut batch: Vec<T> = Vec::with_capacity(MAX_BATCH);
     while let Some(first) = rx.recv().await {
-        batch.clear();
         batch.push(first);
         // Take whatever else is already waiting. Not a timed window: the queue
         // is the window, and draining it is what makes one insert per burst
@@ -353,25 +406,9 @@ async fn write_loop(pool: PgPool, mut rx: mpsc::Receiver<TelemetryRow>) {
                 Err(_) => break,
             }
         }
-        if let Err(e) = insert_batch(&pool, &batch).await {
-            warn!(rows = batch.len(), error = %e, "fleet telemetry insert failed");
-        }
-    }
-}
-
-async fn trace_write_loop(pool: PgPool, mut rx: mpsc::Receiver<TraceRow>) {
-    let mut batch: Vec<TraceRow> = Vec::with_capacity(MAX_BATCH);
-    while let Some(first) = rx.recv().await {
-        batch.clear();
-        batch.push(first);
-        while batch.len() < MAX_BATCH {
-            match rx.try_recv() {
-                Ok(row) => batch.push(row),
-                Err(_) => break,
-            }
-        }
-        if let Err(e) = insert_trace_batch(&pool, &batch).await {
-            warn!(rows = batch.len(), error = %e, "fleet trace insert failed");
+        let rows = batch.len();
+        if let Err(e) = insert(std::mem::take(&mut batch)).await {
+            warn!(rows, error = %e, "{what} insert failed");
         }
     }
 }
@@ -485,6 +522,9 @@ pub async fn run_retention(pool: &PgPool) -> Result<()> {
         .bind(Utc::now() - Duration::days(ROLLUP_RETENTION_DAYS))
         .execute(pool)
         .await?;
+
+    // Plans are large and the question they answer is recent, so they keep days, not months.
+    crate::fleet_plan::run_retention(pool).await?;
 
     if rolled + raw + rollup > 0 {
         info!(

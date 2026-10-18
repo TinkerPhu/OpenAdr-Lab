@@ -101,9 +101,45 @@ pub fn apply_message(
                 .as_ref()
                 .and_then(|v| v.get("state")?.as_str().map(str::to_string));
         }
-        // Other leaves (signals, trace, plan) are published by the VEN and not
-        // yet consumed here. Ignored rather than warned about: they are part
-        // of the design, just not of this step.
+        // Other leaves are not part of the live state. `trace` and `plan` go to the store from
+        // the ingest loop; `signals` is published by no VEN yet. Ignored rather than warned
+        // about: they are part of the design, just not of this step.
+        _ => {}
+    }
+}
+
+/// Hand one received message to the history store.
+///
+/// Telemetry is stored from what the live state holds for it, so the history cannot end up holding a
+/// differently-parsed version of the same message. A decision and a plan are not held in the live
+/// state (a plan is asked about "as of an instant", which only the history can answer), so they are
+/// read from the message here. A message that cannot be read costs only itself.
+fn store_message(
+    store: &crate::fleet_store::TelemetryWriter,
+    ven: &str,
+    leaf: &str,
+    payload: &[u8],
+    live_telemetry: Option<&serde_json::Value>,
+    now: DateTime<Utc>,
+) {
+    let body = || serde_json::from_slice::<serde_json::Value>(payload).ok();
+    match leaf {
+        "trace" => {
+            match body().and_then(|b| crate::fleet_store::TraceRow::from_message(ven, &b, now)) {
+                Some(row) => store.offer_trace(row),
+                None => tracing::warn!(ven, "unreadable fleet trace message"),
+            }
+        }
+        "plan" => match body().and_then(|b| crate::fleet_plan::PlanRow::from_message(ven, &b, now))
+        {
+            Some(row) => store.offer_plan(row),
+            None => tracing::warn!(ven, "unreadable fleet plan message"),
+        },
+        "telemetry" => {
+            if let Some(b) = live_telemetry {
+                store.offer(crate::fleet_store::TelemetryRow::from_message(ven, b, now));
+            }
+        }
         _ => {}
     }
 }
@@ -211,30 +247,24 @@ pub fn spawn_ingest(
                     if let Some((ven, leaf)) = parse_topic(&root, &p.topic) {
                         let now = Utc::now();
                         apply_message(&mut *state.write().await, ven, leaf, &p.payload, now);
-                        // Store what was stored in the live state, from the
-                        // live state -- so the history cannot end up holding a
-                        // differently-parsed version of the same message.
-                        if let (Some(store), "trace") = (&store, leaf) {
-                            match serde_json::from_slice::<serde_json::Value>(&p.payload)
-                                .ok()
-                                .and_then(|body| {
-                                    crate::fleet_store::TraceRow::from_message(ven, &body, now)
-                                }) {
-                                Some(row) => store.offer_trace(row),
-                                None => tracing::warn!(ven, "unreadable fleet trace message"),
-                            }
-                        }
-                        if let (Some(store), "telemetry") = (&store, leaf) {
-                            if let Some(body) = state
-                                .read()
-                                .await
-                                .get(ven)
-                                .and_then(|v| v.telemetry.as_ref())
-                            {
-                                store.offer(crate::fleet_store::TelemetryRow::from_message(
-                                    ven, body, now,
-                                ));
-                            }
+                        if let Some(store) = &store {
+                            let live_telemetry = if leaf == "telemetry" {
+                                state
+                                    .read()
+                                    .await
+                                    .get(ven)
+                                    .and_then(|v| v.telemetry.clone())
+                            } else {
+                                None
+                            };
+                            store_message(
+                                store,
+                                ven,
+                                leaf,
+                                &p.payload,
+                                live_telemetry.as_ref(),
+                                now,
+                            );
                         }
                         status.write().await.last_message_at = Some(now);
                     }

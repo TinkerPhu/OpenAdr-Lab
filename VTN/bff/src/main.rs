@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod error;
 mod fleet;
+mod fleet_plan;
 mod fleet_reactions;
 mod fleet_signals;
 mod fleet_store;
@@ -206,6 +207,7 @@ fn api_routes() -> Router<AppCtx> {
         .route("/api/fleet/power", get(routes::fleet::fleet_power))
         .route("/api/fleet/reactions", get(routes::fleet::fleet_reactions))
         .route("/api/fleet/signals", get(routes::fleet::fleet_signals))
+        .route("/api/fleet/plan", get(routes::fleet::fleet_plan))
         // The signal workbench: wire facts per payload type, and drafts resolved by
         // the receivers' own interval rule.
         .route("/api/signals/registry", get(routes::signals::registry))

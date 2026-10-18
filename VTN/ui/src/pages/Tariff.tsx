@@ -16,6 +16,7 @@ import { fleetChartWindow } from "../components/fleetChartWindow";
 import { FleetPowerChart } from "../components/FleetPowerChart";
 import { FleetTariffChart, TARIFF_AXIS_ID } from "../components/FleetTariffChart";
 import { OperatorToolbar } from "../components/OperatorToolbar";
+import { PlanComparison } from "../components/PlanComparison";
 import { PublishDialog } from "../components/PublishDialog";
 import { RecurrenceControl } from "../components/RecurrenceControl";
 import { TariffGrid } from "../components/TariffGrid";
@@ -35,6 +36,8 @@ const AHEAD_MINUTES = 1080;
 const TICK_MINUTES = 180;
 const POWER_STEP_SECONDS = 300;
 const PREVIEW_DEBOUNCE_MS = 150;
+/** How long after a publish the before/after comparison is offered. */
+const COMPARE_WITHIN_MS = 24 * 3_600_000;
 
 /** The clock, refreshed each minute, so a query keyed on it does not refetch on every render. */
 function useMinuteClock(): number {
@@ -130,6 +133,23 @@ export function TariffPage() {
         : [],
     [draft, events],
   );
+
+  // The tariff this editor last published, found from the VTN rather than remembered: the newest
+  // event carrying one of the draft's signals, created in the last day. The comparison it feeds
+  // is therefore the same after a reload, on another device, or from another session.
+  const lastPublished = useMemo(() => {
+    if (!draft) return undefined;
+    return events
+      .filter((e) => {
+        const age = nowMs - Date.parse(e.createdDateTime ?? "");
+        return (
+          age >= 0 &&
+          age <= COMPARE_WITHIN_MS &&
+          eventPayloadTypes(e.intervals).some((t) => draft.types.includes(t))
+        );
+      })
+      .sort((a, b) => Date.parse(b.createdDateTime!) - Date.parse(a.createdDateTime!))[0];
+  }, [draft, events, nowMs]);
 
   const patternStart = draft?.intervals[0] ? new Date(draft.intervals[0].start) : null;
   const patternEnd = draft?.intervals.length
@@ -231,6 +251,19 @@ export function TariffPage() {
               </Alert>
             )}
           </Paper>
+
+          {lastPublished?.createdDateTime && (
+            <Paper sx={{ p: 2 }} data-testid="tariff-comparison-card">
+              <Typography variant="h6" gutterBottom>
+                What the fleet planned: before and after “{lastPublished.eventName}”
+              </Typography>
+              <PlanComparison
+                publishedAt={lastPublished.createdDateTime}
+                targets={lastPublished.targets ?? []}
+                nowMs={nowMs}
+              />
+            </Paper>
+          )}
 
           <Paper sx={{ p: 2 }}>
             <Stack spacing={2}>

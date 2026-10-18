@@ -35,13 +35,21 @@ const PATTERN: PatternInterval[] = Array.from({ length: 24 }, (_, h) => ({
   payloads: [{ type: "PRICE", value: 0.08 }],
 }));
 
+let eventsData: Record<string, unknown>[] = [SEED_EVENT, OTHER_EVENT];
+
+vi.mock("../components/PlanComparison", () => ({
+  PlanComparison: (props: { publishedAt: string; targets: string[] }) => (
+    <div data-testid="plan-comparison-stub" data-published-at={props.publishedAt} data-targets={props.targets.join(",")} />
+  ),
+}));
+
 const loadMock = vi.fn();
 const createMock = vi.fn();
 const previewArgs: unknown[] = [];
 
 vi.mock("../api/hooks", () => ({
   useSignalRegistry: () => ({ data: REGISTRY, isError: false }),
-  useEvents: () => ({ data: [SEED_EVENT, OTHER_EVENT] }),
+  useEvents: () => ({ data: eventsData }),
   useEventPattern: () => ({ mutate: loadMock, isError: false }),
   useSignalPreview: (event: unknown) => {
     previewArgs.push(event);
@@ -89,6 +97,7 @@ function chooseSeed() {
 
 describe("TariffPage", () => {
   beforeEach(() => {
+    eventsData = [SEED_EVENT, OTHER_EVENT];
     loadMock.mockReset();
     createMock.mockReset();
     chartProps.length = 0;
@@ -147,6 +156,39 @@ describe("TariffPage", () => {
       expect((screen.getByTestId("cell-PRICE-0") as HTMLInputElement).value).toBe("0.16"),
     );
     expect(screen.getByTestId("recurrence-kind")).toHaveValue("forever");
+  });
+
+  it("offers no before/after comparison when the tariff was not published recently", async () => {
+    render(<TariffPage />);
+    chooseSeed(); // the seeded event is weeks old
+    await waitFor(() => expect(screen.getAllByTestId(/^cell-PRICE-/)).toHaveLength(24));
+    expect(screen.queryByTestId("tariff-comparison-card")).toBeNull();
+  });
+
+  it("compares the fleet's plans before and after the newest recent tariff, from the VTN's own record", async () => {
+    const publishedAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    eventsData = [
+      SEED_EVENT,
+      OTHER_EVENT,
+      { ...SEED_EVENT, id: "ev-new", eventName: "tou-edited", createdDateTime: publishedAt, targets: ["ven-1"] },
+    ];
+    render(<TariffPage />);
+    chooseSeed();
+    const stub = await screen.findByTestId("plan-comparison-stub");
+    expect(stub).toHaveAttribute("data-published-at", publishedAt);
+    expect(stub).toHaveAttribute("data-targets", "ven-1");
+    expect(screen.getByTestId("tariff-comparison-card")).toHaveTextContent("tou-edited");
+  });
+
+  it("ignores a recent event that carries none of the draft's signals", async () => {
+    eventsData = [
+      SEED_EVENT,
+      { ...OTHER_EVENT, id: "ev-cap-new", createdDateTime: new Date(Date.now() - 60_000).toISOString() },
+    ];
+    render(<TariffPage />);
+    chooseSeed();
+    await waitFor(() => expect(screen.getAllByTestId(/^cell-PRICE-/)).toHaveLength(24));
+    expect(screen.queryByTestId("tariff-comparison-card")).toBeNull();
   });
 
   it("discards edits back to the loaded series", async () => {

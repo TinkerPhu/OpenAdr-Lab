@@ -58,6 +58,10 @@ pub trait TelemetryPort: Send + Sync {
     /// for "did this VEN see the event" cannot recover a lost one.
     async fn publish_trace(&self, _body: TraceBody<'_>) {}
 
+    /// The plan this VEN has just adopted, for a fleet view of what sites intend to import and
+    /// export. State, not an event: the next adopted plan replaces it, so it is retained.
+    async fn publish_plan(&self, _body: PlanBody<'_>) {}
+
     /// Whether this VEN's publisher is connected, for `/health` and the VEN
     /// UI's diagnostics (`ui-transparency`: a feed with no visible surface is
     /// an incomplete implementation).
@@ -140,6 +144,52 @@ pub struct TraceBody<'a> {
 
 pub fn trace_body<'a>(ven_name: &'a str, event: &'a ControllerEvent) -> TraceBody<'a> {
     TraceBody { event, ven_name }
+}
+
+/// One slot of an adopted plan as the fleet channel carries it: the six fields a fleet view sums or
+/// prices, named exactly as `GET /plan` names them (`dto`). Power is kW, import and export apart.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct PlanSlotBody {
+    pub start: chrono::DateTime<chrono::Utc>,
+    pub end: chrono::DateTime<chrono::Utc>,
+    pub net_import_kw: f64,
+    pub net_export_kw: f64,
+    pub import_tariff_eur_kwh: f64,
+    pub export_tariff_eur_kwh: f64,
+}
+
+/// What a plan message says: a projection of the adopted `Plan`, not the plan. A full plan carries
+/// per-asset allocations and state for every slot (hundreds of kB) and would be retained once per
+/// VEN on the broker; the fleet view needs the site totals only.
+#[derive(Debug, Serialize)]
+pub struct PlanBody<'a> {
+    pub id: uuid::Uuid,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub trigger: &'a crate::entities::asset::PlanTrigger,
+    pub slots: Vec<PlanSlotBody>,
+    #[serde(rename = "venName")]
+    pub ven_name: &'a str,
+}
+
+pub fn plan_body<'a>(ven_name: &'a str, plan: &'a crate::entities::plan::Plan) -> PlanBody<'a> {
+    PlanBody {
+        id: plan.id,
+        created_at: plan.created_at,
+        trigger: &plan.trigger,
+        slots: plan
+            .slots
+            .iter()
+            .map(|s| PlanSlotBody {
+                start: s.start,
+                end: s.end,
+                net_import_kw: s.net_import_kw,
+                net_export_kw: s.net_export_kw,
+                import_tariff_eur_kwh: s.import_tariff_eur_kwh,
+                export_tariff_eur_kwh: s.export_tariff_eur_kwh,
+            })
+            .collect(),
+        ven_name,
+    }
 }
 
 /// The JSON a body goes onto the wire as. A body that will not serialise is a bug in its own
@@ -235,5 +285,66 @@ mod tests {
     fn telemetry_body_keeps_the_sign_of_exported_power() {
         let body = serde_json::to_value(telemetry_body("ven-1", &snapshot(-3.1))).unwrap();
         assert_eq!(body["grid"]["net_power_kw"], -3.1);
+    }
+
+    fn plan_with_flows() -> crate::entities::plan::Plan {
+        let start = chrono::Utc::now();
+        let mut plan = crate::services::test_support::plans::flat_plan(300, 4, start);
+        for (slot, (import_kw, export_kw)) in
+            plan.slots.iter_mut().zip([(2.0, 0.0), (0.0, 1.5), (3.25, 0.0), (0.0, 0.0)])
+        {
+            slot.net_import_kw = import_kw;
+            slot.net_export_kw = export_kw;
+        }
+        plan
+    }
+
+    /// The fleet view sums these, so they must be the plan's own numbers under the plan's own
+    /// names, and every slot must be there.
+    #[test]
+    fn plan_body_carries_the_plans_site_flows_under_the_plans_names() {
+        let plan = plan_with_flows();
+        let body = serde_json::to_value(plan_body("ven-4", &plan)).unwrap();
+        assert_eq!(body["venName"], "ven-4");
+        assert_eq!(body["id"], serde_json::json!(plan.id));
+        let slots = body["slots"].as_array().unwrap();
+        assert_eq!(slots.len(), plan.slots.len());
+        for (wire, slot) in slots.iter().zip(&plan.slots) {
+            assert_eq!(wire["net_import_kw"], slot.net_import_kw);
+            assert_eq!(wire["net_export_kw"], slot.net_export_kw);
+            assert_eq!(wire["import_tariff_eur_kwh"], slot.import_tariff_eur_kwh);
+            assert_eq!(wire["export_tariff_eur_kwh"], slot.export_tariff_eur_kwh);
+        }
+    }
+
+    /// A projection, not the plan: nothing per-asset goes on the broker.
+    #[test]
+    fn plan_body_leaves_out_what_a_fleet_view_does_not_need() {
+        let body = serde_json::to_value(plan_body("ven-4", &plan_with_flows())).unwrap();
+        let slot = body["slots"][0].as_object().unwrap();
+        let mut keys: Vec<_> = slot.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "end",
+                "export_tariff_eur_kwh",
+                "import_tariff_eur_kwh",
+                "net_export_kw",
+                "net_import_kw",
+                "start"
+            ]
+        );
+    }
+
+    /// Import and export are separate fields, both non-negative (kW): a slot that imports 2 kW
+    /// says `net_export_kw: 0`, not `-2`.
+    #[test]
+    fn plan_body_states_import_and_export_as_separate_non_negative_kw() {
+        let body = plan_body("ven-4", &plan_with_flows());
+        assert!(body
+            .slots
+            .iter()
+            .all(|s| s.net_import_kw >= 0.0 && s.net_export_kw >= 0.0));
     }
 }

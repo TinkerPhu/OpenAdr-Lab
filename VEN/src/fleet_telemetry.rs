@@ -19,7 +19,9 @@ use async_trait::async_trait;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use tracing::{info, warn};
 
-use crate::controller::telemetry_port::{to_wire, TelemetryBody, TelemetryPort, TraceBody};
+use crate::controller::telemetry_port::{
+    to_wire, PlanBody, TelemetryBody, TelemetryPort, TraceBody,
+};
 
 /// Where this VEN publishes, and as whom.
 #[derive(Clone, Debug)]
@@ -250,6 +252,25 @@ impl TelemetryPort for FleetMqttPublisher {
             .await
         {
             tracing::debug!(topic, error = %e, "fleet trace publish dropped");
+        }
+    }
+
+    async fn publish_plan(&self, body: PlanBody<'_>) {
+        let topic = format!("{}/plan", self.topic_root);
+        let Ok(payload) = to_wire(&body).inspect_err(|e| {
+            tracing::error!(error = %e, "plan is not serialisable");
+        }) else {
+            return;
+        };
+        // QoS 1 and retained: unlike a decision this is state, so a subscriber joining later should
+        // find the plan the site is working to; but losing one adoption silently would leave the
+        // fleet view on a stale plan until the next replan, so it is delivered at least once.
+        if let Err(e) = self
+            .client
+            .publish(&topic, QoS::AtLeastOnce, true, payload)
+            .await
+        {
+            tracing::debug!(topic, error = %e, "fleet plan publish dropped");
         }
     }
 
