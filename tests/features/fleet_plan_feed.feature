@@ -18,7 +18,7 @@ Feature: Fleet plan feed (what the fleet intends to import and export)
   Scenario: A replan changes the fleet plan now but not as of an earlier instant
     Given I create a rate-system program and save its ID
     And I wait for the fleet plan to carry the plan the VEN is working to
-    And I remember this instant and the plan the VEN has
+    And I remember the plan the VEN has and the instant it took effect
     When I create a high-priced PRICE event for the saved program
     And I wait for the VEN to adopt a different plan
     And I wait for the fleet plan to carry the plan the VEN is working to

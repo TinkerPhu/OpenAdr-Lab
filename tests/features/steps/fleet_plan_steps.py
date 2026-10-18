@@ -57,14 +57,14 @@ def step_fleet_plan_counts_contributors(context):
         assert isinstance(p["contributingVens"], int) and p["contributingVens"] >= 1, p
 
 
-@given("I remember this instant and the plan the VEN has")
+@given("I remember the plan the VEN has and the instant it took effect")
 def step_remember_instant(context):
-    # `at` has whole-second precision; rounded down it can fall before a plan created earlier in
-    # the same second, so round up.
-    instant = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(seconds=1)
-    context.remembered_at = instant.strftime("%Y-%m-%dT%H:%M:%SZ")
+    """The instant is the plan's own `createdAt`, not the wall clock: a VEN replans on its own
+    schedule, so "now" may already belong to a successor of the plan being remembered."""
     context.earlier_plan_id = context.carried_plan_id
-    context.earlier_plan_created_at = ven_get("/plan").json().get("created_at")
+    context.remembered_at = next(
+        p["createdAt"] for p in context.fleet_plan["plans"] if p["planId"] == context.carried_plan_id
+    )
 
 
 @when("I create a high-priced PRICE event for the saved program")
@@ -107,8 +107,7 @@ def step_fleet_plan_earlier(context):
     then = _fleet_plan(context.remembered_at)
     listed = [(p["venName"], p["planId"], p["createdAt"]) for p in (then or {"plans": []})["plans"]]
     assert _carries(then, context.earlier_plan_id), (
-        f"as of {context.remembered_at} the fleet plan lists {listed}, not {context.earlier_plan_id}; "
-        f"the VEN's plan then was created at {context.earlier_plan_created_at}"
+        f"as of {context.remembered_at} the fleet plan lists {listed}, not {context.earlier_plan_id}"
     )
 
 
