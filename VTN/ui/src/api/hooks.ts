@@ -57,6 +57,38 @@ export function useFleetReactions(eventId: string) {
   });
 }
 
+/** One VEN's adopted plan, fetched only while its row is open. */
+export function useVenPlan(venName: string, open: boolean) {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["fleet", "vens", venName, "plan"],
+    queryFn: () => api.venPlan(venName),
+    enabled: open,
+    refetchInterval: 60_000,
+  });
+}
+
+/** Command one VEN's objective (`objective: null` releases it). */
+export function useSetVenObjective() {
+  const { api } = useBffContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ venName, objective }: { venName: string; objective: string | null }) =>
+      api.setVenObjective(venName, objective),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fleet", "power"] }),
+  });
+}
+
+/** Command the whole fleet's objective (`null` releases every VEN). */
+export function useSetFleetObjective() {
+  const { api } = useBffContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (objective: string | null) => api.setFleetObjective(objective),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fleet", "power"] }),
+  });
+}
+
 /** The signal bands over the same window the power chart is drawing. */
 export function useFleetSignals(minutes: number, aheadMinutes = 0) {
   const { api } = useBffContext();
@@ -93,12 +125,14 @@ export function useSignalPreview(event: unknown | null, fromIso: string, toIso: 
 /**
  * What the fleet planned to import and export. With `atIso` it is the plan current at that instant
  * (a past plan does not change, so it is not polled); without, it is now and follows the fleet.
+ * `enabled` false asks nothing (an instant that is not known yet).
  */
-export function useFleetPlan(atIso?: string) {
+export function useFleetPlan(atIso?: string, enabled = true) {
   const { api } = useBffContext();
   return useQuery({
     queryKey: ["fleet", "plan", atIso ?? "now"],
     queryFn: () => api.fleetPlan(atIso),
+    enabled,
     refetchInterval: atIso ? false : 30_000,
     // A 503 means the store is not connected; the card says so, so do not hammer it.
     retry: false,

@@ -158,6 +158,10 @@ impl ShiftableLoadAsset {
 }
 
 impl Asset for ShiftableLoadAsset {
+    fn surplus_claim_rank(&self) -> Option<u8> {
+        Some(super::shiftable_declared::SURPLUS_CLAIM_RANK)
+    }
+
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
         let s: &ShiftableLoadState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);

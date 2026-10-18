@@ -2,13 +2,21 @@
 
 mod arbiter_glue;
 mod context;
-mod dispatch_override;
 mod feeds;
 mod finalize;
+#[cfg(test)]
+#[path = "tests/forecast_guard.rs"]
+mod forecast_guard;
 mod forecast_wiring;
 mod post_lock;
 mod publish;
 mod setpoints;
+#[cfg(test)]
+#[path = "tests/setpoints_golden.rs"]
+mod setpoints_golden;
+#[cfg(test)]
+#[path = "tests/switch_back.rs"]
+mod switch_back;
 mod tick;
 mod usage_sim_plan_ahead;
 

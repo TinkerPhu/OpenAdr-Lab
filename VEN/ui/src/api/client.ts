@@ -1,6 +1,6 @@
 import type {
   VtnEvent, Program, Report, ReportSubmissionRecord, ReportWindowSize, SensorSnapshot, SimSnapshot, ControllerEvent,
-  SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, AssetLedgerEntry, AssetLedgerHistory,
+  SimInjectState, PlannedRates, OadrCapacityState, CapacitySchedule, Plan, PlannerObjective, ObjectiveSetting, AssetLedgerEntry, AssetLedgerHistory,
   UserRequestWithSession, CreateUserRequestBody, ControlDescriptor,
   SiteHeadroom, SiteHeadroomSample, SiteHeadroomForecastSlot,
   CapacityCurves,
@@ -282,6 +282,13 @@ export class VenApi {
   async measurement(): Promise<MeasurementResponse> {
     const r = await this.getReq("/measurement");
     if (!r.ok) throw new Error(`measurement ${r.status}`);
+    return r.json();
+  }
+
+  /** GET /plan/objective: the objective in force, who set it and when. */
+  async planObjective(): Promise<ObjectiveSetting> {
+    const r = await this.getReq("/plan/objective");
+    if (!r.ok) throw new Error(`planObjective ${r.status}`);
     return r.json();
   }
 

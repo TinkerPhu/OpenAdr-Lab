@@ -29,14 +29,21 @@ const mockObligations = [
     reading_type: "DIRECT_READ", resource_name: null,
     due_at: new Date(Date.now() + 3_600_000).toISOString(),
     interval_width_s: 900, submit_every_s: 900, fulfilled: false,
-    created_at: new Date().toISOString(), historical: true,
+    created_at: new Date().toISOString(), historical: true, aggregate: false, ad_hoc: false,
   },
   {
     id: "ob-2", event_id: "e2", program_id: "p1", payload_type: "USAGE",
     reading_type: "DIRECT_READ", resource_name: null,
     due_at: new Date(Date.now() - 3_600_000).toISOString(),
     interval_width_s: 900, submit_every_s: 900, fulfilled: false,
-    created_at: new Date().toISOString(), historical: true,
+    created_at: new Date().toISOString(), historical: true, aggregate: false, ad_hoc: false,
+  },
+  {
+    id: "ob-3", event_id: "e3", program_id: "p1", payload_type: "USAGE_FORECAST",
+    reading_type: "FORECAST", resource_name: null,
+    due_at: new Date(Date.now() + 600_000).toISOString(),
+    interval_width_s: 900, submit_every_s: 900, fulfilled: false,
+    created_at: new Date().toISOString(), historical: false, aggregate: false, ad_hoc: true,
   },
 ];
 
@@ -223,6 +230,15 @@ describe("ReportsPage", () => {
   it("renders a past-due, unfulfilled obligation with an Overdue status", () => {
     renderReports();
     expect(screen.getByTestId("obligation-row-ob-2")).toHaveTextContent("Overdue");
+  });
+
+  // openspec opportunistic-objective 6.4: `frequency: 0` leaves the cadence to the VEN; the
+  // page says which obligations are ad hoc and how often each one goes out.
+  it("shows each obligation's cadence and marks ad hoc ones", () => {
+    renderReports();
+    expect(screen.getByTestId("obligation-row-ob-1")).toHaveTextContent("every 15 min");
+    expect(screen.getByTestId("obligation-row-ob-1")).not.toHaveTextContent("ad hoc");
+    expect(screen.getByTestId("obligation-row-ob-3")).toHaveTextContent("ad hoc, every 15 min");
   });
 });
 

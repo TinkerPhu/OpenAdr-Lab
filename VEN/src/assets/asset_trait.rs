@@ -263,6 +263,11 @@ pub trait Asset: Send + Sync {
         None
     }
 
+    /// Where this asset stands in claiming PV surplus without look-ahead (lower first), or
+    /// `None` if it never takes surplus or covers import (PV, base load). The same constant
+    /// the kind's MILP context returns, so live dispatch and plan attribution share one order.
+    fn surplus_claim_rank(&self) -> Option<u8>;
+
     /// The lever this asset offers the deviation arbiter, or `None` if it offers none.
     fn arbiter_lever(&self) -> Option<crate::entities::asset::ArbiterLever> {
         None

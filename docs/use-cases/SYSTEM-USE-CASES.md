@@ -229,8 +229,10 @@ retained), and the BFF holds the latest message per VEN and serves it at
 The two sources stay distinct on purpose. Reports are the record: durable,
 spec-shaped, exact. Telemetry is the live feed: lossy, a few seconds old at
 worst, and never the thing anything is *measured* by. Nothing a VEN publishes
-here can change what it does — instructions arrive as OpenADR events, where
-the spec's targeting and priority rules apply.
+here can change what it does, and grid instructions arrive as OpenADR events,
+where the spec's targeting and priority rules apply. The one message the lab
+sends a VEN on this channel is the operator's choice of its planner objective
+(§14), the same switch the VEN UI has.
 
 **Reading it correctly:**
 - Power is signed: import positive, export negative. A fleet sum that clamped
@@ -341,6 +343,41 @@ An operator changes the price schedule the fleet is told about and wants to see 
 - A stored repeating tariff loads as its 24-interval pattern, not as an expansion
 - The fleet plan: after a VEN adopts a plan it is on `GET /api/fleet/plan`; after a replan, "now" follows and an instant before the new price still answers with the earlier plan (`tests/features/fleet_plan_feed.feature`)
 - `tests/features/tariff_editor.feature`; the unit behaviour is in `VTN/ui/src/__tests__/signalDraft.test.ts`, `recurrence.test.ts` and `Tariff.test.tsx`
+
+---
+
+## 14. Comparing the Fleet With and Without Planning
+**Description:**
+A lab operator wants to see what planning is worth: the same fleet, the same day, once planning
+and once dispatching like a HEMS that does not plan. That needs one switch for the whole fleet,
+a view of what the fleet expects to draw either way, and a way back.
+
+**What the lab does:**
+- **Switch** on the VTN UI's Fleet page: per VEN (the Fleet command column) or for all (Fleet
+  objective, Apply to all; one VEN every 10 s, so their replans do not solve at once). The BFF
+  publishes a retained command on the VEN's `command/objective` leaf; the VEN applies it and
+  reports the objective, its source ("fleet") and the accepted objectives back on its
+  `objective` leaf. The Objective column shows what each VEN reports, and "pending" until it
+  reports the command applied.
+- **Before and after:** the Fleet plan card (the fleet's adopted plans summed, `GET
+  /api/fleet/plan`) names the objectives the fleet runs under and draws, faint behind the current
+  plan, the plan as of just before the last objective change (the BFF notes when each VEN's
+  objective changed): what the fleet intended before the switch, and what it intends now. Every
+  VEN also reports a `USAGE_FORECAST` to the VTN, ad hoc: at once when its plan's objective
+  changes, else every 15 minutes (`WIRE_PROFILE.md` v3).
+- **Drill-down:** a row opens to that VEN's adopted plan (net and per-asset power, from the same
+  plan store, `GET /api/fleet/vens/:ven/plan`); under the opportunistic objective it is a
+  simulated forecast.
+- **Release:** Release (per row) or Release all withdraws the command and each VEN returns to its
+  profile objective. A change made on the VEN UI afterwards stays.
+- **Restart:** a VEN restarted while commanded applies the retained command again; after a
+  release it starts on its profile objective.
+
+**What to test:**
+- `tests/features/fleet_objective_control.feature`: one VEN and the fleet switched, the VEN
+  reporting the fleet as source, release, a refused objective, the plan from before a switch and
+  the VEN's new plan, the ad hoc usage forecast, restart (`@resilience`)
+- The VEN side of the same objective: UC-19 in `HEMS-USE-CASE-OBSERVATION-MANUAL.md`
 
 ---
 

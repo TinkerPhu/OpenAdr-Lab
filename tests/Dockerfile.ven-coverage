@@ -55,6 +55,13 @@ COPY lab-core/ /lab-core/
 # (linking HiGHS + aws-lc-rs simultaneously exceeds 1500 MiB).
 ENV RUST_BACKTRACE=1
 
+# Cargo trusts file times for path crates. A cached COPY layer keeps the times of the build that
+# made it, so once another branch has compiled into the shared target volume these sources look
+# older than its artifacts and cargo reuses them (the CI runner checked a branch against main's
+# lab-core). Stamping them when the container starts makes every run compile what it was given;
+# a RUN step would not help, the layer cache replays it with the old times.
+ENTRYPOINT ["sh", "-c", "find /app/src /app/tests /app/benches /lab-core -name '*.rs' -exec touch {} + 2>/dev/null; exec \"$@\"", "--"]
+
 # --out Html for humans, --out Json for later automated analysis (GB-30).
 # --output-dir is bind-mounted by the compose service so the report survives
 # past the container's --rm.

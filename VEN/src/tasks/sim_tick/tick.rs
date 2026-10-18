@@ -96,23 +96,13 @@ pub(crate) async fn tick_once(
         let heater_emergency_by_asset =
             heater_emergency_modes(&ctx.inject, &outcome.heater_emergency_mode, &pre_snap);
 
-        sim_guard.tick(crate::simulator::TickInputs {
-            pv_irradiance_override: ctx.inject.pv_irradiance,
-            pv_tau_s: ctx.inject.pv_tau_s,
-            pv_generation_limit_override: resolved_pv_generation_limit.limit_kw,
-            pv_curtailment_source: resolved_pv_generation_limit.source,
-            ambient_temp_c_override: ctx.inject.ambient_temp_c,
-            heater_temp_min_override: ctx.inject.heater_temp_min_c,
-            heater_temp_max_override: ctx.inject.heater_temp_max_c,
+        sim_guard.tick(tick_inputs(
+            &ctx,
+            &resolved_pv_generation_limit,
             heater_emergency_by_asset,
-            base_load_kw_override: ctx.inject.base_load_kw,
-            base_load_alpha: ctx.inject.base_load_alpha,
-            ev_plugged_override: ctx.inject.ev_plugged,
-            ev_soc_target_override: ctx.inject.ev_soc_target,
-            ev_departure_by_asset: ctx.ev_departure_by_asset.clone(),
-            feeds: ctx.feeds.clone(),
-            ..crate::simulator::TickInputs::new(dt_s, now, std::mem::take(&mut outcome.setpoints))
-        });
+            (dt_s, now),
+            std::mem::take(&mut outcome.setpoints),
+        ));
 
         let (tick_sensor, tick_sim_snap, tick_site_headroom, tick_forecast, tick_capacity_curves) =
             super::finalize::finalize_tick_outputs(&mut sim_guard, &ctx, now);
@@ -172,3 +162,32 @@ pub(crate) async fn tick_once(
 #[cfg(test)]
 #[path = "tick_tests.rs"]
 mod tick_tests;
+
+/// This tick's simulator inputs: the sim injects, the resolved PV generation limit, each
+/// heater's emergency mode, each EV's departure, the request targets and the feeds.
+fn tick_inputs(
+    ctx: &super::context::TickContext,
+    pv_limit: &crate::controller::dispatcher::ResolvedPvGenerationLimit,
+    heater_emergency_by_asset: std::collections::HashMap<String, (Option<bool>, Option<bool>)>,
+    (dt_s, now): (f64, chrono::DateTime<chrono::Utc>),
+    setpoints: std::collections::HashMap<String, f64>,
+) -> crate::simulator::TickInputs {
+    crate::simulator::TickInputs {
+        pv_irradiance_override: ctx.inject.pv_irradiance,
+        pv_tau_s: ctx.inject.pv_tau_s,
+        pv_generation_limit_override: pv_limit.limit_kw,
+        pv_curtailment_source: pv_limit.source,
+        ambient_temp_c_override: ctx.inject.ambient_temp_c,
+        heater_temp_min_override: ctx.inject.heater_temp_min_c,
+        heater_temp_max_override: ctx.inject.heater_temp_max_c,
+        heater_emergency_by_asset,
+        base_load_kw_override: ctx.inject.base_load_kw,
+        base_load_alpha: ctx.inject.base_load_alpha,
+        ev_plugged_override: ctx.inject.ev_plugged,
+        ev_soc_target_override: ctx.inject.ev_soc_target,
+        ev_departure_by_asset: ctx.ev_departure_by_asset.clone(),
+        request_targets: ctx.request_targets(),
+        feeds: ctx.feeds.clone(),
+        ..crate::simulator::TickInputs::new(dt_s, now, setpoints)
+    }
+}

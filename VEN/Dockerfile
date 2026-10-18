@@ -38,12 +38,18 @@ COPY VEN/profiles ./profiles
 # rebuilds only the dependencies that changed -- not HiGHS and every other crate,
 # as a layer keyed on the lockfile would. The binary is copied out in the same
 # step because a cache mount is not part of the image.
+# Cargo judges staleness by file times, and a cached COPY layer brings back the times of the
+# build that made it: after another branch compiled into the shared `target/`, cargo would keep
+# that branch's lab-core (observed on the CI runner). Touching the sources first, inside this
+# step, makes the build compile what it was given; when the step itself is cached, its output
+# already came from these sources.
 # `release` for production; the E2E stack passes `ci` (see Cargo.toml).
 ARG CARGO_PROFILE=release
 RUN --mount=type=cache,id=ven-cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=ven-cargo-git,target=/usr/local/cargo/git \
     --mount=type=cache,id=ven-target,target=/repo/VEN/target,sharing=locked \
-    cargo build --profile "$CARGO_PROFILE" && cp "target/$CARGO_PROFILE/ven-app" /ven-app
+    find src /repo/lab-core/src -name '*.rs' -exec touch {} + \
+    && cargo build --profile "$CARGO_PROFILE" && cp "target/$CARGO_PROFILE/ven-app" /ven-app
 
 FROM debian:bookworm-slim
 RUN apt-get update \

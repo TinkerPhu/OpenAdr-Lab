@@ -36,6 +36,9 @@ pub struct ArbiterDiagnostics {
     /// (kW, both passes) — removed from its carried command next tick (R-104).
     #[serde(default)]
     pub bridge_kw_by_asset: HashMap<String, f64>,
+    /// The opportunistic pass's last tick; `None` under every planning objective.
+    #[serde(default)]
+    pub opportunistic: Option<crate::controller::arbiter::OpportunisticOutcome>,
     pub updated_at: Option<DateTime<Utc>>,
 }
 

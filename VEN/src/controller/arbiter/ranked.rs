@@ -256,3 +256,7 @@ pub(crate) fn apply_ranked_levers(
     applied.bridge_kw_by_asset = bridge.into_bridge_kw_by_asset();
     applied
 }
+
+#[cfg(test)]
+#[path = "ranked_frozen_tests.rs"]
+mod ranked_frozen_tests;

@@ -3596,3 +3596,82 @@ needs `pub` and asking the server. The same applies to a table: `event_quantity_
 nothing could list the types without a second list; turning it into a public table that the function reads
 meant the registry endpoint cost no new data. Look at what the shared function hides before copying it.
 
+## A pass that starts from the base every tick must allocate open-loop (2026-10-16)
+
+- The arbiter's lever loop corrects closed-loop: a lever is credited with what its asset draws
+  **this tick**. That is right for deviation correction, which carries its last command forward,
+  and wrong for a pass that rebuilds every command from the asset's default each tick: a charger
+  whose command lands one tick late is credited 0, its share goes to the next lever, and on the
+  next balanced tick its command is reset, so it toggles. Such a pass commands each asset what it
+  should draw once the command lands, from this tick's balance (as `apply_ev_lever_opportunistic`
+  always did); the same balance then gives the same commands every tick, and a test pins that.
+
+## A golden over floating sums of a HashMap compares decisions, not bits (2026-10-16)
+
+- A bit-exact tick golden failed against itself on the next run: `projected_net_kw` sums over a
+  `HashMap`, whose iteration order changes per process, so the last bit of a sum moves. Compare at
+  a stated tolerance (1e-9 kW here) and say why in the golden's header; run it in three separate
+  processes before trusting it.
+
+## A limit judged on this tick releases a lagging actuator it has just cut (2026-10-17)
+
+- The limit pass projected import with each asset's power **this tick**. For the EV charger,
+  which applies a command a tick late, that is the previous command: once the pass had cut it, the
+  next tick read "within the limit" and let the full command through, which landed a tick later
+  above the limit. Import alternated 7.5 / 2.9 kW against 3 kW. A pass that enforces a limit
+  must also check where its commands **land** (`limit::hold_where_commands_land`); this tick's
+  part is the bridge's.
+- It hides at 1 s ticks (one tick in two over the limit looks like noise) and shows at once in a
+  forecast with 30-minute slots that runs the same decision. Stepping the live decision at a
+  coarse step is a cheap test for any controller with a lagging actuator.
+
+## An MQTT client's packet limit is part of the channel's contract (2026-10-17)
+
+- rumqttc caps packets at 10 KiB in both directions by default. Telemetry fitted, so the limit
+  was invisible until a leaf carried a whole plan (hundreds of kB): the sender fails such a
+  publish inside its event loop and drops the connection, re-sends on reconnect and fails again,
+  and a receiver at the default drops the connection that carries every publisher. Nothing
+  reports it as "too big" anywhere a fleet view would show.
+- Size the limit to the largest leaf, set it on every client of the channel from one constant
+  (`lab_core::fleet_channel::MAX_PACKET_BYTES`), and pin it with a test that a realistic body
+  exceeds the library default.
+
+## A cached image layer plus a shared cargo target volume compiles the wrong source (2026-10-17)
+
+- Cargo decides whether a path crate is fresh by file times. Docker's layer cache matches COPY by
+  content, not times, so a cached layer brings back the times of the build that first made it.
+  Once another branch has compiled a different version into the shared `target` volume, those
+  sources look older than its artifacts and cargo reuses them: the CI runner checked 051 against
+  main's `lab-core` and reported modules missing that the tested commit contains.
+- Stamp the sources where the compiler runs: in the harness images' `ENTRYPOINT`
+  (`tests/Dockerfile.ven-unit-test`, `tests/Dockerfile.ven-coverage`), and inside the `RUN` that
+  builds with a `target` cache mount (`VEN/Dockerfile`, `VTN/bff/Dockerfile`). A separate
+  `RUN touch` layer does not help: the cache replays it with the old times. The tell is a log with
+  no `Checking <crate>` / `Compiling <crate>` line for a crate whose source changed.
+
+## A scenario that waits for an asset to move must make it move (2026-10-18)
+
+- The test VEN's PV follows the real sun, so "wait until the battery shows in `/ledger`" passed
+  by day (PV moved it at once) and failed before sunrise (after a restart, the plan left it idle
+  for the rest of the suite). If a scenario needs an asset to move, a step of the scenario must
+  cause it: an inject, a load step, an objective that dispatches it. Whatever the plan or the
+  weather happens to do at that hour is not a cause.
+- A released `pv_irradiance` inject leaves a decaying `irradiance_offset` that the PV asset adds
+  to whichever source wins, a published measurement included (`assets/pv.rs`, `step_inner`), and
+  with a time constant of about 47 minutes it outlives the scenario that released it. A scenario
+  that reads PV from a measurement starts with "the VEN-1 pv irradiance offset is flushed to
+  zero": not injecting irradiance itself is not enough, since an earlier feature's midday "no PV"
+  turned a published 5 kW into 0.3 kW. A failure that comes and goes with the hour of the run is
+  the tell.
+
+## Two branches can build one concept twice; the rebase is where it is caught (2026-10-18)
+
+- 051 and 053 both put the adopted plan on the fleet channel's `plan` leaf and both summed a fleet
+  forecast, from different sources, in branches that never saw each other. Git reported it as a few
+  text conflicts; the real conflict was two implementations of "what the fleet intends".
+- When a rebase conflicts in a shared surface (a topic leaf, a port method, a route family), read
+  what the other side built before resolving lines: two methods of one name on one trait, or two
+  publishers of one topic, is a design question, not a merge. Keep the merged, tested one and
+  widen it for the second caller; delete the copy.
+- Before building a cross-cutting producer (a topic, a store, a BFF sum), look at the open
+  `openspec/changes/` and the branches in CI for the same noun.

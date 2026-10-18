@@ -13,15 +13,19 @@
 //!
 //! Deliberately an outbound port with no reply. A VEN publishes what it is
 //! doing; nothing it publishes here can change what it does. Anything that
-//! *instructs* a VEN arrives as an OpenADR event through `VtnPort`, where the
-//! spec's rules about targeting and priority apply — a side channel that could
-//! also command would be a way around them.
+//! *instructs* a VEN about the grid arrives as an OpenADR event through
+//! `VtnPort`, where the spec's rules about targeting and priority apply. The
+//! one inbound message on the same broker, `command/objective`, is not a grid
+//! instruction but the lab operator's version of the VEN UI's objective switch
+//! (openspec `opportunistic-objective` D10); it reaches the VEN through its own
+//! channel to `tasks::fleet_command`, not through this port.
 
 use async_trait::async_trait;
 use serde::Serialize;
 
 use crate::controller::sim_snapshot::SimSnapshot;
 use crate::controller::trace::ControllerEvent;
+use crate::entities::objective_setting::ObjectiveSetting;
 
 /// What a VEN publishes about itself, and where.
 ///
@@ -76,6 +80,11 @@ pub trait TelemetryPort: Send + Sync {
     fn publishes(&self) -> bool {
         true
     }
+
+    /// The objective in force and its source, on the retained `objective` leaf:
+    /// at start-up and on every change. Returns at once whatever the broker is
+    /// doing, because its callers are a route and the objective setter.
+    fn publish_objective(&self, _setting: &ObjectiveSetting) {}
 }
 
 /// The port when no broker is configured.
@@ -147,26 +156,31 @@ pub fn trace_body<'a>(ven_name: &'a str, event: &'a ControllerEvent) -> TraceBod
 }
 
 /// One slot of an adopted plan as the fleet channel carries it: the six fields a fleet view sums or
-/// prices, named exactly as `GET /plan` names them (`dto`). Power is kW, import and export apart.
+/// prices, and each asset's planned kW for the Fleet page's per-VEN plan, named exactly as
+/// `GET /plan` names them (`dto`). Power is kW, import and export apart.
 #[derive(Debug, Serialize, PartialEq)]
-pub struct PlanSlotBody {
+pub struct PlanSlotBody<'a> {
     pub start: chrono::DateTime<chrono::Utc>,
     pub end: chrono::DateTime<chrono::Utc>,
     pub net_import_kw: f64,
     pub net_export_kw: f64,
     pub import_tariff_eur_kwh: f64,
     pub export_tariff_eur_kwh: f64,
+    pub planned_kw_by_asset: &'a std::collections::HashMap<String, f64>,
 }
 
 /// What a plan message says: a projection of the adopted `Plan`, not the plan. A full plan carries
 /// per-asset allocations and state for every slot (hundreds of kB) and would be retained once per
-/// VEN on the broker; the fleet view needs the site totals only.
+/// VEN on the broker; the fleet view needs the site totals, and the per-VEN plan each asset's kW
+/// and what the plan was solved for.
 #[derive(Debug, Serialize)]
 pub struct PlanBody<'a> {
     pub id: uuid::Uuid,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub trigger: &'a crate::entities::asset::PlanTrigger,
-    pub slots: Vec<PlanSlotBody>,
+    pub objective: crate::entities::planner_params::PlannerObjective,
+    pub solve_status: crate::entities::plan_outcome::SolveStatus,
+    pub slots: Vec<PlanSlotBody<'a>>,
     #[serde(rename = "venName")]
     pub ven_name: &'a str,
 }
@@ -176,6 +190,8 @@ pub fn plan_body<'a>(ven_name: &'a str, plan: &'a crate::entities::plan::Plan) -
         id: plan.id,
         created_at: plan.created_at,
         trigger: &plan.trigger,
+        objective: plan.objective,
+        solve_status: plan.solve_status,
         slots: plan
             .slots
             .iter()
@@ -186,6 +202,7 @@ pub fn plan_body<'a>(ven_name: &'a str, plan: &'a crate::entities::plan::Plan) -
                 net_export_kw: s.net_export_kw,
                 import_tariff_eur_kwh: s.import_tariff_eur_kwh,
                 export_tariff_eur_kwh: s.export_tariff_eur_kwh,
+                planned_kw_by_asset: &s.planned_kw_by_asset,
             })
             .collect(),
         ven_name,
@@ -319,7 +336,8 @@ mod tests {
         }
     }
 
-    /// A projection, not the plan: nothing per-asset goes on the broker.
+    /// A projection, not the plan: of what a slot holds per asset only the planned kW goes on the
+    /// broker, never the allocations or the asset state.
     #[test]
     fn plan_body_leaves_out_what_a_fleet_view_does_not_need() {
         let body = serde_json::to_value(plan_body("ven-4", &plan_with_flows())).unwrap();
@@ -334,8 +352,47 @@ mod tests {
                 "import_tariff_eur_kwh",
                 "net_export_kw",
                 "net_import_kw",
+                "planned_kw_by_asset",
                 "start"
             ]
+        );
+    }
+
+    /// The per-VEN plan on the Fleet page says what the plan was solved for and how, and draws
+    /// each asset's planned kW.
+    #[test]
+    fn plan_body_carries_the_objective_the_solve_status_and_each_assets_kw() {
+        let mut plan = plan_with_flows();
+        plan.slots[0]
+            .planned_kw_by_asset
+            .insert("battery".into(), -1.5);
+        let body = serde_json::to_value(plan_body("ven-4", &plan)).unwrap();
+        assert_eq!(body["objective"], serde_json::json!(plan.objective));
+        assert_eq!(body["solve_status"], serde_json::json!(plan.solve_status));
+        assert_eq!(body["slots"][0]["planned_kw_by_asset"]["battery"], -1.5);
+    }
+
+    /// A day of 5-minute slots with five assets is what a VEN publishes: over the MQTT client's
+    /// 10 KiB default, so both fleet clients must raise it, and well inside the limit they set.
+    #[test]
+    fn a_days_plan_body_needs_the_raised_packet_limit_and_fits_it() {
+        let mut plan =
+            crate::services::test_support::plans::flat_plan(300, 288, chrono::Utc::now());
+        for slot in &mut plan.slots {
+            for asset in ["pv", "battery", "ev", "heater", "base_load"] {
+                slot.planned_kw_by_asset.insert(asset.into(), 1.25);
+            }
+        }
+        let bytes = serde_json::to_vec(&plan_body("ven-12", &plan))
+            .unwrap()
+            .len();
+        assert!(
+            bytes > 10 * 1024,
+            "{bytes} bytes: the 10 KiB default would take this plan"
+        );
+        assert!(
+            bytes < lab_core::fleet_channel::MAX_PACKET_BYTES / 4,
+            "{bytes} bytes leaves no room under MAX_PACKET_BYTES"
         );
     }
 

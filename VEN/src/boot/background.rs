@@ -263,3 +263,24 @@ pub fn spawn_fleet_plan(
         ven_name,
     );
 }
+
+/// The objective on the fleet channel (openspec `opportunistic-objective` D10): the
+/// start-up setting goes out on the `objective` leaf (the publisher re-sends it on every
+/// connect), and the commands arriving on `command/objective` are carried out. Spawned during
+/// assembly like the trace bridge, so a retained command is consumed as soon as it arrives.
+pub async fn spawn_fleet_commands(
+    commands: Option<tokio::sync::mpsc::Receiver<Vec<u8>>>,
+    active_objective: &crate::app_ctx::ActiveObjective,
+    trigger_tx: &crate::app_ctx::PlanTriggerTx,
+    telemetry: &crate::app_ctx::Telemetry,
+) {
+    telemetry.publish_objective(&*active_objective.read().await);
+    if let Some(commands) = commands {
+        tasks::fleet_command::spawn(
+            commands,
+            active_objective.clone(),
+            trigger_tx.clone(),
+            telemetry.clone(),
+        );
+    }
+}

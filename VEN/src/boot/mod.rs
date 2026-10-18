@@ -19,7 +19,7 @@ use crate::config::Config;
 use crate::domain_params::build_domain_params;
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::asset_params::{AssetFeedConfig, AssetParams};
-use crate::entities::planner_params::{PlannerObjective, PlannerParams, SimulatorParams};
+use crate::entities::planner_params::{PlannerParams, SimulatorParams};
 use crate::planner_events::{PlannerEvent, PlannerEventTx};
 use crate::profile::{comms_loss::CommsLossConfig, Profile};
 use crate::services;
@@ -63,7 +63,7 @@ pub struct World {
 
     pub trigger_tx: Arc<watch::Sender<PlanTriggerSignal>>,
     pub planner_event_tx: PlannerEventTx,
-    pub active_objective: Arc<RwLock<PlannerObjective>>,
+    pub active_objective: crate::app_ctx::ActiveObjective,
     pub metrics_handle: Arc<metrics_exporter_prometheus::PrometheusHandle>,
 }
 
@@ -118,10 +118,22 @@ impl World {
     ) -> Self {
         let (sim_params, planner_params, asset_params) = build_domain_params(&profile);
         let data_dir = data_dir_from(cfg);
-        let ports = Ports::build(cfg, &profile, &data_dir);
+        let mut ports = Ports::build(cfg, &profile, &data_dir);
 
         background::spawn_fleet_trace(&state, ports.telemetry.clone(), cfg.ven_name.clone());
         background::spawn_fleet_plan(&state, ports.telemetry.clone(), cfg.ven_name.clone());
+        let active_objective = Arc::new(RwLock::new(
+            crate::entities::objective_setting::ObjectiveSetting::from_profile(
+                planner_params.objective,
+            ),
+        ));
+        background::spawn_fleet_commands(
+            ports.fleet_commands.take(),
+            &active_objective,
+            &trigger_tx,
+            &ports.telemetry,
+        )
+        .await;
         seed_from_store(&state, &ports).await;
 
         // Asset configs are always rebuilt from the profile, so profile
@@ -148,7 +160,7 @@ impl World {
 
         Self {
             notifier: services::notify::Notifier::new(ports.history.clone()),
-            active_objective: Arc::new(RwLock::new(planner_params.objective)),
+            active_objective,
             ven_name: cfg.ven_name.clone(),
             listen_addr: cfg.listen_addr.clone(),
             persist_path: cfg.persist_path.clone(),

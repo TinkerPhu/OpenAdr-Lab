@@ -15,6 +15,7 @@ pub mod heuristics;
 pub mod comfort;
 pub mod history_sampling;
 pub mod notify;
+pub mod objective;
 pub mod obligation;
 pub use obligation::ObligationService;
 

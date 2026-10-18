@@ -1,4 +1,4 @@
-import type { EventInput, FleetHistory, FleetLive, FleetPlan, FleetReactions, FleetSignals, HealthStatus, Program, PatternInterval, ProgramInput, Report, SignalPreview, VtnEvent, Ven, WireSignalFacts } from "./types";
+import type { EventInput, FleetHistory, FleetLive, FleetPlan, FleetReactions, FleetSignals, HealthStatus, PatternInterval, Program, ProgramInput, Report, SignalPreview, Ven, VenPlan, VtnEvent, WireSignalFacts } from "./types";
 import { debugLog } from "@lab/ui/debugLog";
 
 let reqCounter = 0;
@@ -60,6 +60,25 @@ export class BffApi {
     const r = await this.getReq("/api/fleet/power");
     if (!r.ok) throw new Error(`fleet power ${r.status}`);
     return r.json();
+  }
+
+  /** The plan a VEN adopted last, as it published it. */
+  async venPlan(venName: string): Promise<VenPlan> {
+    const r = await this.getReq(`/api/fleet/vens/${encodeURIComponent(venName)}/plan`);
+    if (!r.ok) throw new Error(`VEN plan ${r.status}`);
+    return r.json();
+  }
+
+  /** Command one VEN's objective; `null` releases the fleet's command. */
+  async setVenObjective(venName: string, objective: string | null): Promise<void> {
+    const r = await this.jsonReq("PUT", `/api/fleet/vens/${encodeURIComponent(venName)}/objective`, { objective });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `objective ${r.status}`);
+  }
+
+  /** Command every VEN, one at a time; `null` releases them all. */
+  async setFleetObjective(objective: string | null): Promise<void> {
+    const r = await this.jsonReq("PUT", "/api/fleet/objective", { objective });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `fleet objective ${r.status}`);
   }
 
   /** The fleet's stored telemetry over a window. */

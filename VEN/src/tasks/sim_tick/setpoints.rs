@@ -16,9 +16,6 @@ use crate::controller::SimSnapshot;
 use crate::entities::capacity::effective_capacity_limit;
 
 use super::context::TickContext;
-use super::dispatch_override::{
-    apply_comms_loss_clamp, apply_dispatch_override, comms_loss_setpoint_bounds_kw,
-};
 
 /// PHASE 2: build the plan's base setpoint allocation, then the arbiter's
 /// reactive layer on top of it (`controller::arbiter`): deviation correction
@@ -63,11 +60,16 @@ pub(crate) fn build_tick_setpoints(
             .map(|l| l.limit_kw);
     let hard_limit_kw = limit::hard_import_limit_kw(capacity_limit_kw, alert_active)
         .filter(|_| ctx.limit_enforcement_enabled);
-    let ev_overlay =
-        controller::arbiter::ev_overlays(sim_snap, plan_snap, now, |id| ctx.overlay_enabled.of(id));
+    // The opportunistic arm follows no plan allocation anywhere (D1): not in the base, not in
+    // the EV overlays, not as the slot the levers are priced in. So the forecast, which has no
+    // plan yet when it steps, decides as the live tick does.
+    let followed_plan = plan_snap.filter(|_| ctx.opportunistic.is_none());
+    let ev_overlay = controller::arbiter::ev_overlays(sim_snap, followed_plan, now, |id| {
+        ctx.overlay_enabled.of(id)
+    });
     let tick = controller::arbiter::ArbiterTick {
         sim: sim_snap,
-        plan_slot: plan_snap.and_then(|p| p.current_slot(now)),
+        plan_slot: followed_plan.and_then(|p| p.current_slot(now)),
         objective: plan_snap.map_or(PlannerObjective::MinCost, |p| p.objective),
         ev_overlay: &ev_overlay,
         live_kw,
@@ -80,7 +82,23 @@ pub(crate) fn build_tick_setpoints(
         prev_bridge_kw_by_asset: &ctx.bridge_kw_by_asset,
     };
 
-    let mut outcome = if ctx.deviation_arbiter_enabled {
+    let stages = controller::arbiter::DispatchStages {
+        dispatch_windows: &ctx.dispatch_windows,
+        alert_windows: &ctx.alert_windows,
+        comms_loss: ctx.comms_loss,
+        limit_incumbent_lever: ctx.limit_incumbent_lever.as_deref(),
+    };
+    if let Some(requests) = &ctx.opportunistic {
+        // The opportunistic objective: no plan allocation is followed (D1, D5); the one step
+        // the forecast runs too (D6) decides from this tick's balance and bounds it.
+        let defaults =
+            controller::dispatcher::build_setpoints_without_plan(sim_snap, thermostat_setpoints_kw);
+        let ev_switch = |id: &str| ctx.overlay_enabled.of(id);
+        return controller::arbiter::opportunistic_step(
+            &tick, defaults, requests, ev_switch, now, &stages,
+        );
+    }
+    let outcome = if ctx.deviation_arbiter_enabled {
         controller::arbiter::reconcile(&tick, &base_sp, ctx.incumbent_lever.as_deref())
     } else {
         let mut sp = base_sp;
@@ -91,25 +109,5 @@ pub(crate) fn build_tick_setpoints(
         }
     };
 
-    let sp = &mut outcome.setpoints;
-    let (dispatch, alerts) = (&ctx.dispatch_windows, &ctx.alert_windows);
-    apply_dispatch_override(sp, &tick, now, dispatch, alerts);
-    apply_comms_loss_clamp(sp, sim_snap, ctx.comms_loss);
-    let bounds_kw = comms_loss_setpoint_bounds_kw(sim_snap, ctx.comms_loss);
-    // A deviation-pass PV curtailment lowers generation, so the limit pass
-    // projects PV after it.
-    let pv_tighten_kw = outcome.pv_generation_limit_tighten_kw.unwrap_or(0.0);
-    let tightened = controller::arbiter::tighten_generation(live_kw, sim_snap, pv_tighten_kw);
-    let limit_tick = controller::arbiter::ArbiterTick {
-        live_kw: &tightened,
-        ..tick
-    };
-    let incumbent = ctx.limit_incumbent_lever.as_deref();
-    outcome.limit = limit::enforce_import_limit(&limit_tick, sp, incumbent, &bounds_kw);
-    // Limit-pass Curtail (alerts only) overrides a deviation-pass Absorb, heater by heater.
-    let limit_modes = outcome.limit.iter().flat_map(|l| &l.heater_emergency_mode);
-    let limit_modes: Vec<(String, (bool, bool))> =
-        limit_modes.map(|(id, m)| (id.clone(), *m)).collect();
-    outcome.heater_emergency_mode.extend(limit_modes);
-    outcome
+    controller::arbiter::dispatch_stages(outcome, &tick, now, &stages)
 }

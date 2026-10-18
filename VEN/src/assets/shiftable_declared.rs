@@ -13,6 +13,11 @@ use crate::controller::milp_planner::{
     DeclaredAsset, FlexibilityWindow, ObjectivePart, ShiftableLoadMilpContext,
 };
 
+/// Where this kind stands in claiming PV surplus, lower first: in the plan's allocation
+/// order (`AssetMilpContext::surplus_claim_rank`) and in live opportunistic dispatch
+/// (`Asset::surplus_claim_rank`), one declaration for both. A shiftable load claims PV surplus after the EV and the heater.
+pub(crate) const SURPLUS_CLAIM_RANK: u8 = 2;
+
 /// Deterministic earliest-start tie-break for a shiftable load [€ per start-slot index].
 ///
 /// Window offsets are measured from the ALIGNED grid start (now truncated to the
@@ -125,6 +130,28 @@ impl DeclaredAsset for DeclaredShiftableLoad<'_> {
 }
 
 impl AssetMilpContext for ShiftableLoadMilpContext {
+    /// The start choice is the valid start at which the trace first draws power, if any.
+    fn solution_from_trace(
+        &self,
+        net_kw: &[f64],
+        _states: &[std::collections::HashMap<String, f64>],
+    ) -> AssetSolution {
+        let first_on = net_kw.iter().position(|&kw| kw > 1e-6);
+        let starts = self
+            .valid_start_slots
+            .iter()
+            .map(|&j| if Some(j) == first_on { 1.0 } else { 0.0 })
+            .collect();
+        AssetSolution {
+            asset_id: self.asset_id.clone(),
+            net_power_kw: net_kw.to_vec(),
+            planned_state: Vec::new(),
+            storage: None,
+            warnings: Vec::new(),
+            detail: AssetSolutionDetail::ShiftableLoad { starts },
+        }
+    }
+
     fn asset_id(&self) -> &str {
         &self.asset_id
     }
@@ -147,7 +174,7 @@ impl AssetMilpContext for ShiftableLoadMilpContext {
 
     /// A shiftable load claims PV surplus after the EV and the heater.
     fn surplus_claim_rank(&self) -> u8 {
-        2
+        SURPLUS_CLAIM_RANK
     }
 
     #[cfg(test)]
@@ -177,6 +204,30 @@ impl AssetMilpContext for ShiftableLoadMilpContext {
 mod tests {
     use super::*;
     use crate::services::test_support::milp_pool::bound_range;
+
+    /// The start chosen is the valid start at which the trace first runs the load.
+    #[test]
+    fn solution_from_trace_starts_the_load_where_it_first_runs() {
+        let ctx = washing_machine();
+        let n = ctx.valid_start_slots.iter().max().unwrap() + ctx.duration_slots + 1;
+        let start = ctx.valid_start_slots[1];
+        let mut net_kw = vec![0.0; n];
+        for kw in net_kw.iter_mut().skip(start).take(ctx.duration_slots) {
+            *kw = ctx.power_kw;
+        }
+        let sol = ctx.solution_from_trace(&net_kw, &[]);
+        let AssetSolutionDetail::ShiftableLoad { starts } = &sol.detail else {
+            panic!("a shiftable load reads back its starts")
+        };
+        let chosen: Vec<usize> = starts
+            .iter()
+            .enumerate()
+            .filter(|(_, &y)| y > 0.5)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(chosen, vec![1]);
+        assert_eq!(sol.net_power_kw, net_kw);
+    }
 
     fn washing_machine() -> ShiftableLoadMilpContext {
         let now = chrono::Utc::now();

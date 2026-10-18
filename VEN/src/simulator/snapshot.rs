@@ -73,6 +73,7 @@ impl SimState {
                     emergency_what_ifs: cfg.emergency_what_ifs(&entry.state),
                     ac_ceiling_kw: cfg.ac_ceiling_kw(),
                     arbiter_lever: cfg.arbiter_lever(),
+                    surplus_claim_rank: cfg.surplus_claim_rank(),
                     roster_index,
                 },
             );

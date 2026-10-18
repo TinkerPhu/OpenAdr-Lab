@@ -85,7 +85,7 @@ pub fn build_router(ctx: AppCtx) -> Router {
         .route("/metrics", get(system::get_metrics))
         // HEMS Stage 1–3 routes
         .route("/plan", get(hems::get_plan))
-        .route("/plan/objective", put(hems::put_plan_objective))
+        .route("/plan/objective", hems::plan_objective_methods())
         .route("/plan/events", get(hems::get_plan_events))
         .route("/notifications", get(notifications::get_notifications))
         .route(

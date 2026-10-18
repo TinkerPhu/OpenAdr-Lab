@@ -16235,3 +16235,148 @@ the question went to the user before any code.
 - Not seen: a drag on the real chart in a real browser. The layer is tested with stand-in scales and
   pointer events; the first look at it is the screenshot task of `tariff-editor-workbench` (4.4).
 
+## 051: the opportunistic objective, groups 0-4 (051-opportunistic-objective)
+
+**What.** A planner objective `opportunistic` (`openspec/changes/opportunistic-objective`): the
+common non-planning HEMS as a baseline. Under it the tick follows no plan allocation; one pass
+(`controller/arbiter/opportunistic.rs`) shares the site balance out to every asset that declares a
+surplus-claim rank (EV, heater, shiftable load, battery: the same constants the MILP context
+returns), and storage covers import. Request modes declare how they are served without look-ahead
+(`UserRequestMode::non_planning_dispatch`); an EV session's target and a heater's start-now
+target reach the asset through per-asset tick inputs, so the asset says when it is done, and the
+heater holds a target through its own ceiling latch. The planning cycle does not solve it (an
+interim plan without slots, status `SIMULATED`, until the forecast of group 7); the gate adopts on
+any change of dispatch regime. VEN UI: the objective in the picker, a plan-status table per solve
+status, a "Simulated forecast" chip, an opportunistic readout in the arbiter diagnostics.
+
+**Why.** The lab could show that planning moves load, not what the same fleet does without it.
+
+**How planning mode is kept identical.** Before any production edit: a tick golden (18 planned
+scenarios x 30 ticks through `build_tick_setpoints`), `rank_levers` and the adoption gate against
+frozen copies on 10 000 random cases each. The opportunistic code sits behind two guards on
+`PlannerObjective::dispatches_from_plan()`; the planning no-plan window, the EV overlay, `reconcile`
+and the lever machinery are untouched, and a switch-back test shows the first planned tick after an
+opportunistic hour decides as a fresh planning VEN does.
+
+**Issues.** The first design put the pass on the shared closed-loop lever machinery; a charger with
+a one-tick lag would have toggled, so it became an open-loop allocation (design D2). A bit-exact
+tick golden failed against itself: the arbiter sums power over `HashMap`s. Two hand-written
+spellings of enums were consolidated on the way (`PlannerObjective`'s three lists, the plan-history
+store's `SolveStatus`/`WarningKind`). `entities/plan.rs` crossed 500 lines; the plan's outcome
+vocabulary moved to `entities/plan_outcome.rs`. Groups 5-10 (objective source, fleet channel,
+forecast, VTN UI, BDD, docs) are still open.
+
+**Group 5 (objective and its source).** `ObjectiveSetting` (objective, source `profile` /
+`ven_ui` / `fleet`, when it was set, the profile's objective, the accepted objectives) replaced the
+bare `ActiveObjective` value; `services::objective::set_objective` is the one setter, `GET
+/plan/objective` serves the setting, and the Planner page and Dashboard say who set the objective.
+Releasing fleet control was left for group 6, which brings its only caller.
+
+**Group 6 (the fleet channel, VEN side).** The VEN keeps two more retained leaves current on
+`lab-mqtt`, `objective` (the `GET /plan/objective` body, at start-up and on every change, from
+`set_objective`) and `plan` (each adopted plan), and reads `command/objective`. Every new publish
+is `try_publish` from a spawned task, so a route or the planning cycle never waits on the broker,
+and the newest body of each leaf is re-sent on every ConnAck. A command goes through one pure
+decision (`services::objective::decide_fleet_command`): a new `requested_at` applies with source
+`fleet`, the broker's redelivery of an applied one is ignored (a local change made since
+survives), an empty payload reverts to the profile objective only while the fleet's objective is
+still in force. `frequency: 0` is now the ad hoc report the spec defines: a forecast every 15
+minutes and at once when an adopted plan runs under a new objective, a measurement at the profile
+default (WIRE_PROFILE v3; the Reports page shows each obligation's cadence).
+
+**Issues.** The VEN and the BFF each spelled the fleet topic shape, the leaf names and the broker
+settings; they moved into `lab_core::fleet_channel` with the command body both sides use, and the
+power/energy conversions the BFF will need into `lab_core::units`. Threading the port into the
+planning cycle grew two functions already over the 100-line ratchet; the announced solve and the
+GB-55 hold became their own functions instead. A cargo run started while files were mid-edit
+reported errors that were not the change's; and `wsl bash -lc "...; echo $?"` from Git Bash
+printed `EXIT=0` for a failed cargo (the quoting swallowed the status) and lost its `/tmp` log, so
+builds ran through a script file with logs on the Windows side.
+
+**Group 7 (the forecast).** Under `opportunistic` the cycle steps a clone of the site through
+the planner's own slots with the live tick's decision and adopts what it saw
+(`simulator::opportunistic_forecast`, `milp_planner::plan_from_forecast`). The decision had lived
+in `tasks/sim_tick`, out of the simulator's reach; it became `controller::arbiter::
+opportunistic_step`, with the stages after any pass (`dispatch_stages`) moved into the arbiter,
+so the forecaster runs the same function. Each asset reads its own part back from the trace
+(`AssetMilpContext::solution_from_trace`); the plan then goes through `translate_to_plan` like a
+solved one, with status `SIMULATED`, the real cap and penalty exceedance of the trace, and D8's
+marginal values. A guard test pins that one forecast step and one live tick command the same
+setpoints, and the opportunistic arm stopped reading the plan for its lever slot and EV overlays,
+so a forecast plan with allocations cannot make the two diverge.
+
+**Issues.** The forecast's first limit test failed: import alternated between 7.5 and 2.9 kW
+against a 3 kW limit. The limit pass judged a lagging charger by what it draws this tick, released
+a cut it had just made, and the full command landed a tick later; at 1 s ticks this looks like
+noise. `limit::hold_where_commands_land` also checks where commands land. The opportunistic step
+applies it; planning mode would change recorded decisions (tick golden `plan_import_limit` shows
+the same release), which this change keeps identical, so that is R-151 for the user. `cycle.rs`
+was at the 200-line cap, so the guard moved to `tasks/planning/plan_for.rs`; `results.rs` (488)
+got its third caller of the new per-slot skeleton (7.1) through a new file.
+
+**Group 8 (the fleet side).** The BFF keeps each VEN's `objective` and `plan` leaves verbatim and
+the fleet's own retained command, and says per VEN whether a command is still pending. It
+commands one VEN or all through a `CommandPublisher` port, validated against the objectives each
+VEN itself declares, a fleet switch all or nothing and one VEN every `FLEET_OBJECTIVE_SPACING_S`.
+`GET /api/fleet/forecast` sums the online VENs' newest `USAGE_FORECAST` reports from the recorder
+table, converted with the unit each declares (`lab_core::units::mean_power_kw`), with the
+objectives behind each slot, and a `before` sum from each changed VEN's newest report before its
+objective changed. The seeded fleet-monitoring event asks for the forecast (frequency 0, profile
+v3). The VTN UI's Fleet page shows and commands the objectives, opens a VEN's plan, and draws the
+forecast dashed ahead of now with the pre-change sum fainter; both Fleet charts share one
+look-ahead.
+
+**Group 9 (BDD, docs, debts).** `ven_opportunistic_objective.feature` (UC-19) and
+`fleet_objective_control.feature`; `/plan/objective` is a declared scenario-cleanup family and
+every fleet command a scenario sends is released. UC-19, SYSTEM-USE-CASES §13, the architecture
+sections and fleet-monitor §6.2 describe the result; R-146..R-149 record what is left.
+
+**Issues.** D11 had the BFF capture a report id when a VEN's objective changes; holding only the
+moment and asking the recorder for the newest report before it needs no ingest-time database
+access and gives the same report. Summing only the changed VENs' old forecasts would not compare
+with the current total, so `before` keeps every other VEN's current forecast. Writing the fleet
+scenario showed that an ad hoc forecast obligation was first due 15 minutes after it was learned,
+so a new VEN reported no forecast for that long; it is now due at once. The BFF has no route-test
+harness (R-149), so its rules are pure functions with unit tests and the routes are E2E's.
+
+**CI unit-test harness compiles what it is given (051).** The second hand-off failed clippy on
+`lab_core::fleet_channel` not being found, although the tested commit contains it. The ticket
+before it (`fix/fleet-acl-test-no-root`) had just compiled main's `lab-core` into the shared
+target volume, and the cached COPY layer gave 051's unchanged sources the times of 051's first
+run, so cargo kept that ticket's artifacts (no `Checking lab-core` in the log). The E2E image build then failed the same way through its
+`ven-target` BuildKit cache mount. The unit-test and coverage images now touch the sources in
+their `ENTRYPOINT`, and the VEN and BFF image builds touch them inside the `RUN` that compiles;
+lab-core and the crate on top recompile each time, which they nearly always did anyway.
+
+**Two scenarios that passed or failed by the hour (051).** With the build fixed, the full suite
+failed on UC-11c (the battery never appeared in `/ledger`) and the PV-surplus scenario was
+flaky. UC-11c only checked that the battery had moved since the VEN started; by day PV moves it
+at once, but the run reached it before sunrise, after the restart scenario, and the plan left the
+battery idle for the 38 minutes that remained. A retained fleet command keeping VEN-1 on the
+opportunistic objective was the first suspect; a Node2 run in suite order showed the release
+works and the VEN back on its profile objective. UC-11c now makes the battery cover a base-load
+step under the opportunistic objective, which it does at any hour. The PV-surplus scenario
+started from the shared "no PV" inject and then published a 5 kW measurement: a released
+irradiance inject leaves a decaying offset that the PV asset adds to whichever source wins, the
+measurement included, so by day the VEN saw about 2.7 kW (traced tick by tick on Node2). Dropping
+its own inject was not enough: the next CI run reached it at midday, and an offset of -0.95 left
+by an earlier feature's "no PV" (time constant about 47 min) turned the 5 kW into 0.3 kW. A
+replay of the 34 features before it on Node3 showed that state; the scenario now first runs the
+existing "the VEN-1 pv irradiance offset is flushed to zero" step, which the real-measurement
+feature already used for the same reason.
+
+**One plan feed, not two (051 onto 053).** While 051 waited for CI, `main` took the 053 fleet plan
+feed: the VEN publishes each adopted plan on the `plan` leaf (`tasks/fleet_plan.rs`, a projection
+of `GET /plan`), the BFF stores every one and sums them "as of" any instant. 051 had built the same
+thing a second way: its fleet channel published the whole plan on the same leaf from the planning
+cycle, the BFF kept the latest in memory for the per-VEN drill-down, and `fleet_forecast.rs` summed
+the VENs' `USAGE_FORECAST` reports into a dashed forecast with a "before the change" line. Two
+answers to "what will the fleet draw" is the one-concept-one-function failure in its plainest form,
+so the rebase (the branch squashed to one commit to resolve it once; the originals stayed on a
+backup ref) kept 053's feed and moved 051's uses onto it: `PlanBody` gained `objective`,
+`solve_status` and each slot's `planned_kw_by_asset` (still no allocations or asset state, which
+were the size 053 avoided); the per-VEN plan reads the newest stored payload; the "before" line is
+the fleet plan one second before the last objective change, the same `instantBefore` rule the tariff
+comparison uses; the planner no longer takes a telemetry port. `fleet_forecast.rs`, its route,
+`lab_core::units::mean_power_kw` and the forecast overlay on the power chart are gone. The VEN still
+reports its ad hoc `USAGE_FORECAST`, now pinned by its own scenario rather than through the sum.

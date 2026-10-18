@@ -55,7 +55,12 @@ pub(crate) fn fallback_plan(
         Some(inp) => {
             let surplus_kw = inp.forecast_surplus_kw();
             (0..inp.n)
-                .map(|t| fallback_slot(inp, &surplus_kw, asset_contexts, now, t))
+                .map(|t| PlanTimeSlot {
+                    forecast_by_asset: forecast_by_asset(asset_contexts, None, t)
+                        .into_iter()
+                        .collect(),
+                    ..slot_skeleton(inp, &surplus_kw, now, t)
+                })
                 .collect()
         }
         None => vec![],
@@ -96,11 +101,14 @@ pub(crate) fn fallback_plan(
     }
 }
 
-/// One slot of the fallback plan: the inputs' prices, caps and forecasts, no allocation.
-fn fallback_slot(
+/// What slot `t` of any plan says about its inputs, whatever fills its allocations: its span,
+/// the tariffs and CO2 intensity, the caps, the baseline and PV forecasts and the PV surplus
+/// left after the baseline. It carries no allocation, no grid flow and no marginal cost, and
+/// counts the whole PV forecast as used; a plan built from a solution or a forecast overrides
+/// those fields, and only those.
+fn slot_skeleton(
     inp: &MilpInputs,
     surplus_kw: &[f64],
-    asset_contexts: &[Box<dyn AssetMilpContext>],
     now: DateTime<Utc>,
     t: usize,
 ) -> PlanTimeSlot {
@@ -128,9 +136,7 @@ fn fallback_slot(
         export_flexibility_kw: 0.0,
         planned_kw_by_asset: std::collections::HashMap::new(),
         planned_state_by_asset: std::collections::HashMap::new(),
-        forecast_by_asset: forecast_by_asset(asset_contexts, None, t)
-            .into_iter()
-            .collect(),
+        forecast_by_asset: std::collections::HashMap::new(),
     }
 }
 
@@ -278,11 +284,14 @@ pub(crate) fn translate_to_plan(
     let mut slots = Vec::with_capacity(n);
     let mut violation_count: usize = 0;
 
-    for t in 0..n {
-        let slot_start = now + Duration::seconds(cum_s[t]);
-        let slot_end = now + Duration::seconds(cum_s[t + 1]);
-        let surplus_available_kw = forecast_surplus_kw[t].max(0.0);
-        let mut surplus_remaining_kw = surplus_available_kw;
+    debug_assert_eq!(
+        marginal_cost_eur_per_kwh.len(),
+        n,
+        "one marginal cost per slot"
+    );
+    for (t, &marginal_cost) in marginal_cost_eur_per_kwh.iter().enumerate().take(n) {
+        let skeleton = slot_skeleton(inputs, &forecast_surplus_kw, now, t);
+        let mut surplus_remaining_kw = skeleton.surplus_available_kw;
         let forecasts = forecast_by_asset(asset_contexts, Some(sol), t);
 
         let allocations: Vec<AssetAllocation> = claim_order
@@ -305,22 +314,9 @@ pub(crate) fn translate_to_plan(
 
         // ── Assemble slot ───────────────────────────────────────────────
         slots.push(PlanTimeSlot {
-            slot_index: t,
-            start: slot_start,
-            end: slot_end,
-            import_tariff_eur_kwh: inputs.c_imp_eur_kwh[t],
-            export_tariff_eur_kwh: inputs.c_exp_eur_kwh[t],
-            co2_g_kwh: inputs.g_imp_kgco2_kwh[t] * 1000.0,
-            grid_effective_cost: inputs.c_imp_eur_kwh[t],
-            marginal_cost_import_eur_per_kwh: marginal_cost_eur_per_kwh[t],
-            marginal_cost_export_eur_per_kwh: marginal_cost_eur_per_kwh[t],
-            rate_estimated: inputs.rate_stale[t],
-            import_cap_kw: inputs.p_imp_max_cont_kw[t],
-            export_cap_kw: inputs.p_exp_max_cont_kw[t],
-            baseline_kw: inputs.load_forecast_kw[t],
-            pv_forecast_kw: inputs.generation_forecast_kw[t],
+            marginal_cost_import_eur_per_kwh: marginal_cost,
+            marginal_cost_export_eur_per_kwh: marginal_cost,
             pv_used_kw: generation_used_kw(&forecasts),
-            surplus_available_kw,
             planned_kw_by_asset: allocations
                 .iter()
                 .map(|a| (a.asset_id.clone(), a.power_kw))
@@ -328,8 +324,6 @@ pub(crate) fn translate_to_plan(
             allocations,
             net_import_kw: sol.p_imp_kw[t],
             net_export_kw: sol.p_exp_kw[t],
-            import_flexibility_kw: 0.0,
-            export_flexibility_kw: 0.0,
             // Each asset's own planned state for the slot (T008/T013/T017).
             planned_state_by_asset: sol
                 .assets
@@ -337,6 +331,7 @@ pub(crate) fn translate_to_plan(
                 .filter_map(|a| Some((a.asset_id.clone(), a.planned_state.get(t)?.clone())))
                 .collect(),
             forecast_by_asset: forecasts.into_iter().collect(),
+            ..skeleton
         });
     }
 

@@ -278,6 +278,10 @@ impl PvInverter {
 }
 
 impl Asset for PvInverter {
+    fn surplus_claim_rank(&self) -> Option<u8> {
+        None
+    }
+
     fn as_milp_participant(&self) -> Option<&dyn super::capability_traits::MilpParticipant> {
         Some(self)
     }
@@ -408,7 +412,7 @@ impl Asset for PvInverter {
     // PV implements none of D4's three capability traits; the trait's own
     // None defaults apply, matching AssetConfig's existing `_ => None`
     // fallback for PV in build_milp_context/resolve_request_target/
-    // available_storage_kwh/surplus_charge_kw/thermostat_setpoint_kw/
+    // available_storage_kwh/thermostat_setpoint_kw/
     // plan_trajectory.
 
     fn as_tick_overridable(&mut self) -> Option<&mut dyn TickOverridable> {
@@ -1086,6 +1090,7 @@ mod tests {
             ev_plugged_override: None,
             ev_soc_target_override: None,
             ev_departure_time: None,
+            heater_request_ceiling_c: None,
         };
         let mut asset_state = AssetState::Pv(state);
         pv.apply_tick_overrides(&mut asset_state, &overrides);

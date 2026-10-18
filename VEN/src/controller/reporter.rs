@@ -419,6 +419,7 @@ mod tests {
             created_at: Utc::now(),
             historical: true,
             aggregate: false,
+            ad_hoc: false,
         }
     }
 
@@ -507,6 +508,7 @@ mod tests {
             created_at: Utc::now(),
             historical: true,
             aggregate: false,
+            ad_hoc: false,
         };
         let empty: HashMap<String, Vec<AssetReportSample>> = HashMap::new();
         assert!(build_measurement_report_for_obligation(

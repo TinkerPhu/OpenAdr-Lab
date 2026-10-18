@@ -1,12 +1,12 @@
 use chrono::Utc;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::controller::{HistoryPort, SolverPort, WeatherForecastPort};
 use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::asset_params::AssetParams;
-use crate::entities::planner_params::{PlannerObjective, PlannerParams};
+use crate::entities::planner_params::PlannerParams;
 use crate::planner_events::PlannerEventTx;
 use crate::simulator::SimState;
 use crate::state::AppState;
@@ -14,6 +14,7 @@ use crate::state::AppState;
 mod assemble;
 mod cycle;
 mod cycle_state;
+mod plan_for;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_planning(
@@ -25,7 +26,7 @@ pub(crate) fn spawn_planning(
     solver: Arc<dyn SolverPort>,
     mut trigger_rx: tokio::sync::watch::Receiver<PlanTriggerSignal>,
     sim: Arc<Mutex<SimState>>,
-    active_objective: Arc<RwLock<PlannerObjective>>,
+    active_objective: crate::app_ctx::ActiveObjective,
     event_tx: PlannerEventTx,
     notifier: crate::services::notify::Notifier,
     now_fn: impl Fn() -> chrono::DateTime<Utc> + Send + Sync + 'static,
@@ -47,24 +48,9 @@ pub(crate) fn spawn_planning(
         // from mis-classifying timeout cycles as hard triggers, bypassing the gate.
         let mut wake_trigger = PlanTriggerSignal::bare(PlanTrigger::Periodic);
         loop {
-            // GB-55: hold a rate-change reaction for a jittered moment before
-            // solving. A VTN rate update reaches the whole fleet at once and hard
-            // triggers bypass GB-54's periodic grid, so without this every VEN
-            // solves on the same instant. Held *before* `now_fn()` so the plan is
-            // built from the time it is actually solved at, not from when the
-            // trigger arrived.
-            if matches!(wake_trigger.trigger, PlanTrigger::RateChange) {
-                let delay_s = crate::entities::planner_params::rate_change_delay_s(
-                    planner.rate_change_trigger_delay_s,
-                    planner.rate_change_trigger_jitter_pct,
-                    planner.replan_interval_s,
-                    rand::random::<f64>(),
-                );
-                if delay_s > 0 {
-                    info!(delay_s, "planner loop: holding RateChange replan (GB-55)");
-                    tokio::time::sleep(std::time::Duration::from_secs(delay_s)).await;
-                }
-            }
+            // Held *before* `now_fn()` so the plan is built from the time it is
+            // actually solved at, not from when the trigger arrived.
+            hold_rate_change(&planner, &wake_trigger.trigger).await;
 
             let wall_now = now_fn();
             // Align to the nearest step boundary so all replans within the same window
@@ -125,6 +111,25 @@ pub(crate) fn spawn_planning(
             };
         }
     })
+}
+
+/// GB-55: hold a rate-change reaction for a jittered moment before solving. A VTN rate update
+/// reaches the whole fleet at once and hard triggers bypass GB-54's periodic grid, so without
+/// this every VEN solves on the same instant.
+async fn hold_rate_change(planner: &PlannerParams, trigger: &PlanTrigger) {
+    if !matches!(trigger, PlanTrigger::RateChange) {
+        return;
+    }
+    let delay_s = crate::entities::planner_params::rate_change_delay_s(
+        planner.rate_change_trigger_delay_s,
+        planner.rate_change_trigger_jitter_pct,
+        planner.replan_interval_s,
+        rand::random::<f64>(),
+    );
+    if delay_s > 0 {
+        info!(delay_s, "planner loop: holding RateChange replan (GB-55)");
+        tokio::time::sleep(std::time::Duration::from_secs(delay_s)).await;
+    }
 }
 
 #[cfg(test)]
@@ -194,7 +199,11 @@ mod tests {
         let event_tx = Arc::new(event_bcast_tx);
         let solver = Arc::new(MockSolverPort::returning(minimal_plan()));
         let sim = minimal_sim();
-        let active_objective = Arc::new(RwLock::new(PlannerObjective::default()));
+        let active_objective = Arc::new(RwLock::new(
+            crate::entities::objective_setting::ObjectiveSetting::from_profile(
+                PlannerObjective::default(),
+            ),
+        ));
 
         let handle = spawn_planning(
             AppState::new(),
@@ -217,5 +226,61 @@ mod tests {
         handle.abort();
         let _ = trigger_tx; // keep alive until abort
                             // passes if no panic during construction and abort
+    }
+
+    /// 7.4: under the opportunistic objective the cycle adopts the forecast plan, with slots
+    /// over the planner's horizon and the simulated status, and never calls the solver.
+    #[tokio::test]
+    async fn an_opportunistic_cycle_adopts_a_forecast_plan() {
+        let (_trigger_tx, trigger_rx) =
+            watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
+        let (event_bcast_tx, _) = broadcast::channel::<PlannerEvent>(8);
+        let state = AppState::new();
+        let planner = PlannerParams {
+            planning_initial_delay_s: 0,
+            ..PlannerParams::default()
+        };
+        // A solve would panic into the infeasible fallback, which the status check rejects.
+        let solver = Arc::new(crate::services::test_support::mock_solver_port::PanickingSolverPort);
+        let handle = spawn_planning(
+            state.clone(),
+            planner.clone(),
+            10.0,
+            10.0,
+            vec![],
+            solver,
+            trigger_rx,
+            minimal_sim(),
+            Arc::new(RwLock::new(
+                crate::entities::objective_setting::ObjectiveSetting::from_profile(
+                    PlannerObjective::Opportunistic,
+                ),
+            )),
+            Arc::new(event_bcast_tx),
+            crate::services::notify::Notifier::new(None),
+            Utc::now,
+            Arc::new(crate::controller::NoopWeatherPort),
+            Default::default(),
+            None,
+            0,
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while state.active_plan().await.is_none() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        handle.abort();
+        let plan = state
+            .active_plan()
+            .await
+            .expect("the forecast plan is adopted");
+        assert_eq!(plan.objective, PlannerObjective::Opportunistic);
+        assert_eq!(
+            plan.solve_status,
+            crate::entities::plan::SolveStatus::Simulated
+        );
+        assert_eq!(
+            plan.slots.len(),
+            crate::entities::time_grid::slot_count(&planner.plan_zones)
+        );
     }
 }

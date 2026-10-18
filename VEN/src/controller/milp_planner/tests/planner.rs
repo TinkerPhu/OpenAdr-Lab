@@ -666,6 +666,13 @@ fn run_planner_infeasible_constraints_fallback_no_panic() {
         fn allocation_basis(&self) -> AllocationBasis {
             self.inner.allocation_basis()
         }
+        fn solution_from_trace(
+            &self,
+            net_kw: &[f64],
+            states: &[std::collections::HashMap<String, f64>],
+        ) -> AssetSolution {
+            self.inner.solution_from_trace(net_kw, states)
+        }
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }

@@ -1,6 +1,7 @@
 import { Alert, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
 import { useFleetPlan } from "../api/hooks";
 import { planDelta, replanProgress, type DirectionDelta } from "../utils/planDelta";
+import { instantBefore } from "../utils/fleetPlan";
 import { FleetPlanChart } from "./FleetPlanChart";
 
 const MINUS = "−";
@@ -42,7 +43,7 @@ export function PlanComparison({
   nowMs: number;
 }) {
   const publishedMs = Date.parse(publishedAt);
-  const reference = useFleetPlan(new Date(publishedMs - 1000).toISOString());
+  const reference = useFleetPlan(instantBefore(publishedAt));
   const result = useFleetPlan();
 
   if (reference.isError || result.isError) {

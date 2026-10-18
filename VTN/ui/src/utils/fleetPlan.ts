@@ -26,6 +26,15 @@ const samplesOf = (plan: FleetPlan, importKey: string, exportKey: string): Named
     ];
   });
 
+/**
+ * The instant to ask the fleet plan "as of" for the plan that stood before something happened at
+ * `iso` (a tariff published, an objective changed): one second earlier, so a plan adopted in
+ * answer to it is not counted.
+ */
+export function instantBefore(iso: string): string {
+  return new Date(Date.parse(iso) - 1000).toISOString();
+}
+
 export function planRows(plan: FleetPlan, reference?: FleetPlan): TimestampedRow[] {
   return mergeTimestampedSeries(
     [],

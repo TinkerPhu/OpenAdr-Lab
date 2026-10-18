@@ -33,21 +33,35 @@ def _sample_measurement_message(power_kw: float) -> dict:
     }
 
 
+def _publish_for_scenario(context, topic: str, power_kw: float) -> None:
+    """Publish a retained reading that lasts only this scenario.
+
+    The broker keeps the message and the VEN trusts it for five minutes (it reads the time from
+    `ts`), so a reading left behind outranks the PV model and every inject of the scenarios that
+    follow. When this scenario ends, a retained reading stamped an hour ago replaces it, which the
+    VEN treats as no reading at all.
+    """
+    _publish_mqtt(topic, _sample_measurement_message(power_kw))
+
+    def withdraw():
+        stale = {"power_kw": 0.0, "ts": "2000-01-01T00:00:00Z"}
+        _publish_mqtt(topic, stale)
+
+    context.add_cleanup(withdraw)
+
+
 PV_MEASURED_KW = 2.5
 BASE_LOAD_MEASURED_KW = 0.75
 
 
 @given("a PV measurement message is published to the test Mosquitto broker for VEN-1")
 def step_publish_pv_measurement(context):
-    _publish_mqtt(
-        "openadr-lab/measurement/ven-1/pv",
-        _sample_measurement_message(PV_MEASURED_KW),
-    )
+    _publish_for_scenario(context, "openadr-lab/measurement/ven-1/pv", PV_MEASURED_KW)
 
 
 @given("a PV measurement of {kw:g} kW is published to the test Mosquitto broker for VEN-1")
 def step_publish_pv_measurement_of(context, kw):
-    _publish_mqtt("openadr-lab/measurement/ven-1/pv", _sample_measurement_message(kw))
+    _publish_for_scenario(context, "openadr-lab/measurement/ven-1/pv", kw)
 
 
 @given("daylight gives the weather forecast a snow-free PV output of at least {kw:g} kW for VEN-1")
@@ -94,10 +108,7 @@ def step_derived_hours_covered(context):
 
 @given("a baseline-load measurement message is published to the test Mosquitto broker for VEN-1")
 def step_publish_base_load_measurement(context):
-    _publish_mqtt(
-        "openadr-lab/measurement/ven-1/base_load",
-        _sample_measurement_message(BASE_LOAD_MEASURED_KW),
-    )
+    _publish_for_scenario(context, "openadr-lab/measurement/ven-1/base_load", BASE_LOAD_MEASURED_KW)
 
 
 @given("no PV measurement has ever been published for VEN-1")

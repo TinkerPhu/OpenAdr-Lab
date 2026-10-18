@@ -6,7 +6,7 @@ import {
 import AddIcon from "@mui/icons-material/Add";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import EditIcon from "@mui/icons-material/Edit";
-import type { Report, ReportSubmissionRecord } from "../api/types";
+import type { OadrReportObligation, Report, ReportSubmissionRecord } from "../api/types";
 import { buildExampleResources } from "../utils/exampleResources";
 import {
   useReports, useReportSubmissions, useReportWindows, useSubmitReport, useUpdateReport, useEvents, usePrograms,
@@ -38,6 +38,12 @@ function latestSubmissionFor(
   return matches.reduce((newest, s) =>
     new Date(s.submitted_at).getTime() > new Date(newest.submitted_at).getTime() ? s : newest,
   );
+}
+
+/** How often an obligation is submitted; `ad hoc` when the VTN left it to the VEN (`frequency: 0`). */
+function obligationCadence(o: OadrReportObligation): string {
+  const every = o.submit_every_s % 60 === 0 ? `${o.submit_every_s / 60} min` : `${o.submit_every_s} s`;
+  return o.ad_hoc ? `ad hoc, every ${every}` : `every ${every}`;
 }
 
 export function ReportStatusChip({ submission }: { submission: ReportSubmissionRecord | null }) {
@@ -172,7 +178,7 @@ export function ReportsPage() {
         <Table size="small" data-testid="obligations-table">
           <TableHead>
             <TableRow>
-              <TableCell colSpan={5}>
+              <TableCell colSpan={6}>
                 <Typography variant="subtitle1">Pending Obligations</Typography>
               </TableCell>
             </TableRow>
@@ -181,6 +187,7 @@ export function ReportsPage() {
               <TableCell>Payload type</TableCell>
               <TableCell>Due</TableCell>
               <TableCell>Historical</TableCell>
+              <TableCell>Cadence</TableCell>
               <TableCell>Status</TableCell>
             </TableRow>
           </TableHead>
@@ -193,6 +200,7 @@ export function ReportsPage() {
                   <TableCell>{o.payload_type}</TableCell>
                   <TableCell>{new Date(o.due_at).toLocaleString()}</TableCell>
                   <TableCell>{o.historical ? "Yes" : "Forecast"}</TableCell>
+                  <TableCell>{obligationCadence(o)}</TableCell>
                   <TableCell sx={{ color: overdue ? "error.main" : undefined }}>
                     {o.fulfilled ? "Fulfilled" : overdue ? "Overdue" : "Pending"}
                   </TableCell>
@@ -201,7 +209,7 @@ export function ReportsPage() {
             })}
             {obligations.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} align="center" data-testid="obligations-empty">
+                <TableCell colSpan={6} align="center" data-testid="obligations-empty">
                   No pending obligations
                 </TableCell>
               </TableRow>

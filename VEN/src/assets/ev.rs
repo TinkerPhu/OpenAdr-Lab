@@ -239,6 +239,10 @@ impl EvCharger {
 }
 
 impl Asset for EvCharger {
+    fn surplus_claim_rank(&self) -> Option<u8> {
+        Some(super::ev_declared::SURPLUS_CLAIM_RANK)
+    }
+
     fn key_features(&self, _state: &AssetState) -> Vec<KeyFeature> {
         vec![KeyFeature::energy_kwh("capacity", self.battery_kwh)]
     }
@@ -503,17 +507,6 @@ impl RequestResolvable for EvCharger {
             (s.soc_frac - self.min_soc_frac).max(0.0) * self.battery_kwh,
             (1.0 - s.soc_frac).max(0.0) * self.battery_kwh,
         ))
-    }
-
-    /// Moved here verbatim from `AssetConfig::surplus_charge_kw`'s only real
-    /// arm (EV is the only asset kind that absorbs surplus today).
-    fn surplus_charge_kw(&self, state: &AssetState, surplus_kw: f64) -> Option<f64> {
-        let s: &EvState = own(state);
-        if s.plugged && s.soc_frac < self.soc_target_frac {
-            Some(surplus_kw.min(self.max_charge_kw))
-        } else {
-            None
-        }
     }
 }
 

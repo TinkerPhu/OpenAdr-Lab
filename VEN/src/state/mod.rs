@@ -1090,6 +1090,7 @@ mod tests {
             created_at: Utc::now(),
             historical: true,
             aggregate: false,
+            ad_hoc: false,
         }
     }
 

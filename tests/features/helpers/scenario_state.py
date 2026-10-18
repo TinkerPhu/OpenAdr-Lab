@@ -31,6 +31,7 @@ RESETS = [
     (re.compile(r"^/assets/[^/]+/comfort_curve$"), "comfort"),
     (re.compile(r"^/baseline-override$"), "baseline_override"),
     (re.compile(r"^/arbiter-settings$"), "arbiter"),
+    (re.compile(r"^/plan/objective$"), "objective"),
 ]
 
 # Path pattern -> why a mutation there needs no reset.
@@ -41,7 +42,7 @@ NO_RESET = [
 ]
 
 # Reachable from the VEN UI too, which bypasses api_client: always reset on the default VEN.
-ALWAYS_ON_DEFAULT_VEN = ("user_requests", "injects", "arbiter", "baseline_override", "comfort")
+ALWAYS_ON_DEFAULT_VEN = ("user_requests", "injects", "arbiter", "baseline_override", "comfort", "objective")
 
 # Families whose undo needs the value from before the scenario's first change.
 NEEDS_SNAPSHOT = ("soc", "battery_config")
@@ -143,6 +144,19 @@ def _reset_arbiter(base_url, _paths):
             f"arbiter reset on {base_url}")
 
 
+def _restore_objective(base_url, _paths):
+    # Back to the profile's objective (the VEN UI's switch reaches it too). It replans, so it runs
+    # after requests are cancelled and injects reset, against the site the next scenario finds.
+    setting = _get(base_url, "/plan/objective")
+    profile = setting.get("profile_objective")
+    if not profile:
+        print(f"[cleanup] LEAK: {base_url} reports no profile objective to restore: {setting}")
+        return
+    if setting.get("objective") != profile:
+        _expect(requests.put(f"{base_url}/plan/objective", json={"objective": profile}, timeout=HTTP_TIMEOUT),
+                f"objective restore on {base_url}")
+
+
 def _clear_baseline_override(base_url, _paths):
     _expect(requests.delete(f"{base_url}/baseline-override", timeout=HTTP_TIMEOUT),
             f"baseline override clear on {base_url}", ok=(200, 204, 404))
@@ -198,6 +212,7 @@ UNDO = [
     ("user_requests", _cancel_user_requests),
     ("injects", _reset_injects),
     ("arbiter", _reset_arbiter),
+    ("objective", _restore_objective),
     ("baseline_override", _clear_baseline_override),
     ("comfort", _clear_comfort_overrides),
     ("battery_config", _restore_battery_config),

@@ -39,6 +39,40 @@ export type FleetVenLive = {
   netPowerKw: number | null;
   state: string | null;
   receivedAt: string;
+  /** The VEN's own `objective` leaf (its `GET /plan/objective` body), passed through. */
+  objective?: VenObjective | null;
+  /** The fleet's command for this VEN, as the broker holds it; null once released. */
+  command?: ObjectiveCommand | null;
+  /** A command is in force that the VEN does not report applied yet. */
+  commandPending?: boolean;
+  /** When the BFF saw this VEN's objective last change (not set by the first one seen). */
+  objectiveChangedAt?: string | null;
+};
+
+/** What a VEN says about its objective (VEN `ObjectiveSetting`, wire names kept). */
+export type VenObjective = {
+  objective: string;
+  source: "profile" | "ven_ui" | "fleet";
+  set_at: string | null;
+  profile_objective: string;
+  available_objectives: string[];
+};
+
+/** The body of a VEN's `command/objective` leaf. */
+export type ObjectiveCommand = { objective: string; requested_at: string };
+
+/** The part of a VEN's adopted plan the drill-down draws: its `plan` leaf (VEN
+ *  `telemetry_port::plan_body`, wire names kept), as the BFF stored it. */
+export type VenPlan = {
+  objective: string;
+  solve_status: string;
+  slots: {
+    start: string;
+    end: string;
+    net_import_kw: number;
+    net_export_kw: number;
+    planned_kw_by_asset: Record<string, number>;
+  }[];
 };
 
 export type FleetLive = {

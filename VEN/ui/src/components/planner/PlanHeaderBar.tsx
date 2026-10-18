@@ -64,6 +64,8 @@ export function PlanHeaderBar({ plan }: Props) {
   // the timeout or by hitting the configured MIP-gap tolerance): distinct
   // from both a clean Optimal solve and the no-plan-at-all Infeasible case.
   const isSuboptimal = plan.solve_status === "TIME_LIMIT" || plan.solve_status === "GAP_LIMIT";
+  // The opportunistic objective: a forecast of dispatch without look-ahead, not a solve.
+  const isSimulated = plan.solve_status === "SIMULATED";
 
   // R-97 — which phase stopped early, when the plan carries the split. This is the
   // distinction `solve_status` alone cannot make, and it is not cosmetic: a phase-1
@@ -122,6 +124,12 @@ export function PlanHeaderBar({ plan }: Props) {
               color="warning"
               size="small"
             />
+          </Tooltip>
+        )}
+
+        {isSimulated && (
+          <Tooltip title="Opportunistic objective: no optimisation ran. This plan forecasts what dispatch without look-ahead will do (PV surplus absorbed in each asset's order, the battery covering import).">
+            <Chip data-testid="plan-simulated-chip" label="Simulated forecast" color="info" size="small" />
           </Tooltip>
         )}
 

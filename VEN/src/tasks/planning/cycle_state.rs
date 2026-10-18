@@ -38,7 +38,7 @@ pub(crate) struct CycleState {
 /// snapshot — stays in `cycle.rs`, next to the clone it patches.
 pub(crate) async fn read_cycle_state(
     state: &AppState,
-    active_objective: &tokio::sync::RwLock<PlannerObjective>,
+    active_objective: &tokio::sync::RwLock<crate::entities::objective_setting::ObjectiveSetting>,
 ) -> CycleState {
     let inject_snap = state.inject_state().await;
     CycleState {
@@ -46,7 +46,7 @@ pub(crate) async fn read_cycle_state(
         ev_sessions: state.ev_sessions().await,
         heater_targets: state.heater_targets().await,
         bl_override: state.baseline_override().await,
-        obj: *active_objective.read().await,
+        obj: active_objective.read().await.objective,
         pv_forecast_override: inject_snap.pv_plan_kw,
         inject_snap,
     }
@@ -66,7 +66,11 @@ mod tests {
         inject.pv_plan_kw = Some(4.2);
         state.set_inject_state(inject).await;
 
-        let objective = tokio::sync::RwLock::new(PlannerObjective::default());
+        let objective = tokio::sync::RwLock::new(
+            crate::entities::objective_setting::ObjectiveSetting::from_profile(
+                PlannerObjective::default(),
+            ),
+        );
         let read = read_cycle_state(&state, &objective).await;
         assert_eq!(read.pv_forecast_override, Some(4.2));
         assert_eq!(read.inject_snap.pv_plan_kw, Some(4.2));

@@ -35,6 +35,60 @@ pub struct VenLiveState {
     /// When the BFF received the last message from this VEN. The BFF's clock,
     /// not the VEN's: comparing the two is how §6.3 judges clock offset.
     pub received_at: DateTime<Utc>,
+    /// The objective in force on the VEN and who set it: its `GET /plan/objective` body from
+    /// the `objective` leaf, passed through unchanged (`dto`).
+    pub objective: Option<serde_json::Value>,
+    /// The objective the fleet commands this VEN, as the broker holds it on
+    /// `command/objective` (the BFF reads its own retained commands back); `None` once released.
+    pub command: Option<ObjectiveCommand<String>>,
+    /// When the objective this VEN reports last changed (not set by the first one seen): the
+    /// instant the Fleet page asks the fleet plan "as of" for its line from before the change.
+    pub objective_changed_at: Option<DateTime<Utc>>,
+}
+
+impl VenLiveState {
+    fn new(now: DateTime<Utc>) -> Self {
+        Self {
+            telemetry: None,
+            state: None,
+            received_at: now,
+            objective: None,
+            command: None,
+            objective_changed_at: None,
+        }
+    }
+
+    /// Whether the fleet's command has not reached the VEN yet: one is in force on the broker
+    /// and the VEN reports another objective, or reports it set before the command was issued.
+    pub fn command_pending(&self) -> bool {
+        let Some(command) = &self.command else {
+            return false;
+        };
+        let Some(objective) = &self.objective else {
+            return true;
+        };
+        let reported = objective.get("objective").and_then(|o| o.as_str());
+        let set_at = objective
+            .get("set_at")
+            .and_then(|t| t.as_str())
+            .and_then(|t| t.parse::<DateTime<Utc>>().ok());
+        reported != Some(command.objective.as_str())
+            || set_at.is_none_or(|t| t < command.requested_at)
+    }
+
+    /// The objectives this VEN accepts, from its own `objective` leaf.
+    pub fn available_objectives(&self) -> Option<Vec<String>> {
+        let list = self
+            .objective
+            .as_ref()?
+            .get("available_objectives")?
+            .as_array()?;
+        Some(
+            list.iter()
+                .filter_map(|o| o.as_str().map(str::to_string))
+                .collect(),
+        )
+    }
 }
 
 /// Everything the fleet has told us, keyed by VEN name.
@@ -52,20 +106,9 @@ pub struct FleetIngestStatus {
     pub last_error: Option<String>,
 }
 
-/// Split `openadr-lab/fleet/<ven>/<leaf>` into the VEN and the leaf.
-///
-/// Returns `None` for anything that is not shaped like a fleet topic, so a
-/// stray publish on a neighbouring topic cannot invent a VEN. The root is a
-/// parameter because it is configurable on the publishing side, and the two
-/// have to agree.
-pub fn parse_topic<'a>(root: &str, topic: &'a str) -> Option<(&'a str, &'a str)> {
-    let prefix = format!("{root}/fleet/");
-    let rest = topic.strip_prefix(&prefix)?;
-    let mut parts = rest.splitn(2, '/');
-    let ven = parts.next().filter(|v| !v.is_empty())?;
-    let leaf = parts.next().filter(|v| !v.is_empty())?;
-    Some((ven, leaf))
-}
+use lab_core::fleet_channel::{fleet_subscription, leaf, ObjectiveCommand};
+/// The topic shape, leaf names and broker settings are shared with the VEN.
+pub use lab_core::fleet_channel::{parse_topic, BrokerConfig as FleetMqttConfig};
 
 /// Apply one received message to the fleet state.
 ///
@@ -79,28 +122,33 @@ pub fn apply_message(
     payload: &[u8],
     now: DateTime<Utc>,
 ) {
-    let entry = state.entry(ven.to_string()).or_insert(VenLiveState {
-        telemetry: None,
-        state: None,
-        received_at: now,
-    });
+    let entry = state
+        .entry(ven.to_string())
+        .or_insert_with(|| VenLiveState::new(now));
     entry.received_at = now;
 
     match leaf {
-        "telemetry" => {
-            match serde_json::from_slice::<serde_json::Value>(payload) {
-                Ok(body) => entry.telemetry = Some(body),
-                // Keep the previous value rather than replacing it with
-                // nothing: a garbled message should not erase what we know.
-                Err(e) => tracing::warn!(ven, error = %e, "unreadable fleet telemetry"),
-            }
-        }
-        "status" => {
+        leaf::TELEMETRY => keep_readable(&mut entry.telemetry, payload, ven, leaf::TELEMETRY),
+        leaf::STATUS => {
             let parsed = serde_json::from_slice::<serde_json::Value>(payload).ok();
             entry.state = parsed
                 .as_ref()
                 .and_then(|v| v.get("state")?.as_str().map(str::to_string));
         }
+        leaf::OBJECTIVE => {
+            let before = objective_name(entry.objective.as_ref());
+            keep_readable(&mut entry.objective, payload, ven, leaf::OBJECTIVE);
+            let after = objective_name(entry.objective.as_ref());
+            if before.is_some() && before != after {
+                entry.objective_changed_at = Some(now);
+            }
+        }
+        // An empty retained message is how a command is withdrawn.
+        leaf::COMMAND_OBJECTIVE if payload.is_empty() => entry.command = None,
+        leaf::COMMAND_OBJECTIVE => match serde_json::from_slice(payload) {
+            Ok(command) => entry.command = Some(command),
+            Err(e) => tracing::warn!(ven, error = %e, "unreadable fleet objective command"),
+        },
         // Other leaves are not part of the live state. `trace` and `plan` go to the store from
         // the ingest loop; `signals` is published by no VEN yet. Ignored rather than warned
         // about: they are part of the design, just not of this step.
@@ -124,23 +172,38 @@ fn store_message(
 ) {
     let body = || serde_json::from_slice::<serde_json::Value>(payload).ok();
     match leaf {
-        "trace" => {
+        leaf::TRACE => {
             match body().and_then(|b| crate::fleet_store::TraceRow::from_message(ven, &b, now)) {
                 Some(row) => store.offer_trace(row),
                 None => tracing::warn!(ven, "unreadable fleet trace message"),
             }
         }
-        "plan" => match body().and_then(|b| crate::fleet_plan::PlanRow::from_message(ven, &b, now))
-        {
-            Some(row) => store.offer_plan(row),
-            None => tracing::warn!(ven, "unreadable fleet plan message"),
-        },
-        "telemetry" => {
+        leaf::PLAN => {
+            match body().and_then(|b| crate::fleet_plan::PlanRow::from_message(ven, &b, now)) {
+                Some(row) => store.offer_plan(row),
+                None => tracing::warn!(ven, "unreadable fleet plan message"),
+            }
+        }
+        leaf::TELEMETRY => {
             if let Some(b) = live_telemetry {
                 store.offer(crate::fleet_store::TelemetryRow::from_message(ven, b, now));
             }
         }
         _ => {}
+    }
+}
+
+/// The objective's name in a VEN's `objective` body.
+fn objective_name(body: Option<&serde_json::Value>) -> Option<String> {
+    Some(body?.get("objective")?.as_str()?.to_string())
+}
+
+/// Replace `slot` with the leaf's JSON body; keep the previous one when the body is unreadable,
+/// so a garbled message does not erase what we know.
+fn keep_readable(slot: &mut Option<serde_json::Value>, payload: &[u8], ven: &str, leaf: &str) {
+    match serde_json::from_slice::<serde_json::Value>(payload) {
+        Ok(body) => *slot = Some(body),
+        Err(e) => tracing::warn!(ven, leaf, error = %e, "unreadable fleet leaf"),
     }
 }
 
@@ -156,45 +219,23 @@ pub fn net_power_kw(telemetry: &serde_json::Value) -> Option<f64> {
     telemetry.get("grid")?.get("net_power_kw")?.as_f64()
 }
 
-/// Where the BFF subscribes, and as whom.
-#[derive(Clone, Debug)]
-pub struct FleetMqttConfig {
-    pub broker_host: String,
-    pub broker_port: u16,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub root: String,
+/// The ingest client's connection settings. A VEN's plan leaf is far over rumqttc's 10 KiB
+/// default (`MAX_PACKET_BYTES`); over it, the connection that carries every VEN is dropped.
+fn mqtt_options(config: &FleetMqttConfig) -> rumqttc::MqttOptions {
+    let mut opts = rumqttc::MqttOptions::new("vtn-bff-fleet", config.host.clone(), config.port);
+    opts.set_keep_alive(std::time::Duration::from_secs(30));
+    opts.set_max_packet_size(
+        lab_core::fleet_channel::MAX_PACKET_BYTES,
+        lab_core::fleet_channel::MAX_PACKET_BYTES,
+    );
+    if let (Some(u), Some(p)) = (&config.username, &config.password) {
+        opts.set_credentials(u.clone(), p.clone());
+    }
+    opts
 }
 
-impl FleetMqttConfig {
-    /// `FLEET_MQTT_HOST` gates the whole feature, exactly as it does on the
-    /// publishing side: unset means this deployment has no fleet feed, which
-    /// is a configuration and not a fault.
-    pub fn from_env() -> Option<Self> {
-        Self::from_vars(|k| std::env::var(k).ok())
-    }
-
-    fn from_vars(get: impl Fn(&str) -> Option<String>) -> Option<Self> {
-        let broker_host = get("FLEET_MQTT_HOST").filter(|v| !v.is_empty())?;
-        let non_empty = |k: &str| get(k).filter(|v| !v.is_empty());
-        Some(Self {
-            broker_host,
-            broker_port: get("FLEET_MQTT_PORT")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(1884),
-            username: non_empty("FLEET_MQTT_USERNAME"),
-            password: non_empty("FLEET_MQTT_PASSWORD"),
-            root: get("FLEET_MQTT_ROOT").unwrap_or_else(|| "openadr-lab".into()),
-        })
-    }
-
-    /// The one subscription: every leaf of every VEN.
-    pub fn subscription(&self) -> String {
-        format!("{}/fleet/+/#", self.root)
-    }
-}
-
-/// Subscribe and keep `state` current until the process ends.
+/// Subscribe and keep `state` current until the process ends. Returns the client, which also
+/// publishes the fleet's objective commands (`fleet_command`).
 ///
 /// `store` is where the same messages are kept for later. It is optional
 /// because the live view is useful without a database and must not be held
@@ -205,20 +246,12 @@ pub fn spawn_ingest(
     state: FleetState,
     status: Arc<RwLock<FleetIngestStatus>>,
     store: Option<crate::fleet_store::TelemetryWriter>,
-) {
-    use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
+) -> rumqttc::AsyncClient {
+    use rumqttc::{AsyncClient, Event, Packet, QoS};
 
-    let mut opts = MqttOptions::new(
-        "vtn-bff-fleet",
-        config.broker_host.clone(),
-        config.broker_port,
-    );
-    opts.set_keep_alive(std::time::Duration::from_secs(30));
-    if let (Some(u), Some(p)) = (&config.username, &config.password) {
-        opts.set_credentials(u.clone(), p.clone());
-    }
-    let (client, mut eventloop) = AsyncClient::new(opts, 128);
-    let topic = config.subscription();
+    let (client, mut eventloop) = AsyncClient::new(mqtt_options(&config), 128);
+    let publisher = client.clone();
+    let topic = fleet_subscription(&config.root);
     let root = config.root.clone();
 
     tokio::spawn(async move {
@@ -244,11 +277,11 @@ pub fn spawn_ingest(
                     }
                 }
                 Ok(Event::Incoming(Packet::Publish(p))) => {
-                    if let Some((ven, leaf)) = parse_topic(&root, &p.topic) {
+                    if let Some((ven, ven_leaf)) = parse_topic(&root, &p.topic) {
                         let now = Utc::now();
-                        apply_message(&mut *state.write().await, ven, leaf, &p.payload, now);
+                        apply_message(&mut *state.write().await, ven, ven_leaf, &p.payload, now);
                         if let Some(store) = &store {
-                            let live_telemetry = if leaf == "telemetry" {
+                            let live_telemetry = if ven_leaf == leaf::TELEMETRY {
                                 state
                                     .read()
                                     .await
@@ -260,7 +293,7 @@ pub fn spawn_ingest(
                             store_message(
                                 store,
                                 ven,
-                                leaf,
+                                ven_leaf,
                                 &p.payload,
                                 live_telemetry.as_ref(),
                                 now,
@@ -284,6 +317,7 @@ pub fn spawn_ingest(
             }
         }
     });
+    publisher
 }
 
 #[cfg(test)]
@@ -294,29 +328,17 @@ mod tests {
         DateTime::from_timestamp(1_700_000_000, 0).unwrap()
     }
 
+    /// A VEN's plan leaf is tens of kB; at rumqttc's 10 KiB default the BFF would drop the
+    /// connection carrying every VEN each time one arrived.
     #[test]
-    fn parse_topic_reads_the_ven_and_the_leaf() {
+    fn the_ingest_client_accepts_packets_as_large_as_a_plan() {
+        let config =
+            FleetMqttConfig::from_vars(|k| (k == "FLEET_MQTT_HOST").then(|| "lab-mqtt".into()))
+                .unwrap();
         assert_eq!(
-            parse_topic("openadr-lab", "openadr-lab/fleet/ven-7/telemetry"),
-            Some(("ven-7", "telemetry"))
+            mqtt_options(&config).max_packet_size(),
+            lab_core::fleet_channel::MAX_PACKET_BYTES
         );
-    }
-
-    /// A stray publish on a neighbouring topic must not invent a VEN.
-    #[test]
-    fn parse_topic_rejects_anything_not_shaped_like_a_fleet_topic() {
-        for topic in [
-            "openadr-lab/measurement/ven-7/pv",
-            "openadr-lab/fleet/ven-7",
-            "openadr-lab/fleet//telemetry",
-            "other-root/fleet/ven-7/telemetry",
-            "openadr-lab/fleet/",
-        ] {
-            assert!(
-                parse_topic("openadr-lab", topic).is_none(),
-                "{topic} should not parse as a fleet topic"
-            );
-        }
     }
 
     #[test]
@@ -381,12 +403,89 @@ mod tests {
     }
 
     #[test]
-    fn apply_message_ignores_leaves_this_step_does_not_consume() {
+    fn apply_message_ignores_leaves_it_does_not_consume() {
         let mut state = BTreeMap::new();
-        apply_message(&mut state, "ven-1", "plan", br#"{"slots":[]}"#, now());
+        apply_message(&mut state, "ven-1", "trace", br#"{"kind":"x"}"#, now());
         // The VEN is known to exist and to have spoken; nothing is claimed
         // about its telemetry.
         assert!(state["ven-1"].telemetry.is_none());
         assert_eq!(state["ven-1"].received_at, now());
+    }
+
+    fn objective_body(objective: &str, set_at: &str) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "objective": objective, "source": "fleet", "set_at": set_at,
+            "profile_objective": "min_cost",
+            "available_objectives": ["min_cost", "opportunistic"],
+        }))
+        .unwrap()
+    }
+
+    /// The objective leaf is kept verbatim; a garbled body keeps the previous one. A plan is not
+    /// live state: it goes to the store (`store_message`).
+    #[test]
+    fn apply_message_keeps_the_objective_verbatim() {
+        let mut state = BTreeMap::new();
+        let body = objective_body("opportunistic", "2026-10-16T12:00:00Z");
+        apply_message(&mut state, "ven-1", "objective", &body, now());
+        apply_message(&mut state, "ven-1", "objective", b"not json", now());
+        let v = &state["ven-1"];
+        assert_eq!(v.objective, Some(serde_json::from_slice(&body).unwrap()));
+        assert_eq!(
+            v.available_objectives(),
+            Some(vec!["min_cost".to_string(), "opportunistic".to_string()])
+        );
+    }
+
+    /// The broker hands the BFF its own retained command back; an empty one withdraws it, a
+    /// garbled one keeps the command known before.
+    #[test]
+    fn apply_message_reads_the_command_and_its_withdrawal() {
+        let mut state = BTreeMap::new();
+        let command = br#"{"objective":"opportunistic","requested_at":"2026-10-16T12:00:00Z"}"#;
+        apply_message(&mut state, "ven-1", "command/objective", command, now());
+        apply_message(&mut state, "ven-1", "command/objective", b"garbled", now());
+        assert_eq!(
+            state["ven-1"]
+                .command
+                .as_ref()
+                .map(|c| c.objective.as_str()),
+            Some("opportunistic")
+        );
+        apply_message(&mut state, "ven-1", "command/objective", b"", now());
+        assert!(
+            state["ven-1"].command.is_none(),
+            "an empty command is no command"
+        );
+    }
+
+    /// Pending while the VEN reports another objective, or the commanded one set before the
+    /// command; not pending once it reports the command applied, or with no command at all.
+    #[test]
+    fn a_command_is_pending_until_the_ven_reports_it_applied() {
+        let mut state = BTreeMap::new();
+        let command = br#"{"objective":"opportunistic","requested_at":"2026-10-16T12:00:00Z"}"#;
+        apply_message(&mut state, "ven-1", "command/objective", command, now());
+        assert!(
+            state["ven-1"].command_pending(),
+            "no objective reported yet"
+        );
+        let stale = objective_body("opportunistic", "2026-10-16T11:00:00Z");
+        apply_message(&mut state, "ven-1", "objective", &stale, now());
+        assert!(
+            state["ven-1"].command_pending(),
+            "set before the command was issued"
+        );
+        let other = objective_body("min_cost", "2026-10-16T12:00:05Z");
+        apply_message(&mut state, "ven-1", "objective", &other, now());
+        assert!(
+            state["ven-1"].command_pending(),
+            "another objective is in force"
+        );
+        let applied = objective_body("opportunistic", "2026-10-16T12:00:01Z");
+        apply_message(&mut state, "ven-1", "objective", &applied, now());
+        assert!(!state["ven-1"].command_pending());
+        apply_message(&mut state, "ven-1", "command/objective", b"", now());
+        assert!(!state["ven-1"].command_pending(), "released");
     }
 }

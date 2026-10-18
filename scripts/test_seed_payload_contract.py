@@ -37,6 +37,19 @@ def published_contract():
 
 
 class SeedContract(unittest.TestCase):
+    def test_program_report_descriptors_declare_the_contract_units(self):
+        """A program's report descriptors are a second spelling of PAYLOAD_CONTRACT; they agree."""
+        for prog in seed_vtn.PROGRAMS:
+            for d in prog.get("payloadDescriptors", []):
+                if d.get("objectType") != "REPORT_PAYLOAD_DESCRIPTOR":
+                    continue
+                declared = {k: v for k, v in d.items() if k in ("units", "currency")}
+                self.assertEqual(
+                    declared,
+                    seed_vtn.PAYLOAD_CONTRACT[d["payloadType"]],
+                    f"{prog['programName']}: {d['payloadType']}",
+                )
+
     def test_every_seeded_type_is_published_with_the_same_unit(self):
         published = published_contract()
         self.assertGreaterEqual(len(published), 20, "the profile's tables were not parsed")
