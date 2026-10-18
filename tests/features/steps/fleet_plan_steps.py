@@ -64,6 +64,7 @@ def step_remember_instant(context):
     instant = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(seconds=1)
     context.remembered_at = instant.strftime("%Y-%m-%dT%H:%M:%SZ")
     context.earlier_plan_id = context.carried_plan_id
+    context.earlier_plan_created_at = ven_get("/plan").json().get("created_at")
 
 
 @when("I create a high-priced PRICE event for the saved program")
@@ -104,9 +105,10 @@ def step_wait_ven_adopts_different_plan(context):
 @then("the fleet plan as of the remembered instant still carries the earlier plan")
 def step_fleet_plan_earlier(context):
     then = _fleet_plan(context.remembered_at)
+    listed = [(p["venName"], p["planId"], p["createdAt"]) for p in (then or {"plans": []})["plans"]]
     assert _carries(then, context.earlier_plan_id), (
-        f"as of {context.remembered_at} the fleet plan lists "
-        f"{[p['planId'] for p in (then or {'plans': []})['plans']]}, not {context.earlier_plan_id}"
+        f"as of {context.remembered_at} the fleet plan lists {listed}, not {context.earlier_plan_id}; "
+        f"the VEN's plan then was created at {context.earlier_plan_created_at}"
     )
 
 
