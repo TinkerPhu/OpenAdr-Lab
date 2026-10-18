@@ -16380,3 +16380,13 @@ the fleet plan one second before the last objective change, the same `instantBef
 comparison uses; the planner no longer takes a telemetry port. `fleet_forecast.rs`, its route,
 `lab_core::units::mean_power_kw` and the forecast overlay on the power chart are gone. The VEN still
 reports its ad hoc `USAGE_FORECAST`, now pinned by its own scenario rather than through the sum.
+
+**The fleet-objective scenarios, run in order (051).** The Node3 run failed two of the new
+scenarios. The usage-forecast one waited for a report id it had not seen, but the VEN upserts one
+report per obligation, so the id never changes; the step now compares the VTN's
+`modificationDateTime` per id. The plan-before-a-switch one passed alone and failed in order: the
+release sent by the previous scenario's cleanup counted as "the objective changed", and the
+opportunistic plan from two scenarios earlier counted as the new one. The command step now records
+its instant; the change and the served plan must come after it; both scenarios start from the
+profile objective. UC-11c's single-field ledger poll got the 30 s budget the several-field form
+has, after 15 s ran out on a fully loaded host.

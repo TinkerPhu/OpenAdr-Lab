@@ -103,8 +103,9 @@ def step_poll_ven_fields_present(context, path, fields):
 
 @when('I poll VEN {path} until field "{field}" is present')
 def step_poll_ven_field_present(context, path, field):
-    """Single field; keeps its historical 15 s budget."""
-    _poll_ven_fields_present(context, path, field, timeout=15)
+    """Single field; the same 30 s budget as the several-field form. 15 s ran out on a fully
+    loaded CI host before a field that appears on the next tick or two (UC-11c, 2026-10-18)."""
+    _poll_ven_fields_present(context, path, field, timeout=30)
 
 
 @when('I poll VEN {path} until field "{field}" equals {expected:f}')

@@ -3675,3 +3675,14 @@ meant the registry endpoint cost no new data. Look at what the shared function h
   widen it for the second caller; delete the copy.
 - Before building a cross-cutting producer (a topic, a store, a BFF sum), look at the open
   `openspec/changes/` and the branches in CI for the same noun.
+
+## An upserted object is newer by its modification time, not by a new id (2026-10-18)
+
+- The ad hoc `USAGE_FORECAST` scenario waited for a report id it had not seen before. The VEN
+  upserts one report per obligation (`upsert_report` reuses the id it learned), so a newer forecast
+  is the same id with a later `modificationDateTime`: the step could never pass, on any run.
+- A scenario that waits for "a newer X" first asks how X is written. For anything the VEN upserts
+  (reports, its VEN object), compare the VTN's `modificationDateTime` per id.
+- Scenarios in one feature share a VEN. A step that asserts "the objective changed" must anchor
+  on the instant of its own command, or the release an earlier scenario's cleanup sent a moment
+  before passes for it.
