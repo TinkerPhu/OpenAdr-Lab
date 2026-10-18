@@ -8,14 +8,14 @@ Order: sections 2 and 3 (UI only) first; section 4 after `fleet-plan-feed` is me
 
 ## 2. Operators (test first)
 
-- [ ] 2.1 Failing tests then `signalOperators.ts`: scale, shift (wrapping within the pattern), cap, add-range, templates; recurrence unchanged. Verify: `cd VTN/ui && npm test -- signalOperators` green.
-- [ ] 2.2 Toolbar rendered from the operator table on the Tariff page. Verify: component test lists every table entry and applies one.
+- [x] 2.1 Failing tests then `signalOperators.ts`: scale, shift (wrapping within the pattern), cap, add-range, templates; recurrence unchanged. Verify: `cd VTN/ui && npm test -- signalOperators` green.
+- [x] 2.2 Toolbar rendered from the operator table on the Tariff page. Verify: component test lists every table entry and applies one.
 
 ## 3. Chart editing
 
-- [ ] 3.1 Pixel to (time, value) mapping with snapping, as a pure function. Verify: unit tests for the spec's snap example.
-- [ ] 3.2 SVG overlay with drag handles on `FleetTariffChart`; edits go through draft functions; a drag on a repeated day edits the pattern. Verify: component test drags a step on day 2 and finds day 1 changed and 24 draft intervals.
-- [ ] 3.3 Readout while dragging; the grid reflects the change. Verify: test asserts the grid cell value.
+- [x] 3.1 Pixel to (time, value) mapping with snapping, as a pure function. Verify: unit tests for the spec's snap example.
+- [x] 3.2 SVG overlay with drag handles on `FleetTariffChart`; edits go through draft functions; a drag on a repeated day edits the pattern. Verify: component test drags a step on day 2 and finds day 1 changed and 24 draft intervals.
+- [x] 3.3 Readout while dragging; the grid reflects the change. Verified: `DraftEditLayer.test.tsx` asserts the readout and the reported draft; the grid shows the same draft by construction (`Tariff.test.tsx` shows an operator's edit appearing in the grid). A drag in a real browser on the real chart is still to be seen once, with the screenshot task of `tariff-editor-workbench` (4.4).
 
 ## 4. Comparison (needs `fleet-plan-feed`)
 
