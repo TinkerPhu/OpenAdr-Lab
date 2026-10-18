@@ -59,7 +59,10 @@ def step_fleet_plan_counts_contributors(context):
 
 @given("I remember this instant and the plan the VEN has")
 def step_remember_instant(context):
-    context.remembered_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # `at` has whole-second precision; rounded down it can fall before a plan created earlier in
+    # the same second, so round up.
+    instant = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(seconds=1)
+    context.remembered_at = instant.strftime("%Y-%m-%dT%H:%M:%SZ")
     context.earlier_plan_id = context.carried_plan_id
 
 

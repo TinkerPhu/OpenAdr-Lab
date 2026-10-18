@@ -251,7 +251,10 @@ def step_fleet_chart_has_a_line_per_ven(context):
     ]
     assert reporting, "no VEN is reporting, so this scenario would assert nothing"
 
-    legend = page.locator('[data-testid^="legend-entry-"]')
+    # The Fleet page also carries the plan chart, whose legend is not this chart's.
+    legend = page.locator(
+        '[data-testid^="legend-entry-"]:not([data-testid="fleet-plan-card"] *)'
+    )
     labels = {legend.nth(i).inner_text().strip() for i in range(legend.count())}
     context.fleet_legend_labels = labels
     missing = [name for name in reporting if name not in labels]
