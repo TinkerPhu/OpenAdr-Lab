@@ -16224,7 +16224,7 @@ the question went to the user before any code.
   one generic `batch_write_loop` and one `queue` helper instead (`one-concept-one-function`).
 - The reference needs no storage: "before" is `GET /api/fleet/plan?at=<createdDateTime − 1 s>`, so a reload
   reproduces it. Plans are 7-day, not the decisions' 90, because each is large; the broker/store size is
-  still to be measured (`fleet-plan-feed` 4.2).
+  still to be measured (`tariff-editor-compare-and-chart` task 3).
 - A recharts overlay must be a stable component type. An inline `component={(p) => ...}` is a new type every
   render, remounts the layer and drops the drag in progress; `Customized` with a fixed component and the
   data as props keeps it.
