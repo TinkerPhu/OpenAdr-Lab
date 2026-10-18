@@ -83,6 +83,9 @@ quick_tier() { # $1 = the selected suites (board_suites); the audits and self-te
     for s in test_board test_runner test_handoff test_wait test_deploy test_web; do
         run_step "ci/$s" bash "ci/$s.sh" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     done
+    # The seeder's payload table is pinned to docs/reference/WIRE_PROFILE.md by this test alone, and
+    # a profile-only change selects no suite, so it runs for every ticket.
+    run_step "scripts/test_seed_payload_contract" "$PY" -m unittest scripts/test_seed_payload_contract.py >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     [[ " $1 " == *" cargo "* ]] || return 0
     # The harness copies VEN/ and lab-core/ into its image, so the image is rebuilt from this commit;
     # the cargo registry and target are volumes, so a run compiles only what changed.
