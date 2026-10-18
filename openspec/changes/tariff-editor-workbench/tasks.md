@@ -24,7 +24,7 @@
 - [x] 4.1 `TariffGrid` component: cells, paste, fill-down, set-selection, invalid marking. Verify: component test pastes 24 lines and finds 24 filled rows.
 - [x] 4.2 Recurrence control with period label ("repeats every 24 h"), truncated notice and DST note. Verify: component tests for the four recurrence states and a window across 2026-10-25.
 - [x] 4.3 `FleetTariffChart` optional `draftBands` dashed series; page `Tariff.tsx` with live/draft overlay, dissent warning, targeting line, and fleet power chart on the same window; route and nav entry in `App.tsx`. Verify: Vitest for the page; `npm run build` and `eslint` clean.
-- [ ] 4.4 Layout and wording follow ui-transparency: draft vs live legend, "published at" status, polling hint. Verify: screenshot of the page against the running stack.
+- [ ] 4.4 (OPEN after merge: the wording follows ui-transparency and is covered by `Tariff.test.tsx`, but the screenshot needs a stack running the new BFF; take it after the next VTN deploy, then delete this change) Layout and wording follow ui-transparency: draft vs live legend, "published at" status, polling hint. Verify: screenshot of the page against the running stack.
 
 ## 5. Publish
 
@@ -33,6 +33,6 @@
 
 ## 6. Use case, BDD, docs
 
-- [ ] 6.1 BDD scenario in `tests/features/` "change the tariff and the fleet plan follows" (publish a draft with a `forever` pattern, then assert VEN tariff snapshot and plan change). Verify: `python ci/audits/audit_step_definitions.py` clean, scenario runs green on Node2 under `node2-lock`.
-- [ ] 6.2 Update `docs/use-cases/` (tariff editing, recurrence), `docs/architecture/VTN_ARCHITECTURE.md` (preview endpoint, registry), project_journal and KEY_LEARNINGS entries. Verify: files changed in the same commit.
-- [ ] 6.3 Run the audits (`audit_duplication.py`, `audit_debt_gate.py`, file sizes) and eslint; then run the suites on Node2 by hand (`DOCKER_HOST=Node2 bash run_all_tests.sh`, under `node2-lock`) and merge the traditional way. Do NOT use `ci-handoff.sh`: another session is repairing the CI runner and needs its queue empty. Verify: audits exit 0 and the Node2 suite is green.
+- [x] 6.1 BDD scenario in `tests/features/` "change the tariff and the fleet plan follows" (publish a draft with a `forever` pattern, then assert VEN tariff snapshot and plan change). Verify: `python ci/audits/audit_step_definitions.py` clean, scenario runs green on Node2 under `node2-lock`.
+- [x] 6.2 Update `docs/use-cases/` (tariff editing, recurrence), `docs/architecture/VTN_ARCHITECTURE.md` (preview endpoint, registry), project_journal and KEY_LEARNINGS entries. Verify: files changed in the same commit.
+- [x] 6.3 Run the audits (`audit_duplication.py`, `audit_debt_gate.py`, file sizes) and eslint; then run the suites on Node2 by hand (`DOCKER_HOST=Node2 bash run_all_tests.sh`, under `node2-lock`) and merge the traditional way. Do NOT use `ci-handoff.sh`: another session is repairing the CI runner and needs its queue empty. Verify: audits exit 0 and the Node2 suite is green.
