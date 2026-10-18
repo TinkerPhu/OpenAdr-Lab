@@ -80,7 +80,7 @@ quick_tier() { # $1 = the selected suites (board_suites); the audits and self-te
         run_step "$s" "$PY" "ci/audits/$s.py" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     done
     # The CI mechanism has no other test: a change to it skips the suites, so these always run.
-    for s in test_board test_runner test_handoff test_deploy test_web; do
+    for s in test_board test_runner test_handoff test_wait test_deploy test_web; do
         run_step "ci/$s" bash "ci/$s.sh" >>"$TICKET_DIR/quick.log" 2>&1 || return 1
     done
     [[ " $1 " == *" cargo "* ]] || return 0

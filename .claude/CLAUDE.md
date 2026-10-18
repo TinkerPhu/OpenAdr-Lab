@@ -68,12 +68,14 @@ submodule and lock mechanism (LOCK_HOST=Node3, `DOCKER_HOST=Node3 bash run_all_t
 ci-handoff: Node3 also runs the CI runner, which tests branches and is the only thing that merges
 to main. When your work is done and the quick local checks are green (cargo check, the tests you
 touched, the python audits): commit the journal and KEY_LEARNINGS entries WITH the code, push
-(`git push -f origin HEAD:<branch>`), run `bash ci/ci-handoff.sh`, and stop. Do not run
-the full suite yourself, do not merge to main, do not wait for the result. The user brings you the
-result with `ci/ci-next.sh`: merged means delete the branch and worktree and finish the
-task; red, conflict or stale means fix and hand off again. A run that must not merge (A/B, experiment,
+(`git push -f origin HEAD:<branch>`), run `bash ci/ci-handoff.sh`, then start the `bash ci/ci-wait.sh <ticket> --ack` it prints as a
+BACKGROUND command (Bash run_in_background; never poll or sleep yourself, the wait costs no tokens)
+and end your turn: the session is woken with the verdict. Do not run the full suite yourself, do
+not merge to main. If the session was closed, the user brings the result with `ci/ci-next.sh`
+(the ticket keeps status and result.md either way): merged means delete the branch and worktree
+and finish the task; red, conflict or stale means fix and hand off again. A run that must not merge (A/B, experiment,
 milestone) goes to Node2 by hand under test-host-preference, not onto the board: Node3 is one lane and
-every full run holds it for an hour. `--kind check` is for when the user wants Node3's verdict. Stop only after handing off finished work: a `--kind check` hand-off of work in progress
+every full run holds it for an hour. `--kind check` is for when the user wants Node3's verdict. Finish only after the verdict of finished work has been handled: a `--kind check` hand-off of work in progress
 (a milestone tested while the rest is still being built) does not end the task. Keep working on new
 commits; the ticket tests the commit it recorded, so later pushes do not disturb it. Do not hand the
 branch off again while that ticket is in flight, and fold its result into the branch when it comes. Full description: docs/guidelines/TESTING.md "CI on Node3", skill ci-handoff. If the

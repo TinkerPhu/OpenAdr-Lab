@@ -214,12 +214,12 @@ submodule has its own upstream CI.)
 session / laptop                              Node3
 push the branch
 ci-handoff.sh  ───── ticket on the board ──►  /srv/ci/board/<ticket>/
-close the session                             runner, started by a systemd timer every minute:
+ci-wait.sh (background poll, or close         runner, started by a systemd timer every minute:
                                                 rebases the commit onto origin/main
                                                 quick tier, then full tier
                                                 all green and kind=merge: origin/main fast-forwarded
-ci-next.sh  ◄──── status + result.md ───────  verdict written into the ticket
-resumes the session with the result
+ci-wait.sh / ci-next.sh  ◄─ status + result.md ─  verdict written into the ticket
+wakes / resumes the session with the result
 ```
 
 ### Handing a branch over
@@ -229,7 +229,9 @@ to run without it, so a fresh clone never dials a host that does not exist. The 
 (unset means the local docker). See `ci/README.md`.
 
 Commit everything first, **including the journal and key-learnings entries** (they are tested and
-merged with the code), push, then hand off. Finished work: stop until the result arrives. A
+merged with the code), push, then hand off. The hand-off prints a `ci-wait.sh <ticket> --ack` line:
+the session runs it as a background command and ends its turn; the session is woken when the ticket
+is finished (see "Picking the result up"). Finished work: nothing else to do until then. A
 `--kind check` hand-off of an unfinished branch's milestone: keep working on new commits (the ticket
 tests the commit it recorded) and do not hand off again while it is in flight:
 
@@ -273,6 +275,13 @@ selection), `ci/test_runner.sh` (runner and `result.md`) and `ci/test_web.py` (b
 The board can clear tickets: see "Clearing" in `ci/README.md` (token, archive, 24-hour rule). Pinned by `ci/test_web.py`.
 
 ### Picking the result up
+
+Automatic, while the session lives: `bash ci/ci-wait.sh <ticket> --ack` run in the background polls the
+board over ssh (every 30 s, retrying dropped connections, no model turns spent) and exits with the
+verdict and the first 80 lines of `result.md`; exit 0 merged/deployed/green, 1 red/conflict/stale/error,
+3 gave up (`--max-wait`, default 24 h). Nothing is consumed: the ticket keeps its status and
+`result.md`, so if the wait, the session or the laptop is gone the manual route below still works
+(`--ack` only hides the ticket from the `ci-next.sh` list). Pinned by `ci/test_wait.sh`.
 
 ```bash
 bash ci/ci-next.sh            # finished tickets; resumes the session of the one you choose
@@ -345,7 +354,7 @@ tested by the previous version.
 - Pause: `sudo systemctl stop ci-runner.timer` (a running ticket finishes). Is it alive:
   `systemctl is-active ci-runner.timer`; timer log: `journalctl -u ci-runner`.
 - Push access: `/srv/ci/deploy_key` is a write-enabled deploy key for this repository only.
-- Tests of the mechanism: `ci/test_board.sh`, `ci/test_handoff.sh`, `ci/test_deploy.sh`,
+- Tests of the mechanism: `ci/test_board.sh`, `ci/test_handoff.sh`, `ci/test_wait.sh`, `ci/test_deploy.sh`,
   `tests/test_retry_failed.sh`,
   `ci/locks/test_lease_lock.sh`.
 
