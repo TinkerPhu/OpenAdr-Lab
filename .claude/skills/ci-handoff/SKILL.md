@@ -23,10 +23,16 @@ If it is not, say so and merge the old way (manual gate, own docker host run).
 3. `git push -f origin HEAD:<branch>`.
 4. `bash ci/ci-handoff.sh` (`--kind check` only when the user wants Node3's verdict without a merge: experiments and A/B runs
    belong on Node2 by hand, because Node3 is one lane and a full run holds it for an hour).
-5. Tell the user the ticket name. Do not wait, poll or start the suite yourself. The user
-   resumes you with `ci/ci-next.sh` when the result is there (a full run takes about an hour,
-   queued tickets longer).
-   - **Finished work** (`--kind merge`): stop. There is nothing left to do until the result arrives.
+5. Tell the user the ticket name, and start the command `ci-handoff.sh` printed as a background
+   command: `bash ci/ci-wait.sh <ticket> --ack` with Bash `run_in_background`. It polls the board
+   from the shell (no tokens spent waiting, however long the queue and the run take: a full run is
+   about an hour, queued tickets longer) and exits with the verdict, which wakes this session.
+   Never poll, sleep or `ScheduleWakeup` for it, and do not start the suite yourself.
+   - **Finished work** (`--kind merge`): end your turn. Nothing is left to do until the wait returns.
+   - If the session ends before the wait returns, nothing is lost: the ticket keeps its status and
+     `result.md`, and the user brings the result with `bash ci/ci-next.sh` (without `--ack` the
+     ticket stays listed there too). `ci-wait.sh` exit codes: 0 merged/deployed/green, 1 red,
+     conflict, stale or error, 3 gave up (default after 24 h; the ticket is still waiting).
    - **Work in progress** (`--kind check` on a milestone of an unfinished branch): do not stop. Keep
      working on new commits; the ticket tests the commit it recorded, so later pushes do not
      disturb it. Do not hand the branch off again while that ticket is in flight; fold its result
@@ -34,7 +40,8 @@ If it is not, say so and merge the old way (manual gate, own docker host run).
 
 ## When the result arrives
 
-Your first message is the runner's `result.md`.
+The output of `ci-wait.sh` (or, via `ci-next.sh`, your first message) is the runner's `result.md`,
+cut to 80 lines; the whole file and the logs stay in the ticket on Node3.
 
 - **merged**: `origin/main` now holds the tested commit (the rebased one: its sha may differ from
   yours). Delete the branch (local and `git push origin --delete <branch>`), remove the worktree

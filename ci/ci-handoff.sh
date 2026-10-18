@@ -17,7 +17,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CI_HOST="${CI_HOST:?set CI_HOST to the ssh name of the CI host (e.g. export CI_HOST=Node3); see ci/README.md}"
+# shellcheck source=ci-lib.sh
+source "$HERE/ci-lib.sh"
 TIERS=quick,full
 KIND=merge
 RESUME_DIR=""
@@ -74,5 +75,6 @@ TICKET="$(ssh "$CI_HOST" "bash -s -- $(printf '%q ' create \
 
 echo "handed off: $TICKET"
 echo "  $BRANCH @ ${SHA:0:8}, tiers $TIERS, kind $KIND"
-echo "  The runner picks it up within a minute. Close this session if you like;"
-echo "  'bash ci/ci-next.sh' resumes it with the result (--all shows the whole board)."
+echo "  The runner picks it up within a minute. To be woken with the verdict, run in the background:"
+echo "    bash ci/ci-wait.sh $TICKET --ack"
+echo "  Or close this session: 'bash ci/ci-next.sh' resumes it with the result (--all shows the board)."

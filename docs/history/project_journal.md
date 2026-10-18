@@ -16183,3 +16183,17 @@ page. The tariff the lab runs on repeats forever, which the Events form cannot e
 - The live-power chart is actual telemetry, not the fleet's plan: the VTN has no view of VEN plans, so the
   "before/after" comparison and a true dry run are left to the follow-up change `tariff-editor-compare-and-chart`.
 
+
+## CI: the session is woken with the verdict (refactor/ci-wait)
+
+**What.** `ci/ci-wait.sh <ticket> [--ack] [--max-wait S]` polls the board over ssh until the ticket is in a
+final status, prints the verdict and the first 80 lines of `result.md`, and exits (0 merged/deployed/green, 1
+red/conflict/stale/error, 3 gave up). `ci-handoff.sh` prints the command; the `ci-handoff` rule and skill now say
+to run it as a background command, so the harness wakes the session when it exits. `ci-lib.sh` holds the one
+`ci_board` ssh wrapper that `ci-handoff`, `ci-next` and `ci-wait` used to each carry a copy of.
+Tests: `ci/test_wait.sh`.
+
+**Why.** A script on the CI host cannot message a session (`SendMessage` is a session tool), and the manual
+`ci-next` round trip was the weak point of the hand-off. A background poll in the session's own shell costs no
+model turns, whatever the queue length. It consumes nothing: status and `result.md` stay in the ticket, and
+without `--ack` `ci-next` still lists it, so a closed session or a dead laptop loses no result.

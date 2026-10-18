@@ -7,7 +7,7 @@ Node1/Node2/Node3 are one lab's deployment, named only through environment varia
 | Path | What it is |
 |---|---|
 | `runner.sh`, `board.sh` | the runner (rebase, quick tier, full tier, fast-forward main) and the handoff board it works through |
-| `ci-handoff.sh`, `ci-next.sh` | a session hands a branch over / picks the verdict up (`CI_HOST` required) |
+| `ci-handoff.sh`, `ci-wait.sh`, `ci-next.sh` | a session hands a branch over / waits for the verdict in the background / picks it up later by hand (`CI_HOST` required; `ci-lib.sh` is what they share) |
 | `deploy.sh` | build release images of `origin/main` and switch a production host over |
 | `install.sh`, `systemd/` | install the runner timer and the web board on the CI host |
 | `web/` | read-only JSON API and single-page view of the board (`ci_web.py`, stdlib only) |

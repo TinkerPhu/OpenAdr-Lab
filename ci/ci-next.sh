@@ -15,7 +15,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CI_HOST="${CI_HOST:?set CI_HOST to the ssh name of the CI host (e.g. export CI_HOST=Node3); see ci/README.md}"
+# shellcheck source=ci-lib.sh
+source "$HERE/ci-lib.sh"
 MODE=resume
 DRY=no
 PICK=""
