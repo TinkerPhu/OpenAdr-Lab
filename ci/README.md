@@ -34,6 +34,8 @@ Nothing here needs a second host. Using one is opt-in:
 | `CI_HOST` | ssh name of the CI host `ci-handoff.sh` / `ci-next.sh` talk to | the scripts refuse to run |
 | `BOARD_DIR` | the board directory (`/srv/ci/board` on the CI host) | `/srv/ci/board` |
 | `CI_WEB_PORT` | port of the web board | `8480` |
+| `CI_WEB_TOKEN` | enables the clear buttons | read-only board |
+| `ARCHIVE_DIR` / `CI_WEB_KEEP_MERGED_H` | where cleared tickets go / hours before merged tickets move | `<board>/../archive` / `24` |
 
 ## CI host
 
@@ -52,6 +54,15 @@ changes the runner is tested by the previous version, enables the runner timer a
 | `/api/tickets?limit=N` | tickets newest first with status, timings, steps, `eta`, `expected_s`, `overdue` |
 | `/api/tickets/<name>` | one ticket |
 | `/api/tickets/<name>/log/<run\|quick\|full>?tail=N` | log tail (text) |
+
+Clearing (opt-in): `CI_WEB_TOKEN` in the service environment (`install.sh` writes one to `/srv/ci/web.env`)
+switches on `POST /api/tickets/<name>/clear` and `POST /api/clear-finished`, sent with
+`Authorization: Bearer <token>`. They move FINISHED tickets to `ARCHIVE_DIR` (a rename, nothing is
+deleted); a queued or running ticket answers 409. Without a token every POST answers 403. The page
+asks for the token once and keeps it in the browser's localStorage; the token travels over plain HTTP,
+so keep the board on the LAN. Merged and deployed tickets also move by themselves after
+`CI_WEB_KEEP_MERGED_H` hours (default 24, 0 = never); red, conflict, green, error and stale tickets
+stay until cleared. The timeline shows the last 24 hours.
 
 Estimates are the median duration of finished tickets of the same class (audits, quick, full),
 chained through the queue. The board is read-only and has no authentication: keep it on the LAN.
