@@ -14,6 +14,7 @@ from features.helpers.api_client import (
     VEN_BASE_URL,
     bff_get,
     bff_put,
+    vtn_get,
     vtn_post,
 )
 from features.helpers.wait import poll_until
@@ -37,6 +38,9 @@ def _commanded(context, ven):
 @given('the fleet commands "{ven}" to run "{objective}"')
 @when('the fleet commands "{ven}" to run "{objective}"')
 def step_fleet_commands(context, ven, objective):
+    # Every change a scenario asserts happens after this instant, not the release an earlier
+    # scenario's cleanup sent a moment before.
+    context.commanded_at = datetime.now(timezone.utc)
     context.response = bff_put(f"/api/fleet/vens/{ven}/objective", json={"objective": objective})
     if context.response.status_code == 200:
         _commanded(context, ven)
@@ -98,6 +102,19 @@ def step_ven_reports_profile(context, seconds, ven_label, source):
     )
 
 
+@given("within {seconds:d} seconds {ven_label} runs its profile objective and no fleet command")
+def step_ven_on_profile_objective(context, seconds, ven_label):
+    # Who set it does not matter (an earlier feature may have set it from the VEN UI); a fleet
+    # command an earlier scenario's cleanup released must have reached the VEN.
+    poll_until(
+        lambda: _objective(ven_label),
+        lambda o: o and o["objective"] == o["profile_objective"] and o["source"] != "fleet",
+        timeout=seconds,
+        interval=2,
+        description=f"{ven_label} on its profile objective, no fleet command in force",
+    )
+
+
 @then('within {seconds:d} seconds the BFF shows "{ven}" running "{objective}" with nothing pending')
 def step_bff_shows(context, seconds, ven, objective):
     def listed():
@@ -148,13 +165,15 @@ def step_create_forecast_event(context):
     context.saved_event_id = r.json()["id"]
 
 
-def _usage_forecast_report_ids(event_id):
-    """The ids of VEN-1's USAGE_FORECAST reports for the event (`/reports` echoes the VTN's)."""
-    r = requests.get(f"{VEN_BASE_URL}/reports", timeout=10)
+def _usage_forecast_reports(token, event_id):
+    """VEN-1's USAGE_FORECAST reports for the event, as {id: modificationDateTime}, read from the
+    VTN. The VEN upserts one report per obligation, so a newer forecast is the same id with a later
+    modification time, not a new id."""
+    r = vtn_get("/reports", token, params={"eventID": event_id})
     if not r.ok:
-        return set()
+        return {}
     return {
-        rep["id"]
+        rep["id"]: rep.get("modificationDateTime")
         for rep in r.json()
         if rep.get("eventID") == event_id
         and any(
@@ -169,8 +188,8 @@ def _usage_forecast_report_ids(event_id):
 @given("within {seconds:d} seconds VEN-1 has reported a usage forecast for the event")
 def step_usage_forecast_reported(context, seconds):
     context.usage_forecast_reports = poll_until(
-        lambda: _usage_forecast_report_ids(context.saved_event_id),
-        lambda ids: len(ids) > 0,
+        lambda: _usage_forecast_reports(context.vtn_token, context.saved_event_id),
+        lambda reports: len(reports) > 0,
         timeout=seconds,
         interval=5,
         description="VEN-1 reporting a usage forecast for the event",
@@ -180,8 +199,10 @@ def step_usage_forecast_reported(context, seconds):
 @then("within {seconds:d} seconds VEN-1 reports a newer usage forecast for the event")
 def step_newer_usage_forecast(context, seconds):
     poll_until(
-        lambda: _usage_forecast_report_ids(context.saved_event_id),
-        lambda ids: bool(ids - context.usage_forecast_reports),
+        lambda: _usage_forecast_reports(context.vtn_token, context.saved_event_id),
+        lambda reports: any(
+            context.usage_forecast_reports.get(rid) != modified for rid, modified in reports.items()
+        ),
         timeout=seconds,
         interval=5,
         description="VEN-1 reporting a usage forecast after the switch, before its 15-minute cadence",
@@ -195,7 +216,10 @@ def step_bff_notes_change(context, seconds, ven):
         return next((v.get("objectiveChangedAt") for v in vens if v["venName"] == ven), None)
 
     context.objective_changed_at = poll_until(
-        changed_at, lambda t: bool(t), timeout=seconds, interval=2,
+        changed_at,
+        lambda t: bool(t) and _parse(t) >= context.commanded_at,
+        timeout=seconds,
+        interval=2,
         description=f"the BFF noting when the objective of {ven} changed",
     )
 
@@ -226,6 +250,7 @@ def step_bff_serves_ven_plan(context, seconds, ven, objective):
         plan,
         lambda p: p
         and p.get("objective") == objective
+        and _parse(p["created_at"]) > _parse(context.objective_changed_at)
         and p.get("solve_status")
         and p.get("slots")
         and all("planned_kw_by_asset" in s for s in p["slots"]),

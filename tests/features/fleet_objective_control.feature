@@ -32,7 +32,8 @@ Feature: The fleet commands its VENs' objectives (fleet objective control)
   # The Fleet page draws the plan as it stood just before the last objective change behind the
   # current one, and opens each VEN's own plan from the same store.
   Scenario: The fleet keeps the plan from before a switch and serves the VEN's new plan
-    Given I wait for the fleet plan to carry the plan the VEN is working to
+    Given within 30 seconds VEN-1 runs its profile objective and no fleet command
+    And I wait for the fleet plan to carry the plan the VEN is working to
     When the fleet commands "ven-1" to run "opportunistic"
     Then within 30 seconds the BFF notes when the objective of "ven-1" changed
     And the fleet plan as of just before that change lists a plan of "ven-1" adopted before it
@@ -42,7 +43,8 @@ Feature: The fleet commands its VENs' objectives (fleet objective control)
   # A USAGE_FORECAST asked for at frequency 0 (ad hoc) goes out when the plan's objective changes,
   # not only on the 15-minute cadence (openspec `opportunistic-objective` 6.4).
   Scenario: A VEN reports its usage forecast at once when the fleet switches its objective
-    Given I have a VTN token as "bl-client"
+    Given within 30 seconds VEN-1 runs its profile objective and no fleet command
+    And I have a VTN token as "bl-client"
     And I create an open program "fleet-forecast" and save its ID
     And I create a standing event for the saved program asking for a usage forecast
     And within 120 seconds VEN-1 has reported a usage forecast for the event
