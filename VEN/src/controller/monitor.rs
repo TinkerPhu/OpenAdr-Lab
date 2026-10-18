@@ -116,6 +116,7 @@ mod tests {
                     emergency_what_ifs: None,
                     ac_ceiling_kw: None,
                     arbiter_lever: None,
+                    surplus_claim_rank: None,
                     roster_index: 0,
                 },
             )]),

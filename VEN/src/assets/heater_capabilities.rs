@@ -20,11 +20,15 @@ impl TickOverridable for Heater {
     /// trait) so there's no ambiguity either way. Kept rather than renamed to
     /// avoid touching the inherent method's own (unrelated) call sites.
     fn apply_tick_overrides(&mut self, _state: &mut AssetState, overrides: &TickOverrides) {
+        // A request may lower the ceiling to its own target, never raise it past `temp_max_c`.
+        let request_ceiling_c = overrides
+            .heater_request_ceiling_c
+            .map(|c| c.min(self.temp_max_c_profile));
         Self::apply_tick_overrides(
             self,
             overrides.heater_ambient_temp_c_override,
             overrides.heater_temp_min_override,
-            overrides.heater_temp_max_override,
+            overrides.heater_temp_max_override.or(request_ceiling_c),
             overrides.heater_emergency_curtail_override,
             overrides.heater_emergency_absorb_override,
         );

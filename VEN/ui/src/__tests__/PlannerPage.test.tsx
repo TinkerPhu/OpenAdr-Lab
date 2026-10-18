@@ -15,6 +15,7 @@ vi.mock("@tanstack/react-query", async () => {
 vi.mock("../api/hooks", () => ({
   useSignals: () => ({ data: undefined }),
   usePlan: vi.fn(),
+  usePlanObjective: vi.fn(() => ({ data: undefined })),
   useTrace: vi.fn(),
   useRequests: vi.fn(),
   useSim: vi.fn(),
@@ -23,7 +24,7 @@ vi.mock("../api/hooks", () => ({
   useAllTimelines: () => ({ data: { zones: [], timelines: {} }, refetch: vi.fn() }),
 }));
 
-import { usePlan, useTrace, useRequests, useSim, useSetObjective, usePlannerEvents } from "../api/hooks";
+import { usePlan, usePlanObjective, useTrace, useRequests, useSim, useSetObjective, usePlannerEvents } from "../api/hooks";
 import { makePlan, makeSlot } from "./fixtures/plan";
 
 /** Captured SSE callback from the most recent usePlannerEvents call. */
@@ -108,6 +109,21 @@ describe("PlannerPage", () => {
   it("renders the planner heading", () => {
     render(<PlannerPage />);
     expect(screen.getByTestId("planner-heading")).toBeInTheDocument();
+  });
+
+  it("shows who set the objective in force, and selects it", () => {
+    vi.mocked(usePlanObjective).mockReturnValue({
+      data: {
+        objective: "opportunistic",
+        source: "fleet",
+        set_at: "2026-10-16T12:00:00Z",
+        profile_objective: "min_cost",
+        available_objectives: ["min_cost", "opportunistic"],
+      },
+    } as unknown as ReturnType<typeof usePlanObjective>);
+    render(<PlannerPage />);
+    expect(screen.getByTestId("objective-source")).toHaveTextContent(/set by the fleet/);
+    expect(screen.getByTestId("objective-select")).toHaveTextContent("Opportunistic");
   });
 
   it("renders objective legend accordion", () => {

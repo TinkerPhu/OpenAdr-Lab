@@ -30,6 +30,7 @@ def step_post_mode_session_budget(context, mode, budget):
 
 
 @given('I POST a mode EV session with mode "{mode}" and no budget')
+@when('I POST a mode EV session with mode "{mode}" and no budget')
 def step_post_mode_session_no_budget(context, mode):
     _post_mode_session(context, mode, None)
 

@@ -6,9 +6,9 @@ import {
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useQueryClient } from "@tanstack/react-query";
-import { usePlan, usePlannerEvents, useRequests, useSetObjective, useSim, useTrace } from "../api/hooks";
+import { usePlan, usePlanObjective, usePlannerEvents, useRequests, useSetObjective, useSim, useTrace } from "../api/hooks";
 import type { PlannerEvent, PlannerObjective } from "../api/types";
-import { OBJECTIVE_LABELS } from "../components/planner/objectiveLabels";
+import { OBJECTIVE_LABELS, OBJECTIVE_SOURCE_LABELS } from "../components/planner/objectiveLabels";
 import { PlanHeaderBar } from "../components/planner/PlanHeaderBar";
 import { PlanTriggerTimeline } from "../components/planner/PlanTriggerTimeline";
 import { PlanDecisionMatrix } from "../components/planner/PlanDecisionMatrix";
@@ -77,6 +77,17 @@ const OBJECTIVE_OPTIONS: {
       { label: "Energy cost", value: "×1.0 (primary)" },
       { label: "Battery wear", value: "0.03 €/kWh" },
       { label: "CO₂ / grid", value: "0 (ignored)" },
+    ],
+  },
+  {
+    value: "opportunistic",
+    label: OBJECTIVE_LABELS.opportunistic,
+    tooltip: "No planning: use PV surplus as it comes",
+    detail: "Behaves like a common HEMS without look-ahead: PV surplus is absorbed as soon as it is there (EV, heater, shiftable loads, then the battery), the battery covers import and never charges from the grid. Requests in ASAP or BY_DEADLINE mode start at once; the free-energy modes take surplus only. The plan shown is a forecast of that behaviour, not an optimisation.",
+    weights: [
+      { label: "Look-ahead", value: "none" },
+      { label: "Surplus order", value: "EV, heater, shiftable, battery" },
+      { label: "Battery", value: "covers import, no grid charging" },
     ],
   },
 ];
@@ -156,6 +167,7 @@ function PlannerStatusBar({ status }: { status: PlannerStatus }) {
 
 export function PlannerPage() {
   const { data: plan } = usePlan();
+  const { data: objectiveSetting } = usePlanObjective();
   const { data: events } = useTrace(200);
   const { data: requests } = useRequests();
   const { data: sim } = useSim();
@@ -177,10 +189,12 @@ export function PlannerPage() {
     });
   }, [events, selectedSlotWindow]);
 
+  // The objective in force (who set it is shown below the picker), else the plan's.
+  const serverObjective = objectiveSetting?.objective ?? plan?.objective;
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs local objective from server plan; no loop risk
-    if (plan?.objective) setObjective(plan.objective);
-  }, [plan?.objective]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs local objective from the server; no loop risk
+    if (serverObjective) setObjective(serverObjective);
+  }, [serverObjective]);
 
   usePlannerEvents(
     useCallback(
@@ -233,6 +247,12 @@ export function PlannerPage() {
               </MenuItem>
             ))}
           </Select>
+          {objectiveSetting && (
+            <Typography variant="caption" color="text.secondary" data-testid="objective-source">
+              {OBJECTIVE_SOURCE_LABELS[objectiveSetting.source]}
+              {objectiveSetting.set_at && `, ${new Date(objectiveSetting.set_at).toLocaleString()}`}
+            </Typography>
+          )}
         </FormControl>
       </Stack>
 

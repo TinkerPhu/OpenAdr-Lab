@@ -14,7 +14,6 @@ use tokio::sync::RwLock;
 
 use crate::assets::ControlDescriptor;
 use crate::entities::asset::PlanTriggerSignal;
-use crate::entities::planner_params::PlannerObjective;
 use crate::planner_events::PlannerEventTx;
 use crate::state::AppState;
 use crate::{controller, services};
@@ -32,7 +31,7 @@ pub type Roster = Arc<dyn controller::SimRosterPort>;
 pub type Headroom = Arc<dyn controller::HeadroomPort>;
 /// What the asset routes read about the simulated assets, as plain data.
 pub type SimRead = Arc<dyn controller::SimReadPort>;
-pub type ActiveObjective = Arc<RwLock<PlannerObjective>>;
+pub type ActiveObjective = Arc<RwLock<crate::entities::objective_setting::ObjectiveSetting>>;
 /// Persistent history store (Phase 1, A-1) — `None` when `profile.history.enabled` is false or the
 /// store failed to open.
 pub type History = Option<Arc<dyn controller::HistoryPort>>;

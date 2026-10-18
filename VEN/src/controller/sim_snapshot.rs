@@ -134,6 +134,9 @@ pub struct AssetSnapshot {
     /// The lever this asset offers the arbiter (`Asset::arbiter_lever`).
     #[serde(skip)]
     pub arbiter_lever: Option<crate::entities::asset::ArbiterLever>,
+    /// Where it stands in claiming PV surplus without look-ahead (`Asset::surplus_claim_rank`).
+    #[serde(skip)]
+    pub surplus_claim_rank: Option<u8>,
     /// The asset's place in the profile's roster: the arbiter's tie-break between levers of
     /// equal cost, the order EVs are offered a surplus in, and the order the VEN UI lists assets
     /// in (W6).
@@ -212,6 +215,7 @@ mod tests {
             emergency_what_ifs: None,
             ac_ceiling_kw: None,
             arbiter_lever: None,
+            surplus_claim_rank: None,
             roster_index: 0,
         };
         assert_eq!(snap.val("soc"), Some(0.5));

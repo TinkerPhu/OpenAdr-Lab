@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
@@ -12,6 +12,16 @@ const mockLive = {
       netPowerKw: 4,
       state: "online",
       receivedAt: new Date().toISOString(),
+      objective: {
+        objective: "min_cost",
+        source: "profile" as const,
+        set_at: null,
+        profile_objective: "min_cost",
+        available_objectives: ["min_cost", "opportunistic"],
+      },
+      command: { objective: "opportunistic", requested_at: "2026-10-17T12:00:00Z" },
+      commandPending: true,
+      objectiveChangedAt: "2026-09-22T09:10:00Z",
     },
     {
       venName: "ven-2",
@@ -41,6 +51,15 @@ const mockHistory = {
   ],
 };
 
+const setVen = vi.fn();
+const setFleet = vi.fn();
+
+vi.mock("../components/VenPlanChart", () => ({
+  VenPlanChart: ({ plan }: { plan: { objective: string } }) => (
+    <div data-testid="ven-plan-stub">{plan.objective}</div>
+  ),
+}));
+
 // The chart has its own test file; here it only has to not be recharts.
 vi.mock("../components/FleetPowerChart", () => ({
   FleetPowerChart: ({ windowMinutes, reportingVens }: { windowMinutes: number; reportingVens: number }) => (
@@ -69,22 +88,29 @@ const mockPlan = {
   ],
   vensWithoutPlan: ["ven-3"],
 };
-const useFleetPlanMock = vi.fn(() => ({ data: mockPlan, isError: false }));
+const useFleetPlanMock = vi.fn<(atIso?: string, enabled?: boolean) => { data: typeof mockPlan; isError: boolean }>(
+  () => ({ data: mockPlan, isError: false }),
+);
 
 vi.mock("../components/FleetPlanChart", () => ({
-  FleetPlanChart: ({ plan }: { plan: { points: unknown[] } }) => (
-    <div data-testid="fleet-plan-chart-stub">{plan.points.length}</div>
+  FleetPlanChart: ({ plan, reference }: { plan: { points: unknown[] }; reference?: { at: string } }) => (
+    <div data-testid="fleet-plan-chart-stub" data-reference={reference?.at ?? ""}>
+      {plan.points.length}
+    </div>
   ),
 }));
 
 vi.mock("../api/hooks", () => ({
-  useFleetPlan: () => useFleetPlanMock(),
+  useFleetPlan: (atIso?: string, enabled?: boolean) => useFleetPlanMock(atIso, enabled),
   useFleetPower: vi.fn(() => ({ data: mockLive, isError: false })),
   useFleetHistory: vi.fn(() => ({ data: mockHistory, isError: false })),
   // The page also hosts the reactions card; it has its own test file, so here
   // it only has to be idle rather than absent.
   useFleetReactions: vi.fn(() => ({ data: undefined, isError: false })),
   useFleetSignals: vi.fn(() => ({ data: undefined, isError: false })),
+  useVenPlan: vi.fn(() => ({ data: { objective: "opportunistic", solve_status: "SIMULATED", slots: [] }, isError: false })),
+  useSetVenObjective: vi.fn(() => ({ mutate: setVen, isError: false })),
+  useSetFleetObjective: vi.fn(() => ({ mutate: setFleet, isError: false })),
 }));
 
 function renderFleet() {
@@ -196,5 +222,52 @@ describe("FleetPage", () => {
     renderFleet();
     expect(screen.getByTestId("fleet-history-error")).toBeVisible();
     expect(screen.queryByTestId("sparkline")).not.toBeInTheDocument();
+  });
+
+  // openspec opportunistic-objective D12: the objective in force, who set it, and a fleet command
+  // still on its way.
+  it("shows each VEN's objective, its source and a pending command", () => {
+    renderFleet();
+    const cell = screen.getByTestId("fleet-objective-ven-1");
+    expect(cell).toHaveTextContent("min_cost");
+    expect(cell).toHaveTextContent("profile");
+    expect(screen.getByTestId("fleet-pending-ven-1")).toHaveTextContent("pending: opportunistic");
+    expect(screen.getByTestId("fleet-objective-ven-2")).toHaveTextContent("—");
+  });
+
+  it("releases one VEN's command", () => {
+    setVen.mockClear();
+    renderFleet();
+    fireEvent.click(screen.getByTestId("fleet-release-ven-1"));
+    expect(setVen).toHaveBeenCalledWith({ venName: "ven-1", objective: null });
+    expect(screen.getByTestId("fleet-release-ven-2")).toBeDisabled();
+  });
+
+  it("switches and releases the whole fleet", () => {
+    setFleet.mockClear();
+    renderFleet();
+    fireEvent.change(screen.getByTestId("fleet-objective-select"), { target: { value: "opportunistic" } });
+    fireEvent.click(screen.getByTestId("fleet-objective-apply"));
+    fireEvent.click(screen.getByTestId("fleet-objective-release"));
+    expect(setFleet.mock.calls).toEqual([["opportunistic"], [null]]);
+  });
+
+  it("opens a VEN's plan under its row", () => {
+    renderFleet();
+    expect(screen.queryByTestId("fleet-plan-row-ven-1")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("fleet-expand-ven-1"));
+    expect(screen.getByTestId("fleet-plan-row-ven-1")).toHaveTextContent("opportunistic");
+  });
+
+  // openspec opportunistic-objective D12: what an objective change did to what the fleet intends —
+  // the plan as of just before the last change, faint behind the current one, and the objectives
+  // the fleet runs under.
+  it("draws the plan from before the last objective change behind the current one", () => {
+    useFleetPlanMock.mockClear();
+    renderFleet();
+    expect(useFleetPlanMock).toHaveBeenCalledWith("2026-09-22T09:09:59.000Z", true);
+    expect(screen.getByTestId("fleet-plan-chart-stub")).toHaveAttribute("data-reference", mockPlan.at);
+    expect(screen.getByTestId("fleet-plan-objectives")).toHaveTextContent("Objectives: min_cost 1");
+    expect(screen.getByTestId("fleet-plan-objectives")).toHaveTextContent("before the objective change");
   });
 });

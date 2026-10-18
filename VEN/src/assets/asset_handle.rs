@@ -34,6 +34,10 @@ pub struct AssetHandle<'a> {
 }
 
 impl<'a> Asset for AssetHandle<'a> {
+    fn surplus_claim_rank(&self) -> Option<u8> {
+        self.config.surplus_claim_rank()
+    }
+
     fn id(&self) -> &str {
         self.id
     }

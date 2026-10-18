@@ -54,6 +54,7 @@ pub mod rate_schedule;
 pub mod arbiter;
 pub mod comms_loss;
 pub mod dispatcher;
+pub mod forecast_trace;
 pub mod milp_interactions;
 pub mod milp_planner;
 pub mod timeline;

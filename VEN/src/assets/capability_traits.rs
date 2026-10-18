@@ -79,7 +79,7 @@ pub trait MilpParticipant {
 }
 
 /// Capability: a user can issue a direct request against this asset (a target
-/// SoC/power, or opportunistic surplus absorption). Implemented by the two
+/// SoC/power). Implemented by the two
 /// storage-shaped assets, Battery and EV.
 pub trait RequestResolvable {
     /// The asset's own answer to "what would a user request resolve against": its current
@@ -90,11 +90,6 @@ pub trait RequestResolvable {
     /// `(discharge_kwh, charge_kwh)` currently available, or `None` if the
     /// asset can't participate right now (e.g. an unplugged EV).
     fn available_storage_kwh(&self, state: &AssetState) -> Option<(f64, f64)>;
-
-    /// How much of `surplus_kw` this asset could opportunistically absorb
-    /// right now, or `None` if it can't absorb surplus at all (e.g. EV
-    /// already at its charge target, or unplugged).
-    fn surplus_charge_kw(&self, state: &AssetState, surplus_kw: f64) -> Option<f64>;
 }
 
 /// Capability: this asset has thermostat-shaped behavior (a target
@@ -167,6 +162,9 @@ pub struct TickOverrides {
     pub heater_temp_max_override: Option<f64>,
     pub heater_emergency_curtail_override: Option<bool>,
     pub heater_emergency_absorb_override: Option<bool>,
+    /// A start-now request's target as this heater's cut-out ceiling (opportunistic objective
+    /// only); the heater caps it at its own `temp_max_c`, and `heater_temp_max_override` wins.
+    pub heater_request_ceiling_c: Option<f64>,
 
     // BaseLoad — `base_load_baseline_kw` is the pre-resolved
     // `self.base_load_smoothing.update(...)` result, `None` if no BaseLoad

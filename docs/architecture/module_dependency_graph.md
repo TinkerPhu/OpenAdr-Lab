@@ -252,6 +252,8 @@ graph LR
   M_entities --> M_ids
   M_entities --> M_lab_core
   M_fleet_telemetry --> M_controller
+  M_fleet_telemetry --> M_entities
+  M_fleet_telemetry --> M_lab_core
   M_history_store --> M_controller
   M_history_store --> M_entities
   M_measurement --> M_controller
@@ -277,11 +279,14 @@ graph LR
   M_simulator --> M_controller
   M_simulator --> M_controller_milp_planner
   M_simulator --> M_entities
+  M_simulator --> M_lab_core
   M_state --> M_controller
   M_state --> M_entities
+  M_tasks --> M_app_ctx
   M_tasks --> M_assets
   M_tasks --> M_config
   M_tasks --> M_controller
+  M_tasks --> M_controller_milp_planner
   M_tasks --> M_entities
   M_tasks --> M_lab_core
   M_tasks --> M_planner_events

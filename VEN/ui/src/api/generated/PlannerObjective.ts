@@ -4,4 +4,4 @@
  * Serialized by hand (`as_str`); the UI type is derived from the variants in the same spelling,
  * pinned by `planner_objective_ts_spelling_is_the_wire_spelling`.
  */
-export type PlannerObjective = "min_cost" | "min_ghg" | "min_grid" | "min_import" | "max_revenue" | "custom";
+export type PlannerObjective = "min_cost" | "min_ghg" | "min_grid" | "min_import" | "max_revenue" | "custom" | "opportunistic";

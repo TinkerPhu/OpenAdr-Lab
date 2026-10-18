@@ -244,7 +244,19 @@ already serves the same data (DTO passthrough — no new vocabulary).
 | `telemetry` | yes | 0 | every 5 s (configurable) | `ts`, `grid.net_power_kw` (signed), per asset `power_kw`/`soc` — as `/sim` snapshot |
 | `signals` | yes | 1 | on change | `GET /signals` |
 | `trace` | no | 1 | on every `ControllerEvent` | one `/trace/events` entry |
-| `plan` | yes | 1 | when the active plan changes | a projection of `GET /plan`: `id`, `created_at`, `trigger`, and per slot `start`, `end`, `net_import_kw`, `net_export_kw`, `import_tariff_eur_kwh`, `export_tariff_eur_kwh` under the plan's own names. Published by `tasks/fleet_plan.rs` (a bridge off the controller trace, like `trace`); stored by the BFF in `lab_recorder.fleet_plan` (7 days) and served as `GET /api/fleet/plan?at=` |
+| `plan` | yes | 1 | when the active plan changes | a projection of `GET /plan`: `id`, `created_at`, `trigger`, `objective`, `solve_status`, and per slot `start`, `end`, `net_import_kw`, `net_export_kw`, `import_tariff_eur_kwh`, `export_tariff_eur_kwh`, `planned_kw_by_asset` under the plan's own names (`telemetry_port::plan_body`; no allocations, no asset state). Published by `tasks/fleet_plan.rs` (a bridge off the controller trace, like `trace`); stored by the BFF in `lab_recorder.fleet_plan` (7 days) and served as `GET /api/fleet/plan?at=` (the fleet sum) and `GET /api/fleet/vens/:ven/plan` (the Fleet page's per-VEN plan, the newest stored one) |
+| `objective` | yes | 1 | at start-up, on every change, re-sent on every connect | `GET /plan/objective` (objective in force, its source, the objectives the VEN accepts) |
+| `command/objective` | yes | 1 | written by the BFF, read by the VEN | `{"objective", "requested_at"}` (`lab_core::fleet_channel::ObjectiveCommand`); empty = released |
+
+Topic shape, leaf names, the command body and the broker settings live once in
+`lab_core::fleet_channel`, used by both ends. `objective` goes out with `try_publish` from a
+spawned task, so neither a route nor the objective setter waits on the broker. The one
+inbound leaf is the lab operator's version of the VEN UI's objective switch, not a grid
+instruction (those stay OpenADR): the VEN applies a new `requested_at` with source `fleet`,
+ignores the broker's redelivery of one it applied (a local change made since survives), and on
+an empty payload goes back to its profile objective only while the fleet's objective is still in
+force (`services::objective::decide_fleet_command`). The BFF may write only that leaf
+(`VTN/mosquitto/fleet-acl.conf`, `scripts/test_fleet_acl.sh`).
 
 Publishing is one outbound port in the VEN (`TelemetryPort`, no-op when
 `FLEET_MQTT_HOST` is unset — same two-gate pattern as `real_measurement_mqtt.md`), fed from the

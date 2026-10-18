@@ -99,13 +99,15 @@ impl PlanRow {
     }
 }
 
-/// A stored plan read back, with its slots parsed.
+/// A stored plan read back, with its slots parsed and the message as the VEN published it (the
+/// Fleet page's per-VEN plan shows that, `GET /api/fleet/vens/:ven/plan`).
 #[derive(Clone, Debug)]
 pub struct StoredPlan {
     pub ven_name: String,
     pub plan_id: String,
     pub created_at: DateTime<Utc>,
     pub slots: Vec<PlanSlot>,
+    pub payload: Value,
 }
 
 pub async fn insert_plan_batch(pool: &PgPool, rows: &[PlanRow]) -> Result<()> {
@@ -158,6 +160,7 @@ pub async fn latest_plans_at(pool: &PgPool, at: DateTime<Utc>) -> Result<Vec<Sto
                 plan_id,
                 created_at,
                 slots: parse_slots(&payload)?,
+                payload,
             })
         })
         .collect())
@@ -323,6 +326,7 @@ mod tests {
             plan_id: id.into(),
             created_at: t(created),
             slots,
+            payload: Value::Null,
         }
     }
 

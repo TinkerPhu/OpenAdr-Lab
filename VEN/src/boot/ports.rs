@@ -26,6 +26,9 @@ pub struct Ports {
     pub pv_measurement: Arc<dyn MeasurementPort>,
     pub base_load_measurement: Arc<dyn MeasurementPort>,
     pub telemetry: Arc<dyn controller::telemetry_port::TelemetryPort>,
+    /// Payloads arriving on this VEN's `command/objective` leaf, for
+    /// `tasks::fleet_command`; `None` when the VEN is not part of a fleet.
+    pub fleet_commands: Option<tokio::sync::mpsc::Receiver<Vec<u8>>>,
     /// `None` when `profile.history.enabled` is false or the SQLite file could
     /// not be opened — the run continues without history rather than failing.
     pub history: Option<Arc<dyn HistoryPort>>,
@@ -42,6 +45,7 @@ impl Ports {
             cfg.ven_name.clone(),
         );
         let store = open_history_store(profile, data_dir);
+        let (telemetry, fleet_commands) = fleet_ports(&cfg.ven_name);
         Self {
             vtn_port: Arc::new(vtn),
             solver: Arc::new(controller::milp_planner::MilpSolver),
@@ -56,7 +60,8 @@ impl Ports {
                 "base_load",
                 measurement_translation::parse_base_load_measurement,
             ),
-            telemetry: telemetry_port(&cfg.ven_name),
+            telemetry,
+            fleet_commands,
             history: store.clone().map(|s| s as Arc<dyn HistoryPort>),
             settings: store.map(|s| s as Arc<dyn SettingsPort>),
         }
@@ -98,21 +103,28 @@ fn measurement_port(
 }
 
 /// The live side channel a fleet view reads, separate from the reports the VTN
-/// receives (fleet-monitor phase 0 §6). No `FLEET_MQTT_HOST` means this VEN is
-/// not part of a monitored fleet — a normal deployment, so the port becomes a
-/// no-op rather than an error.
-fn telemetry_port(ven_name: &str) -> Arc<dyn controller::telemetry_port::TelemetryPort> {
+/// receives (fleet-monitor phase 0 §6), and the objective commands arriving on
+/// it (openspec `opportunistic-objective` D10). No `FLEET_MQTT_HOST` means this
+/// VEN is not part of a monitored fleet — a normal deployment, so the port
+/// becomes a no-op and no commands arrive.
+type FleetPorts = (
+    Arc<dyn controller::telemetry_port::TelemetryPort>,
+    Option<tokio::sync::mpsc::Receiver<Vec<u8>>>,
+);
+
+fn fleet_ports(ven_name: &str) -> FleetPorts {
     match fleet_telemetry::FleetMqttConfig::from_env(ven_name) {
         Some(cfg) => {
             info!(
-                broker = %cfg.broker_host,
-                port = cfg.broker_port,
+                broker = %cfg.broker.host,
+                port = cfg.broker.port,
                 topic_root = %cfg.topic_root,
                 "fleet telemetry: publishing"
             );
-            Arc::new(fleet_telemetry::FleetMqttPublisher::spawn(cfg))
+            let (publisher, commands) = fleet_telemetry::FleetMqttPublisher::spawn(cfg);
+            (Arc::new(publisher), Some(commands))
         }
-        None => Arc::new(controller::telemetry_port::NoTelemetry),
+        None => (Arc::new(controller::telemetry_port::NoTelemetry), None),
     }
 }
 

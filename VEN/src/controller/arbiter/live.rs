@@ -56,6 +56,24 @@ pub fn projected_net_kw_except(
         .sum()
 }
 
+/// Site net power once every command in `setpoints` has landed (kW, positive = import): as
+/// `projected_net_kw`, but each asset at what its command draws after any response lag
+/// (`AssetSnapshot::power_when_command_lands_kw`) instead of what it draws this tick. The two
+/// differ only for a lagging asset, whose command issued now is what it draws next tick.
+pub fn projected_landed_net_kw(
+    sim: &SimSnapshot,
+    setpoints: &HashMap<String, f64>,
+    live: &LiveKwByAsset,
+) -> f64 {
+    sim.assets
+        .iter()
+        .map(|(id, snap)| match live.get(id) {
+            Some(&live_kw) => live_kw,
+            None => snap.power_when_command_lands_kw(current_setpoint_kw(setpoints, sim, id)),
+        })
+        .sum()
+}
+
 /// `live` with the arrays' generation reduced by `tighten_kw` (kW, magnitude): a tightened
 /// site generation limit, shared over the arrays in proportion to what each generates now.
 /// The arrays are the assets with an inverter (`AssetSnapshot::ac_ceiling_kw`); a lone array

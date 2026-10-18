@@ -33,15 +33,32 @@ pub fn build_setpoints(
     thermostat_setpoints_kw: &HashMap<String, f64>,
     now: DateTime<Utc>,
 ) -> HashMap<String, f64> {
+    let slot_allocs = plan.current_slot(now).map(|s| &s.allocations);
+    setpoints_from(sim, slot_allocs, thermostat_setpoints_kw)
+}
+
+/// Every asset's own command, no plan allocation followed: its default, or its thermostat
+/// setpoint. The base of the opportunistic objective's dispatch (openspec
+/// `opportunistic-objective` D5), the same rule `build_setpoints` applies where a plan slot
+/// allocates nothing.
+pub fn build_setpoints_without_plan(
+    sim: &SimSnapshot,
+    thermostat_setpoints_kw: &HashMap<String, f64>,
+) -> HashMap<String, f64> {
+    setpoints_from(sim, None, thermostat_setpoints_kw)
+}
+
+fn setpoints_from(
+    sim: &SimSnapshot,
+    slot_allocs: Option<&Vec<crate::entities::plan::AssetAllocation>>,
+    thermostat_setpoints_kw: &HashMap<String, f64>,
+) -> HashMap<String, f64> {
     // Start with defaults from snapshot
     let mut setpoints: HashMap<String, f64> = sim
         .assets
         .iter()
         .map(|(id, snap)| (id.clone(), snap.default_setpoint_kw))
         .collect();
-
-    let slot_allocs: Option<&Vec<crate::entities::plan::AssetAllocation>> =
-        plan.current_slot(now).map(|s| &s.allocations);
 
     for alloc in slot_allocs.into_iter().flatten() {
         setpoints.insert(alloc.asset_id.clone(), alloc.power_kw);

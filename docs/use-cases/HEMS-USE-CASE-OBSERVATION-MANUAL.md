@@ -59,6 +59,7 @@ The **Controller** page is the primary observation surface for all HEMS use case
 | UC-14 Thermal Feedback Loop | ✅ Full | Simulation: ambient_temp_c slider | Simulation HeaterCard + Controller |
 | UC-17 EV That Leaves on a Schedule | ✅ Full | Profile: `usage_forecast:` on the EV asset | Devices: EV card + Controller: EV chart |
 | UC-18 Several Charging Sessions at Once | ✅ Full | Devices → EV card → Plan Charging, then Plan another | Devices: EV card + Controller: EV chart |
+| UC-19 Running Without Planning | ✅ Full | Planner → objective picker → Opportunistic | Planner: Simulated forecast chip + Devices: Arbiter card |
 
 > **Two cases not fully observable:**
 > - **UC-02**: No washing machine in any VEN profile. You can create a packet for a `"washer"` asset via the User Requests page, but the simulator won't execute it. Use the EV to observe the same planning behavior (deferral to cheap window).
@@ -1087,6 +1088,57 @@ the replacement displaces the standing plan and queues the new one", "A replace 
 naming an unqueued session removes nothing") and, for the dialog itself, by
 `VEN/ui/src/__tests__/Devices.test.tsx`.
 
+
+## UC-19: Running Without Planning (opportunistic objective)
+
+**Scenario:** The site runs like the common HEMS that does not plan: whatever PV is left after
+the house is soaked up by the assets in a fixed order, the battery covers what the house would
+import, and requests are served at once or from surplus, never shifted to a cheaper hour. The
+point is the comparison: the same site, the same day, with and without the planner.
+
+**What the controller should do:** under the `Opportunistic` objective no plan allocation is
+followed. Each tick the site balance is shared out in the order each asset declares (EV, heater,
+shiftable loads, battery): a surplus is absorbed, an import is covered by storage, and the
+battery never discharges into export. A start-now request (`ASAP`, `BY_DEADLINE`) runs its asset
+at full power at once; a surplus-only request (`OPPORTUNISTIC`, `*_FREE`) waits for a surplus.
+An import limit still bounds everything. The plan the VEN adopts is a forecast of exactly that
+dispatch, not an optimisation.
+
+**Suggested VEN:** VEN1 (battery, EV, heater, PV)
+
+### Setup
+
+1. Switch to **VEN1**; on **Planner**, choose **Opportunistic** in the objective picker
+2. Note the caption under the picker: "set here" and the time (the profile's objective shows
+   "from the profile"; a command from the VTN UI's Fleet page shows "set by the fleet (VTN UI)")
+3. Optionally, on **Simulation**, raise **Manual Irradiance** to create a surplus, or raise the
+   base load to create an import
+
+### What to observe
+
+**Planner → plan header:** a **Simulated forecast** chip instead of a solve result; the slots
+show what dispatch without look-ahead will do (battery charging at noon, discharging in the
+evening until its floor), not a schedule.
+
+**Dashboard:** the plan status row reads "Opportunistic forecast, no look-ahead"; the objective
+chip says who set it.
+
+**Devices → Arbiter card → Opportunistic dispatch (no plan followed):** `Site balance before the
+ranked assets`, `Leading` (the asset taking surplus or covering import) and `Unresolved`.
+
+**Requests:** an EV request in `BY_DEADLINE` mode starts charging within seconds even with no PV;
+one in `OPPORTUNISTIC` mode stays at 0 kW until there is a surplus.
+
+**Switching back:** choose **Cost** again; within a minute or two the plan header shows a solved
+plan and the assets follow its allocations again.
+
+**Raw check:** `GET /plan/objective` (objective, source, set time, accepted objectives);
+`GET /plan` → `solve_status: "SIMULATED"`; `GET /arbiter-diagnostics` → `opportunistic`.
+
+Covered end to end by `tests/features/ven_opportunistic_objective.feature`; the fleet-wide
+switch is §14 of `SYSTEM-USE-CASES.md`.
+
+---
 
 ## How to set a comfort curve (Devices → Comfort Curve)
 

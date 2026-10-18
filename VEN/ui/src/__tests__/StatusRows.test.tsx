@@ -84,6 +84,12 @@ describe("PlanStatusRow", () => {
     expect(screen.getByTestId("dash-plan-status")).toHaveTextContent(/not certified optimal/i);
     expect(screen.getByTestId("dash-plan-status")).toHaveTextContent(/gap tolerance/i);
   });
+
+  it("shows a simulated forecast as healthy, not as a solve", () => {
+    render(<PlanStatusRow plan={makePlan({ solve_status: "SIMULATED" })} />);
+    expect(screen.getByTestId("dash-plan-status")).toHaveTextContent(/forecast/i);
+    expect(screen.getByTestId("dash-plan-status")).not.toHaveTextContent(/optimal/i);
+  });
 });
 
 describe("TaskSummaryRow", () => {

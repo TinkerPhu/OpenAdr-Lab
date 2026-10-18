@@ -17,6 +17,9 @@ pub struct Config {
     /// it's an optional add-on, not required for the BFF's core proxy role.
     pub database_url: Option<String>,
     pub recorder_poll_secs: u64,
+    /// Seconds between two VENs of a fleet-wide objective switch, so their replans do not
+    /// all solve at once (openspec `opportunistic-objective` 8.2).
+    pub fleet_objective_spacing_s: u64,
 }
 
 impl Config {
@@ -55,7 +58,13 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(30);
 
+        let fleet_objective_spacing_s = std::env::var("FLEET_OBJECTIVE_SPACING_S")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10);
+
         Ok(Self {
+            fleet_objective_spacing_s,
             listen_addr,
             vtn_base_url,
             bl_client_id,

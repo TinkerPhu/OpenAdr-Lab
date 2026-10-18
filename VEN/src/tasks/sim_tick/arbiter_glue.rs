@@ -114,25 +114,14 @@ pub(crate) async fn record_arbiter_outcome(
             measured_net_kw,
             limit: outcome.limit.clone(),
             bridge_kw_by_asset: both_passes_bridge_kw(outcome),
+            opportunistic: outcome.opportunistic.clone(),
             updated_at: Some(now),
         })
         .await;
     state.set_arbiter_active_lever(active_lever).await;
 }
 
-/// Each EV's overlay switch this tick, by asset id. An EV with neither a settings record
-/// nor a session reads the default settings with no session running.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct OverlayEnabled(HashMap<String, bool>);
-
-impl OverlayEnabled {
-    pub(crate) fn of(&self, asset_id: &str) -> bool {
-        self.0
-            .get(asset_id)
-            .copied()
-            .unwrap_or_else(|| crate::state::EvSettings::default().overlay_enabled(false))
-    }
-}
+pub(crate) use crate::controller::arbiter::OverlayEnabled;
 
 /// PHASE 0, per EV: user toggle AND no EvSession of that EV whose window is open now
 /// (`EvSettings::overlay_enabled`), plus the session governing each EV now. Also updates
@@ -149,34 +138,29 @@ pub(crate) async fn resolve_overlay_enabled(
     // including in the gaps between sessions when the car is sitting at home and
     // free to soak up surplus.
     let settings = state.ev_settings_all().await;
-    let sessions_now: HashMap<String, EvSession> = state
-        .ev_sessions()
-        .await
-        .into_iter()
-        .filter_map(|(id, queue)| queue.current(now).cloned().map(|s| (id, s)))
-        .collect();
+    let (enabled, sessions_now) = OverlayEnabled::at(&settings, &state.ev_sessions().await, now);
     let mut ids: Vec<&String> = settings.keys().chain(sessions_now.keys()).collect();
     ids.sort();
     ids.dedup();
-    let mut enabled = HashMap::new();
     for ev_id in ids {
         let ev_settings = settings.get(ev_id).cloned().unwrap_or_default();
         let session_active = sessions_now.contains_key(ev_id);
         if ev_settings.paused_by_active_session != session_active {
             let paused = crate::state::EvSettings {
                 paused_by_active_session: session_active,
-                ..ev_settings.clone()
+                ..ev_settings
             };
             state.set_ev_settings(ev_id, paused).await;
         }
-        enabled.insert(ev_id.clone(), ev_settings.overlay_enabled(session_active));
     }
-    (OverlayEnabled(enabled), sessions_now)
+    (enabled, sessions_now)
 }
 
 /// Both passes' storage bridges this tick, summed per asset — next tick's
 /// `ArbiterTick::prev_bridge_kw_by_asset`.
-fn both_passes_bridge_kw(outcome: &controller::arbiter::ArbiterOutcome) -> HashMap<String, f64> {
+pub(super) fn both_passes_bridge_kw(
+    outcome: &controller::arbiter::ArbiterOutcome,
+) -> HashMap<String, f64> {
     let limit_bridges = outcome.limit.iter().flat_map(|l| &l.bridge_kw_by_asset);
     let mut bridge_kw_by_asset = HashMap::new();
     for (asset_id, kw) in outcome.bridge_kw_by_asset.iter().chain(limit_bridges) {

@@ -38,7 +38,7 @@ pub(crate) struct TickContext {
     pub alert_windows: Vec<crate::entities::capacity::AlertWindow>,
     pub rates_snap: Vec<crate::entities::tariff_snapshot::TariffSnapshot>,
     /// Each EV's opportunistic-charging switch this tick.
-    pub overlay_enabled: super::arbiter_glue::OverlayEnabled,
+    pub overlay_enabled: crate::controller::arbiter::OverlayEnabled,
     pub deviation_arbiter_enabled: bool,
     pub incumbent_lever: Option<String>,
     /// Last tick's storage bridges (R-104), so each carried storage command drops its own.
@@ -51,6 +51,21 @@ pub(crate) struct TickContext {
     /// result; each EV gets its own (`TickInputs::ev_departure_by_asset`).
     pub ev_departure_by_asset: std::collections::HashMap<String, chrono::DateTime<chrono::Utc>>,
     pub comms_loss: Option<CommsLossState>,
+    /// The active requests, read only while the adopted plan's objective dispatches without
+    /// it (the opportunistic objective); `None` under every planning objective, which reads no
+    /// request state here (openspec `opportunistic-objective` D0).
+    pub opportunistic: Option<crate::controller::arbiter::OpportunisticRequests>,
+}
+
+impl TickContext {
+    /// The request targets the simulator hands each asset this tick: empty under every planning
+    /// objective, which injects no request target (openspec `opportunistic-objective` D0).
+    pub(crate) fn request_targets(&self) -> crate::controller::arbiter::RequestTargets {
+        self.opportunistic
+            .as_ref()
+            .map(|r| r.targets.clone())
+            .unwrap_or_default()
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -101,6 +116,17 @@ pub(crate) async fn resolve_tick_context(
     };
     let (overlay_enabled, ev_sessions_now) =
         super::arbiter_glue::resolve_overlay_enabled(state, now).await;
+    let opportunistic = match plan_snap.as_ref() {
+        Some(plan) if !plan.objective.dispatches_from_plan() => {
+            Some(crate::controller::arbiter::opportunistic_requests(
+                now,
+                &ev_sessions_now,
+                &state.heater_targets().await,
+                &state.shiftable_loads().await,
+            ))
+        }
+        _ => None,
+    };
 
     TickContext {
         inject,
@@ -120,11 +146,9 @@ pub(crate) async fn resolve_tick_context(
         bridge_kw_by_asset: state.arbiter_bridge_kw_by_asset().await,
         limit_enforcement_enabled: state.limit_enforcement_enabled().await,
         limit_incumbent_lever: state.limit_active_lever().await,
-        ev_departure_by_asset: ev_sessions_now
-            .into_iter()
-            .map(|(id, s)| (id, s.departure_time))
-            .collect(),
+        ev_departure_by_asset: crate::controller::arbiter::session_departures(&ev_sessions_now),
         comms_loss,
+        opportunistic,
     }
 }
 

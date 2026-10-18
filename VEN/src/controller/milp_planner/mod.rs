@@ -43,6 +43,7 @@ pub(crate) use self::types::{ForecastMilpContext, ShiftableLoadMilpContext};
 use crate::entities::planner_params::{PlannerObjective, PlannerParams};
 
 pub mod asset_port;
+mod forecast_plan;
 mod forecast_readback;
 mod input_stages;
 mod inputs;
@@ -62,6 +63,7 @@ mod types;
 use self::inputs::*;
 use self::results::*;
 
+pub use self::forecast_plan::plan_from_forecast;
 pub(crate) use self::results::fallback_plan;
 #[cfg(test)]
 use self::solver_duals::*;
@@ -98,15 +100,12 @@ pub fn run_planner(
         "run_planner: two asset contexts report the same asset id"
     );
 
-    // The forecast participants (PV, base load) come first, the assets the plan dispatches after
-    // them; each group keeps its input order. The model declares PV's used generation where the
-    // grid's own PV variable used to be, before the penalty slacks (`ModelSkeleton::declare`).
-    asset_contexts.sort_by_key(|c| matches!(c.participation(), Participation::Dispatched));
     let objective = objective_override.unwrap_or(planner.objective);
-    let inputs = build_milp_inputs(
+    let inputs = planner_inputs(
+        &mut asset_contexts,
         grid,
         planner,
-        &inputs::SiteInputs {
+        inputs::SiteInputs {
             grid_max_import_kw,
             grid_max_export_kw,
             baseline_override,
@@ -116,14 +115,7 @@ pub fn run_planner(
             co2: diurnal_co2_ref,
         },
         now,
-        &asset_contexts,
     );
-    // WP4.1 (BL-28): give contexts the per-slot grid data they cannot know at
-    // construction time (e.g. the OPPORTUNISTIC free-energy charge cap).
-    let forecast_surplus_kw = inputs.forecast_surplus_kw();
-    for ctx in asset_contexts.iter_mut() {
-        ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &forecast_surplus_kw);
-    }
     let p1w = build_phase1_weights(planner, objective);
     match solve_milp_two_phase(
         &inputs,
@@ -168,6 +160,30 @@ pub fn run_planner(
             )
         }
     }
+}
+
+/// The inputs every plan is built on, solved or forecast: the contexts in planner order, the
+/// slot series, and each context's per-slot grid data.
+fn planner_inputs(
+    asset_contexts: &mut [Box<dyn self::asset_port::AssetMilpContext>],
+    grid: &crate::entities::grid_signals::GridSignals,
+    planner: &PlannerParams,
+    site: inputs::SiteInputs<'_>,
+    refs: &inputs::StaleRateRefs<'_>,
+    now: DateTime<Utc>,
+) -> MilpInputs {
+    // The forecast participants (PV, base load) come first, the assets the plan dispatches after
+    // them; each group keeps its input order. The model declares PV's used generation where the
+    // grid's own PV variable used to be, before the penalty slacks (`ModelSkeleton::declare`).
+    asset_contexts.sort_by_key(|c| matches!(c.participation(), Participation::Dispatched));
+    let inputs = build_milp_inputs(grid, planner, &site, refs, now, asset_contexts);
+    // WP4.1 (BL-28): give contexts the per-slot grid data they cannot know at
+    // construction time (e.g. the OPPORTUNISTIC free-energy charge cap).
+    let forecast_surplus_kw = inputs.forecast_surplus_kw();
+    for ctx in asset_contexts.iter_mut() {
+        ctx.inject_grid_slots(&inputs.c_imp_eur_kwh, &forecast_surplus_kw);
+    }
+    inputs
 }
 
 /// Concrete `SolverPort` implementation backed by the two-phase MILP solver.

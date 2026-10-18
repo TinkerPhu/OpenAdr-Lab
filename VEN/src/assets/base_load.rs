@@ -286,6 +286,10 @@ impl super::capability_traits::MilpParticipant for BaseLoad {
 }
 
 impl Asset for BaseLoad {
+    fn surplus_claim_rank(&self) -> Option<u8> {
+        None
+    }
+
     fn as_milp_participant(&self) -> Option<&dyn super::capability_traits::MilpParticipant> {
         Some(self)
     }

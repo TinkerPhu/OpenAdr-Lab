@@ -12,7 +12,6 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
 use crate::app_ctx::{ActiveObjective, History, PlanTriggerTx};
-use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
 use crate::entities::history::LedgerPeriod;
 use crate::entities::reservation_request::ReservationRequest;
 use crate::entities::PlannerObjective;
@@ -43,11 +42,32 @@ pub struct SetObjectiveBody {
 pub async fn put_plan_objective(
     State(active_objective): State<ActiveObjective>,
     State(trigger_tx): State<PlanTriggerTx>,
+    State(telemetry): State<crate::app_ctx::Telemetry>,
     Json(body): Json<SetObjectiveBody>,
 ) -> impl IntoResponse {
-    *active_objective.write().await = body.objective;
-    let _ = trigger_tx.send(PlanTriggerSignal::bare(PlanTrigger::UserRequest));
+    crate::services::objective::set_objective(
+        &active_objective,
+        &trigger_tx,
+        telemetry.as_ref(),
+        body.objective,
+        crate::entities::objective_setting::ObjectiveSource::VenUi,
+        chrono::Utc::now(),
+    )
+    .await;
     StatusCode::NO_CONTENT
+}
+
+/// `/plan/objective`: PUT changes the objective, GET reads the setting.
+pub fn plan_objective_methods() -> axum::routing::MethodRouter<crate::app_ctx::AppCtx> {
+    axum::routing::put(put_plan_objective).get(get_plan_objective)
+}
+
+/// GET /plan/objective — the objective in force, who set it and when, the profile's objective
+/// and the objectives this VEN accepts (the Planner page and the Dashboard read it).
+pub async fn get_plan_objective(
+    State(active_objective): State<ActiveObjective>,
+) -> impl IntoResponse {
+    Json(active_objective.read().await.clone())
 }
 
 /// GET /tariffs — returns planned tariff snapshots parsed from active events.
@@ -316,5 +336,58 @@ mod ledger_tests {
         assert_eq!(status, StatusCode::OK);
         assert!(body["current"].is_object());
         assert!(body["closed_periods"].is_null(), "{body}");
+    }
+}
+
+#[cfg(test)]
+mod objective_route_tests {
+    use super::*;
+    use crate::entities::asset::{PlanTrigger, PlanTriggerSignal};
+    use crate::entities::objective_setting::{ObjectiveSetting, ObjectiveSource};
+    use axum::response::IntoResponse;
+    use std::sync::Arc;
+
+    /// The VEN UI's change is applied with its source, replans, and reads back in full.
+    #[tokio::test]
+    async fn put_then_get_plan_objective_reports_the_change_and_its_source() {
+        let setting: ActiveObjective = Arc::new(tokio::sync::RwLock::new(
+            ObjectiveSetting::from_profile(PlannerObjective::MinCost),
+        ));
+        let (tx, mut rx) =
+            tokio::sync::watch::channel(PlanTriggerSignal::bare(PlanTrigger::Periodic));
+        let tx = Arc::new(tx);
+        rx.mark_unchanged();
+        let telemetry: crate::app_ctx::Telemetry =
+            Arc::new(crate::controller::telemetry_port::NoTelemetry);
+        let status = put_plan_objective(
+            State(setting.clone()),
+            State(tx.clone()),
+            State(telemetry),
+            Json(SetObjectiveBody {
+                objective: PlannerObjective::Opportunistic,
+            }),
+        )
+        .await
+        .into_response()
+        .status();
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert!(rx.has_changed().unwrap(), "the change replans");
+
+        let body = get_plan_objective(State(setting)).await.into_response();
+        let bytes = axum::body::to_bytes(body.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["objective"], "opportunistic");
+        assert_eq!(
+            json["source"],
+            serde_json::to_value(ObjectiveSource::VenUi).unwrap()
+        );
+        assert_eq!(json["profile_objective"], "min_cost");
+        assert_eq!(
+            json["available_objectives"].as_array().unwrap().len(),
+            PlannerObjective::ALL.len()
+        );
+        assert!(json["set_at"].is_string());
     }
 }

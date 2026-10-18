@@ -151,6 +151,10 @@ impl Battery {
 }
 
 impl Asset for Battery {
+    fn surplus_claim_rank(&self) -> Option<u8> {
+        Some(super::battery_declared::SURPLUS_CLAIM_RANK)
+    }
+
     fn arbiter_lever(&self) -> Option<crate::entities::asset::ArbiterLever> {
         Some(crate::entities::asset::ArbiterLever {
             kind: crate::entities::asset::ArbiterLeverKind::Storage,
@@ -329,13 +333,6 @@ impl RequestResolvable for Battery {
             (s.soc_frac - self.min_soc_frac).max(0.0) * self.capacity_kwh,
             (1.0 - s.soc_frac).max(0.0) * self.capacity_kwh,
         ))
-    }
-
-    /// Battery cannot opportunistically absorb surplus — matches
-    /// `AssetConfig::surplus_charge_kw`'s existing `_ => None` fallback for
-    /// every non-EV asset kind today.
-    fn surplus_charge_kw(&self, _state: &AssetState, _surplus_kw: f64) -> Option<f64> {
-        None
     }
 }
 

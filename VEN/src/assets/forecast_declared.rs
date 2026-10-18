@@ -110,6 +110,21 @@ impl DeclaredAsset for DeclaredForecast<'_> {
 }
 
 impl AssetMilpContext for ForecastMilpContext {
+    fn solution_from_trace(
+        &self,
+        net_kw: &[f64],
+        _states: &[std::collections::HashMap<String, f64>],
+    ) -> AssetSolution {
+        AssetSolution {
+            asset_id: self.asset_id.clone(),
+            net_power_kw: net_kw.to_vec(),
+            planned_state: Vec::new(),
+            storage: None,
+            warnings: Vec::new(),
+            detail: AssetSolutionDetail::Forecast,
+        }
+    }
+
     fn asset_id(&self) -> &str {
         &self.asset_id
     }
@@ -157,6 +172,14 @@ impl AssetMilpContext for ForecastMilpContext {
 mod tests {
     use super::*;
     use good_lp::IntoAffineExpression;
+
+    /// A forecast participant's readback is the traced net power, signed as the site sees it.
+    #[test]
+    fn solution_from_trace_keeps_the_traced_net_power() {
+        let sol = pv(vec![3.0, 4.0]).solution_from_trace(&[-3.0, -4.0], &[]);
+        assert_eq!(sol.net_power_kw, vec![-3.0, -4.0]);
+        assert!(matches!(sol.detail, AssetSolutionDetail::Forecast));
+    }
 
     fn pv(forecast_kw: Vec<f64>) -> ForecastMilpContext {
         ForecastMilpContext {

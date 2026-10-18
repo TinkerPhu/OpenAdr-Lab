@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod error;
 mod fleet;
+mod fleet_command;
 mod fleet_plan;
 mod fleet_reactions;
 mod fleet_signals;
@@ -50,6 +51,10 @@ pub struct AppCtx {
     pub fleet_store: fleet_store::SharedPool,
     /// The queue in front of it, for the count of samples it had to drop.
     pub fleet_writer: Option<fleet_store::TelemetryWriter>,
+    /// Publishes the fleet's objective commands; `None` without a fleet broker.
+    pub fleet_commands: Option<Arc<dyn fleet_command::CommandPublisher>>,
+    /// The topic root the fleet lives under (`FLEET_MQTT_ROOT`).
+    pub fleet_root: String,
 }
 
 async fn metrics_middleware(State(_ctx): State<AppCtx>, req: Request, next: Next) -> Response {
@@ -106,24 +111,32 @@ async fn main() -> anyhow::Result<()> {
         None => (None, Arc::new(tokio::sync::RwLock::new(None))),
     };
 
-    match fleet::FleetMqttConfig::from_env() {
+    let fleet_config = fleet::FleetMqttConfig::from_env();
+    let fleet_root = fleet_config
+        .as_ref()
+        .map_or_else(|| "openadr-lab".to_string(), |c| c.root.clone());
+    let fleet_commands: Option<Arc<dyn fleet_command::CommandPublisher>> = match fleet_config {
         Some(cfg) => {
             tracing::info!(
-                broker = %cfg.broker_host,
-                port = cfg.broker_port,
-                topic = %cfg.subscription(),
+                broker = %cfg.host,
+                port = cfg.port,
+                topic = %lab_core::fleet_channel::fleet_subscription(&cfg.root),
                 "fleet ingest: subscribing"
             );
             fleet_status.write().await.enabled = true;
-            fleet::spawn_ingest(
+            let client = fleet::spawn_ingest(
                 cfg,
                 fleet_state.clone(),
                 fleet_status.clone(),
                 telemetry_writer.clone(),
             );
+            Some(Arc::new(fleet_command::MqttCommandPublisher(client)))
         }
-        None => tracing::info!("fleet ingest: no FLEET_MQTT_HOST, not subscribing"),
-    }
+        None => {
+            tracing::info!("fleet ingest: no FLEET_MQTT_HOST, not subscribing");
+            None
+        }
+    };
 
     let ctx = AppCtx {
         business: business.clone(),
@@ -135,6 +148,8 @@ async fn main() -> anyhow::Result<()> {
         fleet_status: fleet_status.clone(),
         fleet_store: fleet_store_pool,
         fleet_writer: telemetry_writer.clone(),
+        fleet_commands,
+        fleet_root,
     };
 
     // Phase 1 (A-2): VTN recorder, gated on DATABASE_URL being set. Spawning
@@ -212,6 +227,19 @@ fn api_routes() -> Router<AppCtx> {
         // the receivers' own interval rule.
         .route("/api/signals/registry", get(routes::signals::registry))
         .route("/api/signals/preview", post(routes::signals::preview))
+        // The fleet's objective (openspec `opportunistic-objective` D10): command one VEN or all.
+        .route(
+            "/api/fleet/objective",
+            put(routes::fleet::put_fleet_objective),
+        )
+        .route(
+            "/api/fleet/vens/:ven/objective",
+            put(routes::fleet::put_ven_objective),
+        )
+        .route(
+            "/api/fleet/vens/:ven/plan",
+            get(routes::fleet::get_ven_plan),
+        )
         .route("/api/reports/:id", delete(routes::reports::delete_report))
         .route("/api/metrics", get(routes::metrics::get_metrics))
 }

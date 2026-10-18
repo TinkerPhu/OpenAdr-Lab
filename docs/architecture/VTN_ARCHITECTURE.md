@@ -146,10 +146,16 @@ resampled with `lab_core::time_series` and summed with `fleet_store::sum_over_gr
 import and export per grid point with `contributingVens`, the contributing plan ids, and the known VENs
 with no plan. "Now" and "an earlier instant" are one function, so the tariff editor's before/after
 comparison (`PlanComparison`) cannot add the two sides up differently; the publish instant is the
-published event's own `createdDateTime`, so nothing is stored by the page. A VEN is absent past its
+published event's own `createdDateTime`, so nothing is stored by the page. The Fleet page asks the
+same question one second before the last objective change (`objectiveChangedAt`, which the BFF sets
+per VEN on `GET /api/fleet/power` when a VEN's `objective` leaf changes; `utils/fleetPlan.ts`
+`instantBefore` is the rule both pages use) and draws that plan faint behind the current one. The
+message carries each slot's `planned_kw_by_asset` and the plan's `objective` and `solve_status` as
+well, for the per-VEN plan the Fleet page opens: `GET /api/fleet/vens/:ven/plan` answers the newest
+stored payload of that VEN (`latest_plans_at`, the rows the sum reads). A VEN is absent past its
 plan's horizon, never zero. The telemetry, trace and plan writers share one batch loop
 (`fleet_store::batch_write_loop`). Tests: `fleet_plan.rs` (`mod tests`),
-`tests/features/fleet_plan_feed.feature`.
+`tests/features/fleet_plan_feed.feature`, `tests/features/fleet_objective_control.feature`.
 
 ---
 

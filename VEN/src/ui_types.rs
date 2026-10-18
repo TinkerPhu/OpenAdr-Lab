@@ -29,6 +29,7 @@ ui_types![
     crate::routes::hems::UserRequestWithSession,
     // Plan and planner (increment 2)
     crate::entities::plan::Plan,
+    crate::entities::objective_setting::ObjectiveSetting,
     crate::entities::history::PlanHistorySample,
     crate::planner_events::PlannerEvent,
     // Simulator and assets (increment 3)

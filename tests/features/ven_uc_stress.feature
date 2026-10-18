@@ -21,8 +21,15 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
     Then the plan has field "id"
     And the plan has field "slots"
 
+  # The scenario makes the battery move itself: the ledger only lists an asset that has moved
+  # energy since the VEN started, and what the plan does with the battery depends on the hour
+  # (by day PV moves it, at night a plan may leave it idle after a restart). Under the
+  # opportunistic objective it covers a base-load step from what it holds, at any hour.
   Scenario: UC-11c — Asset ledger tracks energy in active assets
-    When I poll VEN /ledger until field "battery" is present
+    Given the site has no PV, no EV charging, the heater in its band and the battery at 0.8 SoC
+    And I set the VEN's objective to "opportunistic"
+    When a sustained base-load step of 2.0 kW starts
+    And I poll VEN /ledger until field "battery" is present
     Then the response JSON has field "battery"
 
   # --- UC-12: Multi-Asset Coordination Under Import Cap ---

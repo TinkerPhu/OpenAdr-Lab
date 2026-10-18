@@ -43,6 +43,29 @@ impl UserRequestMode {
     pub fn charges_until_departure(&self) -> bool {
         matches!(self, Self::ByDeadline | Self::Asap | Self::ByDeadlineFree)
     }
+
+    /// How a request in this mode is served when nothing plans ahead (the opportunistic
+    /// objective, openspec `opportunistic-objective` D4). The cost-aware modes cannot wait for
+    /// a cheaper hour nobody forecast, so they start now; the free-energy modes take surplus
+    /// only. `MAX_COST` takes surplus only too: without a price forecast, surplus is the only
+    /// energy known to fit any budget.
+    pub fn non_planning_dispatch(&self) -> NonPlanningDispatch {
+        match self {
+            Self::Asap | Self::ByDeadline => NonPlanningDispatch::StartNow,
+            Self::AsapFree | Self::ByDeadlineFree | Self::MaxCost | Self::Opportunistic => {
+                NonPlanningDispatch::SurplusOnly
+            }
+        }
+    }
+}
+
+/// How an active request is served without look-ahead (`UserRequestMode::non_planning_dispatch`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NonPlanningDispatch {
+    /// The asset runs at full effort toward the request's target from now on.
+    StartNow,
+    /// The asset takes PV surplus toward the request's target, nothing from the grid.
+    SurplusOnly,
 }
 
 /// BY_DEADLINE is the pre-mode implicit behaviour: cost-aware completion by a
@@ -159,6 +182,23 @@ pub struct TimeRange {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every mode answers how it is served without look-ahead: the cost-aware ones start now,
+    /// everything gated by free energy or a budget takes surplus only.
+    #[test]
+    fn non_planning_dispatch_starts_the_cost_aware_modes_and_gives_the_rest_surplus() {
+        use NonPlanningDispatch::{StartNow, SurplusOnly};
+        for (mode, want) in [
+            (UserRequestMode::Asap, StartNow),
+            (UserRequestMode::ByDeadline, StartNow),
+            (UserRequestMode::AsapFree, SurplusOnly),
+            (UserRequestMode::ByDeadlineFree, SurplusOnly),
+            (UserRequestMode::MaxCost, SurplusOnly),
+            (UserRequestMode::Opportunistic, SurplusOnly),
+        ] {
+            assert_eq!(mode.non_planning_dispatch(), want, "{mode:?}");
+        }
+    }
     use chrono::TimeZone;
 
     #[test]

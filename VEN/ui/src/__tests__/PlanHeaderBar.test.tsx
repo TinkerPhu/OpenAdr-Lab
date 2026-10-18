@@ -172,6 +172,18 @@ describe("PlanHeaderBar", () => {
     expect(screen.queryByTestId("plan-infeasible-chip")).toBeNull();
   });
 
+  it("renders a simulated-forecast chip, and no solver chip, when solve_status is SIMULATED", () => {
+    render(<PlanHeaderBar plan={makePlan({ solve_status: "SIMULATED" })} />);
+    expect(screen.getByTestId("plan-simulated-chip")).toBeInTheDocument();
+    expect(screen.queryByTestId("plan-suboptimal-chip")).toBeNull();
+    expect(screen.queryByTestId("plan-infeasible-chip")).toBeNull();
+  });
+
+  it("renders no simulated chip for a solved plan", () => {
+    render(<PlanHeaderBar plan={makePlan({ solve_status: "OPTIMAL" })} />);
+    expect(screen.queryByTestId("plan-simulated-chip")).toBeNull();
+  });
+
   it("renders suboptimal chip when solve_status is GAP_LIMIT", () => {
     render(<PlanHeaderBar plan={makePlan({ solve_status: "GAP_LIMIT" })} />);
     expect(screen.getByTestId("plan-suboptimal-chip")).toBeInTheDocument();

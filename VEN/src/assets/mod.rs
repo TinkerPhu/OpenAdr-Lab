@@ -142,6 +142,19 @@ pub struct GridState {
     pub export_limit_kw: f64,
 }
 
+/// One state value of every step boundary in a forecast trace, `default` where the trace does
+/// not carry the key.
+fn trace_values(
+    states: &[std::collections::HashMap<String, f64>],
+    key: &str,
+    default: f64,
+) -> Vec<f64> {
+    states
+        .iter()
+        .map(|s| s.get(key).copied().unwrap_or(default))
+        .collect()
+}
+
 #[cfg(test)]
 mod phase2a_battery_tests {
     //! Spec A Phase 2a (`asset-dispatch-trait-objects` tasks.md 4.1): Battery's
@@ -216,16 +229,6 @@ mod phase2a_battery_tests {
             .expect("Battery must implement RequestResolvable")
             .available_storage_kwh(&state);
         assert!(result.is_some(), "Battery always reports available storage");
-    }
-
-    #[test]
-    fn surplus_charge_kw_always_none() {
-        let (boxed, state) = boxed_and_state(0.5);
-        let result = boxed
-            .as_request_resolvable()
-            .expect("Battery must implement RequestResolvable")
-            .surplus_charge_kw(&state, 2.0);
-        assert_eq!(result, None, "Battery never absorbs surplus");
     }
 
     #[test]
@@ -362,19 +365,6 @@ mod phase2a_ev_tests {
             .unwrap()
             .available_storage_kwh(&unplugged);
         assert_eq!(result, None, "unplugged EV must report no storage");
-    }
-
-    #[test]
-    fn surplus_charge_kw_positive_when_plugged_and_below_target() {
-        let (boxed, state) = boxed_and_state();
-        let result = boxed
-            .as_request_resolvable()
-            .expect("EvCharger must implement RequestResolvable")
-            .surplus_charge_kw(&state, 3.0);
-        assert!(
-            result.is_some(),
-            "EV below soc_target and plugged must absorb surplus"
-        );
     }
 
     #[test]
@@ -961,6 +951,7 @@ mod phase2b_tick_overridable_tests {
             ev_plugged_override: None,
             ev_soc_target_override: None,
             ev_departure_time: None,
+            heater_request_ceiling_c: None,
         }
     }
 

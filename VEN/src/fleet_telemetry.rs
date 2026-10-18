@@ -13,23 +13,24 @@
 //! deliberately the lossy one — QoS 0, retained, no delivery guarantee.
 
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use lab_core::fleet_channel::{leaf, ven_topic_root, BrokerConfig};
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
+use serde::Serialize;
+use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use crate::controller::telemetry_port::{
     to_wire, PlanBody, TelemetryBody, TelemetryPort, TraceBody,
 };
+use crate::entities::objective_setting::ObjectiveSetting;
 
 /// Where this VEN publishes, and as whom.
 #[derive(Clone, Debug)]
 pub struct FleetMqttConfig {
-    pub broker_host: String,
-    pub broker_port: u16,
-    pub username: Option<String>,
-    pub password: Option<String>,
+    pub broker: BrokerConfig,
     /// Topic root, `openadr-lab/fleet/<ven_name>`.
     pub topic_root: String,
     pub client_id: String,
@@ -38,13 +39,10 @@ pub struct FleetMqttConfig {
 }
 
 impl FleetMqttConfig {
-    /// Read the configuration, or `None` when this VEN does not publish.
-    ///
-    /// `FLEET_MQTT_HOST` is the gate: absent means "not part of a monitored
-    /// fleet", which is a normal deployment and not a degraded one. The port
-    /// defaults to **1884**, the lab broker — `:1883` is always the house
-    /// broker and `:1884` always this one, so the number alone says which is
-    /// meant (§6.1).
+    /// Read the configuration, or `None` when this VEN does not publish
+    /// (`FLEET_MQTT_HOST` unset: not part of a monitored fleet, a normal
+    /// deployment). The broker settings are read as every lab client reads them
+    /// (`lab_core::fleet_channel::BrokerConfig`).
     pub fn from_env(ven_name: &str) -> Option<Self> {
         Self::from_vars(ven_name, |k| std::env::var(k).ok())
     }
@@ -57,21 +55,11 @@ impl FleetMqttConfig {
     /// reasoning as the `determinism` rule's injectable clock -- an ambient
     /// dependency that tests must fight is one that should be a parameter.
     fn from_vars(ven_name: &str, get: impl Fn(&str) -> Option<String>) -> Option<Self> {
-        let broker_host = get("FLEET_MQTT_HOST").filter(|v| !v.is_empty())?;
-        let broker_port = get("FLEET_MQTT_PORT")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1884);
-        let root = get("FLEET_MQTT_ROOT").unwrap_or_else(|| "openadr-lab".into());
-        // Empty is treated as unset: the test broker runs anonymous and its
-        // compose file passes "" rather than omitting the variable.
-        let non_empty = |k: &str| get(k).filter(|v| !v.is_empty());
+        let broker = BrokerConfig::from_vars(&get)?;
         Some(Self {
-            broker_host,
-            broker_port,
-            username: non_empty("FLEET_MQTT_USERNAME"),
-            password: non_empty("FLEET_MQTT_PASSWORD"),
-            topic_root: format!("{root}/fleet/{ven_name}"),
+            topic_root: ven_topic_root(&broker.root, ven_name),
             client_id: format!("ven-fleet-{ven_name}"),
+            broker,
             // D-1: 5 s, and deliberately not tied to the sim tick. The tick is
             // 1 s in production, so publishing per tick is five times the
             // broker traffic and five times the store growth for a fleet view
@@ -100,7 +88,23 @@ fn cadence_reached(last_ms: i64, now_ms: i64, every_ms: i64) -> bool {
     now_ms < last_ms || now_ms - last_ms >= every_ms
 }
 
-/// Publishes to the lab broker; reconnects on its own.
+/// The newest objective this VEN published, re-sent on every connect: a
+/// publish dropped while the broker was away, or a broker restarted without its
+/// retained store, would otherwise leave the fleet view on an old objective
+/// until the next change. (The plan leaf has no such copy: `tasks::fleet_plan`
+/// publishes each adopted plan retained at QoS 1.)
+#[derive(Default)]
+struct LatestLeaves {
+    objective: Option<Arc<ObjectiveSetting>>,
+}
+
+/// Commands queued for `tasks::fleet_command` before the broker's are dropped.
+/// A command is a person's click; eight unconsumed ones means the consumer is
+/// gone, not that it is busy.
+const COMMAND_QUEUE: usize = 8;
+
+/// Publishes to the lab broker and receives this VEN's objective commands;
+/// reconnects on its own.
 pub struct FleetMqttPublisher {
     client: AsyncClient,
     topic_root: String,
@@ -109,44 +113,30 @@ pub struct FleetMqttPublisher {
     /// When the last sample went out, as epoch milliseconds. `i64::MIN` means
     /// "never", so the first tick after startup always publishes.
     last_sample_ms: AtomicI64,
+    latest: Arc<Mutex<LatestLeaves>>,
 }
 
 impl FleetMqttPublisher {
-    /// Connect and start the event loop.
+    /// Connect and start the event loop. The receiver yields every payload
+    /// that arrives on `command/objective`, for `tasks::fleet_command`.
     ///
     /// `rumqttc` reconnects internally, so the loop is spawned once and
     /// outlives any broker restart. `connected` tracks what the loop last saw,
     /// which is what `/health` and the VEN UI report.
-    pub fn spawn(config: FleetMqttConfig) -> Self {
-        let mut opts = MqttOptions::new(
-            config.client_id.clone(),
-            config.broker_host.clone(),
-            config.broker_port,
-        );
-        opts.set_keep_alive(std::time::Duration::from_secs(30));
-        if let (Some(u), Some(p)) = (&config.username, &config.password) {
-            opts.set_credentials(u.clone(), p.clone());
-        }
-        // Last will: if this VEN dies without saying goodbye, the broker tells
-        // subscribers on its behalf. A fleet view must distinguish "quiet" from
-        // "gone", and a VEN that has crashed cannot make that distinction
-        // itself -- which is exactly why the broker holds the message.
-        let status_topic = format!("{}/status", config.topic_root);
-        opts.set_last_will(rumqttc::LastWill::new(
-            status_topic.clone(),
-            serde_json::json!({"state": "offline"}).to_string(),
-            QoS::AtLeastOnce,
-            true,
-        ));
-
-        let (client, mut eventloop) = AsyncClient::new(opts, 32);
+    pub fn spawn(config: FleetMqttConfig) -> (Self, mpsc::Receiver<Vec<u8>>) {
+        let broker = &config.broker;
+        let status_topic = format!("{}/{}", config.topic_root, leaf::STATUS);
+        let (client, mut eventloop) = AsyncClient::new(mqtt_options(&config, &status_topic), 32);
         let connected = Arc::new(AtomicBool::new(false));
+        let latest = Arc::new(Mutex::new(LatestLeaves::default()));
+        let (command_tx, command_rx) = mpsc::channel(COMMAND_QUEUE);
 
         let loop_connected = connected.clone();
-        let announce_client = client.clone();
-        let announce_topic = status_topic.clone();
-        let host = config.broker_host.clone();
-        let port = config.broker_port;
+        let loop_client = client.clone();
+        let loop_latest = latest.clone();
+        let topic_root = config.topic_root.clone();
+        let command_topic = format!("{topic_root}/{}", leaf::COMMAND_OBJECTIVE);
+        let (host, port) = (broker.host.clone(), broker.port);
         tokio::spawn(async move {
             loop {
                 match eventloop.poll().await {
@@ -166,7 +156,24 @@ impl FleetMqttPublisher {
                         // "gone vs quiet" distinction this topic exists to
                         // make -- and the one signal an operator would trust
                         // to call a site dead.
-                        announce_online(announce_client.clone(), announce_topic.clone());
+                        announce_online(loop_client.clone(), status_topic.clone());
+                        // A clean session forgets subscriptions, so this too
+                        // runs on every connect; a retained command arrives
+                        // right after it. `try_`: this task is the one that
+                        // drains the request queue, so it must not wait on it.
+                        if let Err(e) = loop_client.try_subscribe(&command_topic, QoS::AtLeastOnce)
+                        {
+                            warn!(topic = command_topic, error = %e, "could not subscribe to fleet commands");
+                        }
+                        republish_latest(&loop_client, &topic_root, &loop_latest);
+                    }
+                    Ok(Event::Incoming(Packet::Publish(p))) if p.topic == command_topic => {
+                        if command_tx.try_send(p.payload.to_vec()).is_err() {
+                            warn!(
+                                topic = command_topic,
+                                "fleet command dropped: consumer not keeping up"
+                            );
+                        }
                     }
                     Ok(_) => {}
                     Err(e) => {
@@ -184,14 +191,50 @@ impl FleetMqttPublisher {
         // first connection too, so doing it now would both duplicate that and
         // race it -- this point runs before the socket is up, and the old call
         // worked only because rumqttc queues publishes.
-        Self {
+        let publisher = Self {
             client,
             topic_root: config.topic_root,
             connected,
             telemetry_every_ms: config.telemetry_every_s * 1000,
             last_sample_ms: AtomicI64::new(i64::MIN),
-        }
+            latest,
+        };
+        (publisher, command_rx)
     }
+
+    fn leaf_topic(&self, name: &str) -> String {
+        format!("{}/{name}", self.topic_root)
+    }
+
+    fn remember(&self, update: impl FnOnce(&mut LatestLeaves)) {
+        update(&mut self.latest.lock().unwrap_or_else(|e| e.into_inner()));
+    }
+}
+
+/// The client's connection settings: keep-alive, credentials, the packet limit the `plan` leaf
+/// needs (rumqttc's 10 KiB default is far under it, `MAX_PACKET_BYTES`), and the last will.
+fn mqtt_options(config: &FleetMqttConfig, status_topic: &str) -> MqttOptions {
+    let broker = &config.broker;
+    let mut opts = MqttOptions::new(config.client_id.clone(), broker.host.clone(), broker.port);
+    opts.set_keep_alive(std::time::Duration::from_secs(30));
+    opts.set_max_packet_size(
+        lab_core::fleet_channel::MAX_PACKET_BYTES,
+        lab_core::fleet_channel::MAX_PACKET_BYTES,
+    );
+    if let (Some(u), Some(p)) = (&broker.username, &broker.password) {
+        opts.set_credentials(u.clone(), p.clone());
+    }
+    // Last will: if this VEN dies without saying goodbye, the broker tells
+    // subscribers on its behalf. A fleet view must distinguish "quiet" from
+    // "gone", and a VEN that has crashed cannot make that distinction
+    // itself -- which is exactly why the broker holds the message.
+    opts.set_last_will(rumqttc::LastWill::new(
+        status_topic,
+        serde_json::json!({"state": "offline"}).to_string(),
+        QoS::AtLeastOnce,
+        true,
+    ));
+    opts
 }
 
 /// Say we are here, retained, so a subscriber that connects later still learns
@@ -209,10 +252,59 @@ fn announce_online(client: AsyncClient, topic: String) {
     });
 }
 
+/// Re-send the newest objective after a (re)connect.
+fn republish_latest(client: &AsyncClient, topic_root: &str, latest: &Mutex<LatestLeaves>) {
+    let objective = latest
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .objective
+        .clone();
+    if let Some(o) = objective {
+        publish_leaf_detached(
+            client.clone(),
+            format!("{topic_root}/{}", leaf::OBJECTIVE),
+            o,
+        );
+    }
+}
+
+/// Serialise `body` and queue it, retained at QoS 1, from a task of its own:
+/// the caller never waits on serialisation or on the broker (D10).
+fn publish_leaf_detached<T: Serialize + Send + Sync + 'static>(
+    client: AsyncClient,
+    topic: String,
+    body: Arc<T>,
+) {
+    tokio::spawn(async move {
+        try_publish_retained(&client, &topic, body.as_ref());
+    });
+}
+
+/// Queue one retained leaf without waiting; `false` (and a warning) when it was
+/// dropped because rumqttc's request queue is full or closed. The newest body
+/// is re-sent on the next connect, so a drop delays the leaf, it does not lose
+/// it.
+fn try_publish_retained<T: Serialize>(client: &AsyncClient, topic: &str, body: &T) -> bool {
+    let payload = match to_wire(body) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(topic, error = %e, "fleet leaf is not serialisable");
+            return false;
+        }
+    };
+    match client.try_publish(topic, QoS::AtLeastOnce, true, payload) {
+        Ok(()) => true,
+        Err(e) => {
+            warn!(topic, error = %e, "fleet leaf publish dropped");
+            false
+        }
+    }
+}
+
 #[async_trait]
 impl TelemetryPort for FleetMqttPublisher {
     async fn publish_telemetry(&self, body: TelemetryBody<'_>) {
-        let topic = format!("{}/telemetry", self.topic_root);
+        let topic = self.leaf_topic(leaf::TELEMETRY);
         let Ok(payload) = to_wire(&body).inspect_err(|e| {
             tracing::error!(error = %e, "sim snapshot is not serialisable");
         }) else {
@@ -235,7 +327,7 @@ impl TelemetryPort for FleetMqttPublisher {
     }
 
     async fn publish_trace(&self, body: TraceBody<'_>) {
-        let topic = format!("{}/trace", self.topic_root);
+        let topic = self.leaf_topic(leaf::TRACE);
         let Ok(payload) = to_wire(&body).inspect_err(|e| {
             tracing::error!(error = %e, "controller event is not serialisable");
         }) else {
@@ -256,7 +348,7 @@ impl TelemetryPort for FleetMqttPublisher {
     }
 
     async fn publish_plan(&self, body: PlanBody<'_>) {
-        let topic = format!("{}/plan", self.topic_root);
+        let topic = self.leaf_topic(leaf::PLAN);
         let Ok(payload) = to_wire(&body).inspect_err(|e| {
             tracing::error!(error = %e, "plan is not serialisable");
         }) else {
@@ -293,6 +385,16 @@ impl TelemetryPort for FleetMqttPublisher {
     fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Relaxed)
     }
+
+    fn publish_objective(&self, setting: &ObjectiveSetting) {
+        let setting = Arc::new(setting.clone());
+        self.remember(|l| l.objective = Some(setting.clone()));
+        publish_leaf_detached(
+            self.client.clone(),
+            self.leaf_topic(leaf::OBJECTIVE),
+            setting,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -323,27 +425,9 @@ mod tests {
     fn config_defaults_to_the_lab_broker_port() {
         let c = FleetMqttConfig::from_vars("ven-7", vars(&[("FLEET_MQTT_HOST", "lab-mqtt")]))
             .expect("host is set");
-        assert_eq!(c.broker_port, 1884, ":1884 is always the lab broker");
+        assert_eq!(c.broker.port, 1884, ":1884 is always the lab broker");
         assert_eq!(c.topic_root, "openadr-lab/fleet/ven-7");
         assert_eq!(c.client_id, "ven-fleet-ven-7");
-    }
-
-    /// The test broker runs anonymous and its compose file passes empty
-    /// strings rather than omitting the variables. Empty credentials must mean
-    /// "anonymous", not "log in as the user named ''".
-    #[test]
-    fn empty_credentials_are_treated_as_absent() {
-        let c = FleetMqttConfig::from_vars(
-            "ven-1",
-            vars(&[
-                ("FLEET_MQTT_HOST", "lab-mqtt"),
-                ("FLEET_MQTT_USERNAME", ""),
-                ("FLEET_MQTT_PASSWORD", ""),
-            ]),
-        )
-        .unwrap();
-        assert!(c.username.is_none());
-        assert!(c.password.is_none());
     }
 
     /// The tick is the site's simulation step and telemetry is an observation
@@ -395,20 +479,83 @@ mod tests {
         assert!(cadence_reached(10_000, 1_000, 5_000));
     }
 
+    fn publisher(capacity: usize) -> (FleetMqttPublisher, rumqttc::EventLoop) {
+        let (client, eventloop) =
+            AsyncClient::new(MqttOptions::new("test", "localhost", 1884), capacity);
+        let publisher = FleetMqttPublisher {
+            client,
+            topic_root: "openadr-lab/fleet/ven-7".into(),
+            connected: Arc::new(AtomicBool::new(false)),
+            telemetry_every_ms: 5_000,
+            last_sample_ms: AtomicI64::new(i64::MIN),
+            latest: Arc::new(Mutex::new(LatestLeaves::default())),
+        };
+        (publisher, eventloop)
+    }
+
+    /// A plan leaf is tens of kB; rumqttc's 10 KiB default would fail it and drop the
+    /// connection (`MAX_PACKET_BYTES`).
     #[test]
-    fn credentials_are_carried_when_set() {
-        let c = FleetMqttConfig::from_vars(
-            "ven-1",
-            vars(&[
-                ("FLEET_MQTT_HOST", "lab-mqtt"),
-                ("FLEET_MQTT_PORT", "1885"),
-                ("FLEET_MQTT_USERNAME", "ven"),
-                ("FLEET_MQTT_PASSWORD", "secret"),
-            ]),
-        )
-        .unwrap();
-        assert_eq!(c.broker_port, 1885);
-        assert_eq!(c.username.as_deref(), Some("ven"));
-        assert_eq!(c.password.as_deref(), Some("secret"));
+    fn the_client_accepts_and_sends_packets_as_large_as_a_plan() {
+        let config =
+            FleetMqttConfig::from_vars("ven-7", vars(&[("FLEET_MQTT_HOST", "lab-mqtt")])).unwrap();
+        let opts = mqtt_options(&config, "openadr-lab/fleet/ven-7/status");
+        assert_eq!(
+            opts.max_packet_size(),
+            lab_core::fleet_channel::MAX_PACKET_BYTES
+        );
+    }
+
+    #[test]
+    fn leaves_live_under_this_vens_topic_root() {
+        let (p, _loop) = publisher(1);
+        assert_eq!(
+            p.leaf_topic(leaf::OBJECTIVE),
+            "openadr-lab/fleet/ven-7/objective"
+        );
+        assert_eq!(p.leaf_topic(leaf::PLAN), "openadr-lab/fleet/ven-7/plan");
+    }
+
+    /// The `objective` leaf carries exactly what `GET /plan/objective` serves:
+    /// both serialise the same `ObjectiveSetting`.
+    #[test]
+    fn objective_leaf_body_is_the_objective_setting() {
+        use crate::entities::planner_params::PlannerObjective;
+        let setting = ObjectiveSetting::from_profile(PlannerObjective::MinCost);
+        let body: serde_json::Value = serde_json::from_str(&to_wire(&setting).unwrap()).unwrap();
+        assert_eq!(body, serde_json::to_value(&setting).unwrap());
+        assert_eq!(body["objective"], "min_cost");
+        assert_eq!(body["source"], "profile");
+    }
+
+    /// With the request queue full (broker away, event loop not draining) the
+    /// publish returns at once and reports the drop, instead of waiting.
+    #[test]
+    fn a_full_request_queue_drops_the_leaf_without_waiting() {
+        let (p, _loop) = publisher(1);
+        assert!(try_publish_retained(&p.client, "t/objective", &1));
+        let started = std::time::Instant::now();
+        assert!(!try_publish_retained(&p.client, "t/objective", &2));
+        assert!(started.elapsed() < std::time::Duration::from_millis(100));
+    }
+
+    /// Each publish is remembered, so the next connect re-sends the newest one.
+    #[tokio::test]
+    async fn the_newest_objective_is_kept_for_the_next_connect() {
+        use crate::entities::planner_params::PlannerObjective;
+        let (p, _loop) = publisher(1);
+        let mut setting = ObjectiveSetting::from_profile(PlannerObjective::MinCost);
+        p.publish_objective(&setting);
+        setting.set(
+            PlannerObjective::Opportunistic,
+            crate::entities::objective_setting::ObjectiveSource::Fleet,
+            chrono::Utc::now(),
+        );
+        p.publish_objective(&setting);
+        let latest = p.latest.lock().unwrap();
+        assert_eq!(
+            latest.objective.as_ref().map(|o| o.objective),
+            Some(PlannerObjective::Opportunistic)
+        );
     }
 }

@@ -1014,6 +1014,7 @@ impl AssetSolutionsView for SolveOutput {
 }
 
 mod fixtures;
+mod forecast_plan;
 use fixtures::*;
 
 mod base_load;

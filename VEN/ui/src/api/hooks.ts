@@ -378,12 +378,25 @@ export function useMeasurement(options?: { refetchInterval?: number | false }) {
   });
 }
 
+/** The objective in force and its source (profile, this UI, the fleet). */
+export function usePlanObjective(options?: { refetchInterval?: number | false }) {
+  const { api } = useVenContext();
+  return useQuery({
+    queryKey: ["plan-objective", api.baseUrl],
+    queryFn: () => api.planObjective(),
+    refetchInterval: options?.refetchInterval ?? 10_000,
+  });
+}
+
 export function useSetObjective() {
   const { api } = useVenContext();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (objective: PlannerObjective) => api.setObjective(objective),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["plan"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["plan"] });
+      queryClient.invalidateQueries({ queryKey: ["plan-objective"] });
+    },
   });
 }
 

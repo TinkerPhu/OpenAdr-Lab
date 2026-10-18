@@ -2,13 +2,13 @@ import { assetsOfType } from "../api/assets";
 import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { Box, Chip, Grid, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
-import { useHealth, usePlan, usePrograms, useEvents, useRequests, useSensor, useReports, useSim, useCapacity, useLedger, useLedgerHistories, useVtnStatus, useTasksStatus } from "../api/hooks";
-import type { OadrCapacityState, AssetLedgerEntry, AssetLedgerHistory } from "../api/types";
+import { useHealth, usePlan, usePlanObjective, usePrograms, useEvents, useRequests, useSensor, useReports, useSim, useCapacity, useLedger, useLedgerHistories, useVtnStatus, useTasksStatus } from "../api/hooks";
+import type { OadrCapacityState, AssetLedgerEntry, AssetLedgerHistory, ObjectiveSetting, PlannerObjective } from "../api/types";
 import { SessionProgressBoard } from "../components/sessions/SessionProgressBoard";
 import { DashboardStatusPanel } from "../components/dashboard/StatusRows";
 import { SimAssetTiles } from "../components/dashboard/SimAssetTiles";
 import { formatFixedOrDash, formatKwOrDash } from "@lab/ui/unitFormat";
-import { OBJECTIVE_LABELS } from "../components/planner/objectiveLabels";
+import { OBJECTIVE_LABELS, OBJECTIVE_SOURCE_LABELS } from "../components/planner/objectiveLabels";
 
 function ModeBadge({ mode }: { mode?: string }) {
   if (!mode || mode === "IDLE") return <Chip label="IDLE" size="small" />;
@@ -196,6 +196,7 @@ export function DashboardPage() {
   const ledgerAssetIds = useMemo(() => (ledger.data ?? []).map((l) => l.asset_id), [ledger.data]);
   const ledgerHistories = useLedgerHistories(ledgerAssetIds);
   const plan = usePlan();
+  const objectiveSetting = usePlanObjective();
   const requests = useRequests();
   const vtnStatus = useVtnStatus();
   const tasksStatus = useTasksStatus();
@@ -312,7 +313,7 @@ export function DashboardPage() {
               clickable
               component={RouterLink}
               to="/planner"
-              label={`Objective: ${plan.data?.objective ? OBJECTIVE_LABELS[plan.data.objective] : "—"}`}
+              label={objectiveChipLabel(objectiveSetting.data, plan.data?.objective)}
             />
           </Stack>
           <SessionProgressBoard
@@ -399,4 +400,15 @@ export function DashboardPage() {
       </Grid>
     </Grid>
   );
+}
+
+/** The objective in force and who set it; the plan's objective until the setting has loaded. */
+function objectiveChipLabel(
+  setting: ObjectiveSetting | undefined,
+  planObjective: PlannerObjective | undefined,
+): string {
+  if (setting) {
+    return `Objective: ${OBJECTIVE_LABELS[setting.objective]} (${OBJECTIVE_SOURCE_LABELS[setting.source]})`;
+  }
+  return `Objective: ${planObjective ? OBJECTIVE_LABELS[planObjective] : "—"}`;
 }

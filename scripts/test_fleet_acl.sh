@@ -101,4 +101,10 @@ check "BFF publishes into the fleet" blocked \
   ven-1 "$PW1" "openadr-lab/fleet/ven-1/acl-probe" \
   "$BFF_U" "$BFF_P" "openadr-lab/fleet/ven-1/acl-probe"
 
+# The objective command is the BFF's one write (fleet objective control): it
+# must reach the VEN it names, and nothing else under the fleet root.
+check "BFF commands ven-1's objective" arrives   ven-1 "$PW1" "openadr-lab/fleet/ven-1/command/objective"   "$BFF_U" "$BFF_P" "openadr-lab/fleet/ven-1/command/objective"
+
+check "ven-1 commands ven-2's objective" blocked   ven-2 "$PW2" "openadr-lab/fleet/ven-2/command/objective"   ven-1 "$PW1" "openadr-lab/fleet/ven-2/command/objective"
+
 exit $fail

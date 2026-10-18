@@ -5,7 +5,7 @@ import {
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
-import type { Plan, TaskStatusEntry, VtnStatusResponse } from "../../api/types";
+import type { Plan, SolveStatus, TaskStatusEntry, VtnStatusResponse } from "../../api/types";
 
 // WP-T8 (docs/history/project_journal.md, search "WP-T" §3.3): shared traffic-light row —
 // a single-line healthy state, or a degraded state whose detail only shows
@@ -96,48 +96,48 @@ export function VtnConnectionRow({ vtnStatus }: { vtnStatus: VtnStatusResponse |
   );
 }
 
+/** What the Dashboard says about each solve status, declared per status. */
+const PLAN_STATUS_ROW: Record<SolveStatus, { severity: Severity; summary: (age: string) => string }> = {
+  OPTIMAL: { severity: "ok", summary: (age) => `Plan status: Optimal (solved ${age})` },
+  // GB-31 — a real plan exists (unlike INFEASIBLE) but the solver was cut off before
+  // certifying optimality; worth a distinct signal from a clean Optimal solve, but not the
+  // same severity as no plan at all.
+  TIME_LIMIT: {
+    severity: "warn",
+    summary: (age) => `Plan status: Feasible, not certified optimal (time limit, solved ${age})`,
+  },
+  GAP_LIMIT: {
+    severity: "warn",
+    summary: (age) => `Plan status: Feasible, not certified optimal (gap tolerance, solved ${age})`,
+  },
+  INFEASIBLE: { severity: "warn", summary: (age) => `Plan status: Infeasible (solved ${age})` },
+  // The opportunistic objective: no solve, a forecast of dispatch without look-ahead.
+  SIMULATED: {
+    severity: "ok",
+    summary: (age) => `Plan status: Opportunistic forecast, no look-ahead (simulated ${age})`,
+  },
+};
+
 export function PlanStatusRow({ plan }: { plan: Plan | null | undefined }) {
   if (!plan) {
     return <StatusRow testId="dash-plan" severity="neutral" summary="Plan status: waiting for planner to run" />;
   }
-  if (plan.solve_status === "INFEASIBLE") {
-    return (
-      <StatusRow
-        testId="dash-plan"
-        severity="warn"
-        summary={`Plan status: Infeasible (solved ${formatAge(plan.created_at)})`}
-        detail={
-          plan.warnings.length > 0 && (
-            <Stack spacing={0.25}>
-              {plan.warnings.map((w, i) => (
-                <Typography key={i} variant="caption" color="text.secondary">
-                  {w.severity}: {w.message}
-                </Typography>
-              ))}
-            </Stack>
-          )
-        }
-      />
-    );
-  }
-  if (plan.solve_status === "TIME_LIMIT" || plan.solve_status === "GAP_LIMIT") {
-    // GB-31 — a real plan exists (unlike INFEASIBLE) but the solver was cut
-    // off before certifying optimality; worth a distinct signal from a
-    // clean Optimal solve, but not the same severity as no plan at all.
-    const reason = plan.solve_status === "TIME_LIMIT" ? "time limit" : "gap tolerance";
-    return (
-      <StatusRow
-        testId="dash-plan"
-        severity="warn"
-        summary={`Plan status: Feasible, not certified optimal (${reason}, solved ${formatAge(plan.created_at)})`}
-      />
-    );
-  }
+  const row = PLAN_STATUS_ROW[plan.solve_status];
+  const detail = plan.solve_status === "INFEASIBLE" && plan.warnings.length > 0 && (
+    <Stack spacing={0.25}>
+      {plan.warnings.map((w, i) => (
+        <Typography key={i} variant="caption" color="text.secondary">
+          {w.severity}: {w.message}
+        </Typography>
+      ))}
+    </Stack>
+  );
   return (
     <StatusRow
       testId="dash-plan"
-      severity="ok"
-      summary={`Plan status: Optimal (solved ${formatAge(plan.created_at)})`}
+      severity={row.severity}
+      summary={row.summary(formatAge(plan.created_at))}
+      detail={detail}
     />
   );
 }

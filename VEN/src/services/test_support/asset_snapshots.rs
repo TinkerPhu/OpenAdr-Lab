@@ -36,6 +36,7 @@ pub fn snapshot_from_asset(
         emergency_what_ifs: asset.emergency_what_ifs(&state),
         ac_ceiling_kw: asset.ac_ceiling_kw(),
         arbiter_lever: asset.arbiter_lever(),
+        surplus_claim_rank: asset.surplus_claim_rank(),
         roster_index: 0,
     }
 }
