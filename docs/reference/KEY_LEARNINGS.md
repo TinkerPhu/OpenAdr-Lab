@@ -3693,3 +3693,12 @@ meant the registry endpoint cost no new data. Look at what the shared function h
   with a comment header, which the retry ran as a scenario, so no flaky run was ever cleared and the
   test stayed green throughout. Write such a fixture from what the tool actually produced (here, a
   rerun file copied from a CI log), and run the test somewhere: nothing ran this one.
+
+## A setting is in force when its effect is, not when it is accepted (2026-10-19)
+
+- `PUT /plan/objective` answers 204 at once; the tick changes dispatch only after a replan under
+  the new objective is adopted, which can take a minute on a loaded host. A scenario that sets
+  something as a precondition waits for the state that applies it (here the adopted plan's
+  objective), not for the request to be accepted.
+- When a poll times out, read what it last saw before raising the timeout: UC-11c's last result
+  showed a battery that had not moved at all, not one that moved late.

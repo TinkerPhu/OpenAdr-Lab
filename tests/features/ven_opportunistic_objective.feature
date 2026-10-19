@@ -22,7 +22,7 @@ Feature: Running without planning (opportunistic objective, UC-19)
   Scenario: A PV surplus is absorbed by the ranked assets instead of being exported
     Given the VEN-1 pv irradiance offset is flushed to zero
     And the site has no EV charging, the heater in its band and the battery at 0.5 SoC
-    And I set the VEN's objective to "opportunistic"
+    And the VEN runs under the "opportunistic" objective
     And a PV measurement of 5 kW is published to the test Mosquitto broker for VEN-1
     Then within 30 seconds the "heater" and the "battery" together draw at least 4 kW
     And within 30 seconds the "battery" draws at least 1 kW
@@ -30,19 +30,19 @@ Feature: Running without planning (opportunistic objective, UC-19)
 
   Scenario: The battery covers import and never exports
     Given the site has no PV, no EV charging, the heater in its band and the battery at 0.8 SoC
-    And I set the VEN's objective to "opportunistic"
+    And the VEN runs under the "opportunistic" objective
     When a sustained base-load step of 2.0 kW starts
     Then the VEN net site power stays between -0.2 and 0.3 kW for 10 seconds within 45 seconds
 
   Scenario: A BY_DEADLINE EV request charges at once, without look-ahead
     Given the site has no PV, the EV plugged at 0.3 SoC, the heater in its band and the battery at 0.1 SoC
-    And I set the VEN's objective to "opportunistic"
+    And the VEN runs under the "opportunistic" objective
     When I POST a mode EV session with mode "BY_DEADLINE" and no budget
     Then within 30 seconds the "ev" draws at least 2 kW
 
   Scenario: An OPPORTUNISTIC EV request waits for a surplus
     Given the site has no PV, the EV plugged at 0.3 SoC, the heater in its band and the battery at 0.1 SoC
-    And I set the VEN's objective to "opportunistic"
+    And the VEN runs under the "opportunistic" objective
     When I POST a mode EV session with mode "OPPORTUNISTIC" and no budget
     Then the "ev" stays at or below 0.1 kW for 20 seconds within 40 seconds
 
@@ -50,7 +50,7 @@ Feature: Running without planning (opportunistic objective, UC-19)
     Given limit enforcement is enabled
     And the site has no PV, the EV plugged at 0.3 SoC, the heater in its band and the battery at 0.1 SoC
     And the simulator imposes an import limit of 3.0 kW
-    And I set the VEN's objective to "opportunistic"
+    And the VEN runs under the "opportunistic" objective
     When I POST a mode EV session with mode "BY_DEADLINE" and no budget
     Then the VEN net site power stays at or below 3.05 kW for 15 seconds within 60 seconds
 

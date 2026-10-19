@@ -24,6 +24,20 @@ def step_set_objective(context, objective):
     _set_objective(objective)
 
 
+@given('the VEN runs under the "{objective}" objective')
+def step_runs_under_objective(context, objective):
+    # A tick dispatches by the adopted plan's objective, not by the one just set: the switch
+    # takes effect once a replan under it is adopted, which on a loaded host took over 30 s.
+    _set_objective(objective)
+    poll_until(
+        _plan,
+        lambda p: p and p.get("objective") == objective,
+        timeout=120,
+        interval=2,
+        description=f"a plan under {objective} adopted",
+    )
+
+
 @then('GET /plan/objective reports "{objective}" set by "{source}"')
 def step_objective_reported(context, objective, source):
     body = ven_get("/plan/objective").json()
