@@ -187,7 +187,7 @@ function renderSteps(t) {
     const w = Math.max(s.seconds / max * (W - left - 70), 2), y = i * rowH;
     return `<text x="4" y="${y + 13}">${esc(s.name).slice(0, 36)}</text>
       <rect x="${left}" y="${y + 3}" width="${w}" height="${rowH - 6}" rx="2" fill="${s.exit ? "var(--red)" : "var(--merged)"}"/>
-      <text x="${left + w + 4}" y="${y + 13}" class="lbl">${dur(s.seconds)}${s.exit ? " exit " + s.exit : ""}</text>`;
+      <text x="${left + w + 4}" y="${y + 13}" class="lbl">${dur(s.seconds)}${s.exit ? " exit " + s.exit : ""} ${esc(s.node || "")}</text>`;
   }).join("");
 }
 

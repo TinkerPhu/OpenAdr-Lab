@@ -2,7 +2,7 @@
 
 ## 1. Measure and check
 
-- [ ] 1.1 Read the per-suite seconds of the next full-tier tickets (the verdict lines of `full.log` carry them since suite selection), or run `--rust`, `--e2e`, `--resilience` once each on Node2 under its lock; record e2e / resilience / rust-vtn medians for Node3 (and Node2 if run) in design.md as the fallbacks. Verify: design.md D3 names three numbers.
+- [x] 1.1 Read the per-suite seconds of the next full-tier tickets (the verdict lines of `full.log` carry them since suite selection), or run `--rust`, `--e2e`, `--resilience` once each on Node2 under its lock; record e2e / resilience / rust-vtn medians for Node3 (and Node2 if run) in design.md as the fallbacks. Verify: design.md D3 names three numbers.
 - [x] 1.2 Check `ssh -o BatchMode=yes Node2 true` and `Node1` as the CI user on Node3, and that `/srv/docker/openadr_lab` there is a clean checkout; write the result into design.md Risks. Verify: no "check" left.
 
 ## 2. Pure parts (test first, `ci/test_lanes.sh`)
