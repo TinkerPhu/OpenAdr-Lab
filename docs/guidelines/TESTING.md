@@ -144,7 +144,8 @@ pass, `tests/settle.sh` waits until the host's CPU has drained, sampled from `/p
 # Only UI tests
 docker compose -f tests/docker-compose.test.yml run --rm test-runner --tags=@ui
 
-# Only a specific feature
+# Only a specific feature: with paths given only they run, each in its pass
+# (a path under features/isolated/ in the isolated one), and a retry reruns only its scenario
 docker compose -f tests/docker-compose.test.yml run --rm test-runner features/enrollment.feature
 
 # Upstream-pending tests (skipped by default, need PR #365 merged)

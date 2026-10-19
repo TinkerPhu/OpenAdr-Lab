@@ -60,18 +60,42 @@ set +e
 # feature:line locations), so a failure gets exactly one retry on its own below.
 RERUN_MAIN=/tmp/rerun_main.txt
 RERUN_ISOLATED=/tmp/rerun_isolated.txt
-python -m behave -f rerun -o "$RERUN_MAIN" -f pretty --tags=~@isolated --exclude "isolated" "$@"
-MAIN_EXIT=$?
+: > "$RERUN_MAIN"
+: > "$RERUN_ISOLATED"
 
-echo ""
-wait_for_load_to_settle "@isolated pass"
+# Feature paths pick what each pass runs, so `test-runner features/x.feature` runs x alone;
+# every other argument (tags, formats) stays in "$@" and applies to every pass and retry.
+MAIN_PATHS='' ISOLATED_PATHS='' PATHS_GIVEN=''
+for arg; do
+  shift
+  case "$arg" in
+    features/isolated/*) ISOLATED_PATHS="$ISOLATED_PATHS $arg"; PATHS_GIVEN=1 ;;
+    features/*) MAIN_PATHS="$MAIN_PATHS $arg"; PATHS_GIVEN=1 ;;
+    *) set -- "$@" "$arg" ;;
+  esac
+done
+[ -n "$PATHS_GIVEN" ] || ISOLATED_PATHS=features/isolated/
 
-echo "=== Running @isolated scenarios (fresh VEN state) ==="
-# Point directly at the dedicated isolated/ subdirectory. Every scenario in
-# that directory is @isolated, so nothing is loaded-but-skipped: zero structural
-# skips in the summary.
-python -m behave -f rerun -o "$RERUN_ISOLATED" -f pretty features/isolated/ "$@"
-ISOLATED_EXIT=$?
+MAIN_EXIT=0
+if [ -z "$PATHS_GIVEN" ] || [ -n "$MAIN_PATHS" ]; then
+  # shellcheck disable=SC2086  # feature paths carry no spaces; empty runs every feature
+  python -m behave -f rerun -o "$RERUN_MAIN" -f pretty --tags=~@isolated --exclude "isolated" "$@" $MAIN_PATHS
+  MAIN_EXIT=$?
+fi
+
+ISOLATED_EXIT=0
+if [ -n "$ISOLATED_PATHS" ]; then
+  echo ""
+  wait_for_load_to_settle "@isolated pass"
+
+  echo "=== Running @isolated scenarios (fresh VEN state) ==="
+  # Point directly at the dedicated isolated/ subdirectory. Every scenario in
+  # that directory is @isolated, so nothing is loaded-but-skipped: zero structural
+  # skips in the summary.
+  # shellcheck disable=SC2086
+  python -m behave -f rerun -o "$RERUN_ISOLATED" -f pretty $ISOLATED_PATHS "$@"
+  ISOLATED_EXIT=$?
+fi
 
 # Flaky versus red: see retry_failed.sh.
 . ./retry_failed.sh
