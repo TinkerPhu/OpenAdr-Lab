@@ -179,7 +179,7 @@ suite_flags() {
 
 # Seconds a suite is assumed to take where no finished ticket has timed it (a full run of 4893 s
 # less E2E's ~3300 s is about 1600 s for the other two).
-BOARD_SUITE_FALLBACK_S="e2e=3300 resilience=1000 rust-vtn=600"
+BOARD_SUITE_FALLBACK_S="e2e=3300 resilience=350 rust-vtn=100"
 
 board_median() { printf '%s
 ' "$@" | sort -n | awk '{ a[NR] = $1 } END { print a[int((NR + 1) / 2)] }'; }

@@ -33,8 +33,8 @@ ticket() { # <name> <status> <result rows...>
     { echo "# CI result: $n"; echo; echo "| step | exit | seconds |"; echo "|---|---|---|"; printf '%s\n' "$@"; } > "$BOARD_DIR/$n/result.md"
 }
 check "no history: the fallback"            3300 "$(board_suite_seconds e2e Node3)"
-check "no history, resilience fallback"     1000 "$(board_suite_seconds resilience Node3)"
-check "no history, rust-vtn fallback"        600 "$(board_suite_seconds rust-vtn Node3)"
+check "no history, resilience fallback"     350 "$(board_suite_seconds resilience Node3)"
+check "no history, rust-vtn fallback"        100 "$(board_suite_seconds rust-vtn Node3)"
 ticket 20261001T0000Z_a_x merged "| run_all_tests.sh --e2e [Node3] | 0 | 3000 |"
 ticket 20261002T0000Z_a_x merged "| run_all_tests.sh --e2e [Node3] | 0 | 3200 |"
 ticket 20261003T0000Z_a_x green  "| run_all_tests.sh --e2e [Node3] | 0 | 3400 |"
@@ -44,7 +44,7 @@ ticket 20261006T0000Z_a_x merged "| run_all_tests.sh --e2e [Node2] | 0 | 5000 |"
 check "median of a host with 3 passing rows" 3200 "$(board_suite_seconds e2e Node3)"
 check "a failed or unfinished row is ignored" 3200 "$(board_suite_seconds e2e Node3)"
 check "a host with fewer than 3 rows uses the median over all hosts" 3200 "$(board_suite_seconds e2e Node2)"
-check "a suite never timed on a host uses its fallback" 1000 "$(board_suite_seconds resilience Node2)"
+check "a suite never timed on a host uses its fallback" 350 "$(board_suite_seconds resilience Node2)"
 
 echo "lane_plan"
 lane_suite_seconds() { # <suite> <host> - a table, as board_suite_seconds would answer

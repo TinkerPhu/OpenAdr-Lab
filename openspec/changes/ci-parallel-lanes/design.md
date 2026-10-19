@@ -55,7 +55,7 @@ Longest processing time first onto the lane with the earliest projected end. Nod
 suite (e2e) lands on Node3, the host without a resident fleet. Seconds come from `board_suite_seconds <suite> <host>`:
 the median of that suite on that host over the last 10 finished tickets (rows are named
 `run_all_tests.sh --<suite> [<host>]`); with fewer than 3 rows for the host, the suite's median over all hosts; with none,
-the fallbacks measured in task 1.1. A suite's length for ordering is its median on the first lane.
+the fallbacks measured in task 1.1 (Node3 full.log verdicts, warm: e2e 3300 s, resilience 350 s, rust-vtn 100 s; a cold rust-vtn build once took 2756 s). A suite's length for ordering is its median on the first lane.
 
 **D4 Getting the commit to a lane host.** The tested commit is Node3's rebased local commit and exists on no other
 machine. The runner pushes it to `refs/ci/<ticket>` on origin (the deploy key already has write access; the ref lives

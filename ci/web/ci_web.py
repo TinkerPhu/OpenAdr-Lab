@@ -107,7 +107,9 @@ def parse_result(text):
     if m:
         r["finished"] = m.group(1)
     for m in re.finditer(r"^\| (.+?) \| (\d+) \| (\d+) \|$", text, re.M):
-        r["steps"].append({"name": m.group(1), "exit": int(m.group(2)), "seconds": int(m.group(3))})
+        host = re.search(r" \[([A-Za-z0-9_-]+)\]$", m.group(1))   # a lane's step name ends in its host
+        r["steps"].append({"name": m.group(1), "exit": int(m.group(2)), "seconds": int(m.group(3)),
+                           "node": host.group(1) if host else HOME_NAME})
     return r
 
 
@@ -161,6 +163,15 @@ def read_lanes(d):
     return lanes, skipped
 
 
+def ticket_nodes(status, lanes):
+    """Where the work is (running: the lanes still running) or was done (finished: every lane's host;
+    a ticket without lanes ran on the runner's own host); a queued ticket has done none."""
+    if status == "queued":
+        return []
+    hosts = [l["host"] for l in lanes if status != "running" or l["state"] == "running"]
+    return list(dict.fromkeys(hosts)) or [HOME_NAME]
+
+
 def read_ticket(name):
     d = BOARD_DIR / name
     n = parse_name(name)
@@ -196,7 +207,7 @@ def read_ticket(name):
         "note": result["note"], "steps": result["steps"],
         "suites_run": result["suites_run"], "suites_skipped": result["suites_skipped"],
         "lanes": lanes, "lanes_skipped": lanes_skipped,
-        "nodes": ([l["host"] for l in lanes if l["state"] == "running"] or [HOME_NAME]) if running else [],
+        "nodes": ticket_nodes(status, lanes),
         "class": step_class(result["steps"]) if result["steps"] else planned_class(req),
         "current_step": step if running else None,
         "current_step_since": iso(since) if running else None,

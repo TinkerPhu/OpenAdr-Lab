@@ -61,6 +61,9 @@ def make_ticket(board, name, status, extra=None, result=None, run_log=None):
     return d
 
 
+NL = chr(10)
+
+
 class WebApi(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -88,8 +91,8 @@ class WebApi(unittest.TestCase):
         self.assertEqual("cargo test failed", r["note"])
         self.assertEqual("2026-10-17T07:10:00Z", r["finished"])
         self.assertEqual(
-            [{"name": "audit_file_sizes", "exit": 0, "seconds": 1},
-             {"name": "cargo test", "exit": 101, "seconds": 124}],
+            [{"name": "audit_file_sizes", "exit": 0, "seconds": 1, "node": ci_web.HOME_NAME},
+             {"name": "cargo test", "exit": 101, "seconds": 124, "node": ci_web.HOME_NAME}],
             r["steps"],
         )
 
@@ -150,7 +153,16 @@ class WebApi(unittest.TestCase):
         make_ticket(self.board, done, "red", extra={"lanes": "Node3|e2e|running||\n"})
         self.assertEqual(["Node2"], ci_web.read_ticket(two)["nodes"])
         self.assertEqual([ci_web.HOME_NAME], ci_web.read_ticket(one)["nodes"])
-        self.assertEqual([], ci_web.read_ticket(done)["nodes"])
+        self.assertEqual(["Node3"], ci_web.read_ticket(done)["nodes"])
+        both = "20261017T0705Z_09fb9c63_nodes-both"
+        make_ticket(self.board, both, "merged", extra={"lanes": "Node3|e2e|ok|900|" + NL + "Node2|resilience|ok|300|" + NL})
+        self.assertEqual(["Node3", "Node2"], ci_web.read_ticket(both)["nodes"])
+        old = "20261017T0706Z_09fb9c63_nodes-old"
+        make_ticket(self.board, old, "merged")
+        self.assertEqual([ci_web.HOME_NAME], ci_web.read_ticket(old)["nodes"])
+        queued = "20261017T0707Z_09fb9c63_nodes-queued"
+        make_ticket(self.board, queued, "queued")
+        self.assertEqual([], ci_web.read_ticket(queued)["nodes"])
 
     def test_a_ticket_without_lanes_has_none(self):
         name = "20261017T0701Z_09fb9c63_fix-nolanes"
