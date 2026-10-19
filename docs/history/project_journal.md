@@ -16424,3 +16424,11 @@ feature with x again, and each retry reran x whole besides the failed scenario. 
 now sorts the arguments: feature paths pick what each pass runs (a path under `features/isolated/`
 in the isolated pass, a pass with no path of its own is skipped), and the rest (tags, formats)
 applies to every pass and retry. Without paths a run is what it was.
+
+**The fleet command grant is live on Node1 (051, 8.0).** `VTN/mosquitto/fleet-acl.conf` with the
+BFF's one write grant (`openadr-lab/fleet/+/command/objective`) is deployed to the Node1 broker:
+the checkout pulled to main and `lab-mqtt` restarted, not reloaded, because the ACL is a
+single-file bind mount and a pull replaces the file the container still holds. `scripts/test_fleet_acl.sh
+Node1` passes all six probes (the BFF commands ven-1's objective; ven-1 can neither publish as nor
+read ven-2, nor command it; the BFF still cannot publish into the fleet), and all twenty VENs were
+publishing telemetry again within the minute.
