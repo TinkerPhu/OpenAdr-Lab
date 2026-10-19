@@ -8,13 +8,17 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . ./retry_failed.sh
 
 CALLS="$TMP/calls"
-python() { echo "$*" >> "$CALLS"; ! grep -q "$FAIL_ON" <<<"$*"; }   # fake behave: fails for $FAIL_ON
+# Fake behave: fails for $FAIL_ON, and for a path that is not a location (as the real one does).
+python() { echo "$*" >> "$CALLS"; ! grep -q -e "$FAIL_ON" -e "# --" <<<"$*"; }
 
 FAILS=0
 check() { if [ "$2" = "$3" ]; then echo "  ok    $1"; else echo "  FAIL  $1 (got '$3', want '$2')"; FAILS=$((FAILS + 1)); fi; }
 run() { : > "$CALLS"; OUT="$(retry_failed_scenarios main "$1" "$TMP/rerun" --tags=@x 2>&1)"; RC=$?; }
 
-printf 'features/a.feature:10
+# As behave's rerun formatter writes it: a comment header and a blank line before the locations.
+printf '# -- RERUN: 2 failing scenarios during last test run.
+
+features/a.feature:10
 features/b.feature:20
 ' > "$TMP/rerun"
 
