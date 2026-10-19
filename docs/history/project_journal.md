@@ -16459,3 +16459,18 @@ single-file bind mount and a pull replaces the file the container still holds. `
 Node1` passes all six probes (the BFF commands ven-1's objective; ven-1 can neither publish as nor
 read ven-2, nor command it; the BFF still cannot publish into the fleet), and all twenty VENs were
 publishing telemetry again within the minute.
+
+**A planning VEN holds a lagging lever where its command lands (R-151).** Under a planning
+objective the import-limit pass judged import on this tick alone, so it released the EV charger
+it had just cut (a cut charger reads as within the limit), and the plan's command landed a tick
+later above it. With nothing to cover that tick, no PV and the battery at its floor, import
+alternated 0.5 / 3.5 kW against a 2 kW limit. The opportunistic objective already used the fix,
+`limit::hold_where_commands_land`; it now runs in `stages::dispatch_stages` after the limit pass,
+for every objective, and `opportunistic_step` lost its own call. The test is
+`tasks/sim_tick/tests/limit_lag.rs`, which replays that night case through `build_tick_setpoints`
+and the simulator; the golden's replay got the scenario's injects (state before the first tick,
+PV in each tick), which left every recorded scenario as it was. The user accepted the change to
+planning-mode decisions, so the tick golden is re-recorded: `plan_import_limit` now trims the EV
+0.3 kW instead of pausing the heater for good after one restore and cut, `plan_alert` keeps the EV
+at 0 instead of alternating EV, heater and battery every tick, and the new
+`plan_import_limit_no_bridge` is recorded; the other sixteen scenarios are unchanged.

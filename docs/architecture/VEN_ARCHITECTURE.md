@@ -395,10 +395,11 @@ instead of solving (§2.3.3), and nothing a planning objective does changes.
   (`UserRequestMode::non_planning_dispatch`); an EV session's target and a heater's start-now
   target reach the asset as per-asset tick inputs, so the asset says when it is done (the heater
   holds the target through its own ceiling latch).
-- **Where commands land.** After the limit pass the opportunistic step also cuts a lagging
-  lever (the EV charger applies a command a tick late) so its command lands under the limit
-  (`limit::hold_where_commands_land`); judged on this tick alone the pass released a cut charger
-  and import alternated above the limit. Planning mode does not apply it yet (R-151).
+- **Where commands land.** After the limit pass the shared stages also cut a lagging lever
+  (the EV charger applies a command a tick late) so its command lands under the limit
+  (`limit::hold_where_commands_land`, in `stages::dispatch_stages`, so for every objective);
+  judged on this tick alone the pass released a cut charger and import alternated above the
+  limit (`tasks/sim_tick/tests/limit_lag.rs`).
 - **Switching back.** The opportunistic arm writes no deviation lever, displacement or
   deviation figure, so the first planned tick decides as a fresh planning VEN does
   (`tasks/sim_tick/tests/switch_back.rs`).

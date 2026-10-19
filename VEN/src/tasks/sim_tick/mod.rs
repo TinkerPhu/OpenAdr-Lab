@@ -8,6 +8,9 @@ mod finalize;
 #[path = "tests/forecast_guard.rs"]
 mod forecast_guard;
 mod forecast_wiring;
+#[cfg(test)]
+#[path = "tests/limit_lag.rs"]
+mod limit_lag;
 mod post_lock;
 mod publish;
 mod setpoints;

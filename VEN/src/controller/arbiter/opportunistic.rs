@@ -156,11 +156,7 @@ pub fn opportunistic_step(
         ev_surplus_switch_on,
     );
     let outcome = opportunistic_pass(tick, &base, &excluded);
-    let mut outcome = super::dispatch_stages(outcome, tick, now, stages);
-    // A start-now request asks for full power every step; held where it lands, a cut charger
-    // is not released into the limit a step later (`limit::hold_where_commands_land`).
-    super::limit::hold_where_commands_land(tick, &mut outcome.setpoints, outcome.limit.as_mut());
-    outcome
+    super::dispatch_stages(outcome, tick, now, stages)
 }
 
 pub fn opportunistic_pass(

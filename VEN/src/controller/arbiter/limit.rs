@@ -19,9 +19,8 @@
 //! charger reads as "within the limit" and is released; its full command lands a
 //! tick later above the limit, and the pass alternates between the two every tick
 //! (found by the opportunistic forecast, 051 group 7). `hold_where_commands_land`
-//! keeps the landed power under the target as well. The opportunistic step applies
-//! it; planning mode does not yet (R-151: it changes planning decisions, which this
-//! change keeps identical).
+//! keeps the landed power under the target as well; `stages::dispatch_stages` applies it
+//! after the limit pass whichever pass proposed the setpoints (R-151).
 
 use std::collections::HashMap;
 use ts_rs::TS;

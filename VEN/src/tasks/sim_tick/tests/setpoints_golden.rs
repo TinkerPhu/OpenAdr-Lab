@@ -10,7 +10,8 @@
 //! The golden was recorded on the code before any opportunistic change. A diff here means a
 //! planning-mode decision changed: fix the code, never re-record to make it pass. Re-record
 //! (`UPDATE_TICK_GOLDEN=1`) only for a change the user has accepted as a planning-mode change,
-//! and say so in the commit.
+//! and say so in the commit. Re-recorded once so far: R-151, the limit pass holding a lagging
+//! lever where its command lands (changed `plan_import_limit` and `plan_alert`).
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
@@ -100,6 +101,9 @@ pub(super) struct Scenario {
     pub(super) comms_loss: bool,
     pub(super) alert: bool,
     pub(super) heater_setpoint_c: Option<f64>,
+    /// Applied as the production tick applies it: one-shot state injections before the first
+    /// tick, the PV override in every tick's inputs.
+    pub(super) inject: crate::entities::sim_inject::SimInjectState,
 }
 
 impl Scenario {
@@ -114,6 +118,7 @@ impl Scenario {
             comms_loss: false,
             alert: false,
             heater_setpoint_c: None,
+            inject: Default::default(),
         }
     }
 }
@@ -155,6 +160,7 @@ fn scenarios() -> Vec<Scenario> {
             deviation: true,
             ..Scenario::new("plan_import_limit_arbiter_on", Some(planned()))
         },
+        plan_import_limit_no_bridge(),
         Scenario {
             import_limit_kw: Some(1.0),
             ..Scenario::new("no_plan_import_limit", None)
@@ -191,7 +197,7 @@ pub(super) fn context(s: &Scenario, sim: &SimState) -> TickContext {
     let window_end = t0() + Duration::hours(1);
     let inject = crate::entities::sim_inject::SimInjectState {
         heater_setpoint_c: s.heater_setpoint_c,
-        ..Default::default()
+        ..s.inject.clone()
     };
     let overlay = sim
         .iter_assets()
@@ -333,12 +339,12 @@ fn dump(out: &mut String, tick: usize, o: &ArbiterOutcome) {
 
 /// One scenario, `TICKS` ticks: the tick's own sequence (snapshot, live previews, thermostat
 /// setpoints, `build_tick_setpoints`), then physics with the chosen setpoints, then the
-/// carried arbiter state the production glue would store.
-fn run(s: &Scenario) -> String {
+/// carried arbiter state the production glue would store. `each` sees every tick's outcome and
+/// the simulator after that tick's physics.
+pub(super) fn replay(s: &Scenario, mut each: impl FnMut(usize, &ArbiterOutcome, &SimState)) {
     let mut sim = sim();
     let mut ctx = context(s, &sim);
-    let mut out = String::new();
-    let _ = writeln!(out, "scenario {}", s.name);
+    crate::simulator::inject::apply_state_injections(&ctx.inject, &mut sim);
     for tick in 0..TICKS {
         let now = t0() + Duration::seconds(tick as i64);
         let snap = sim.to_sim_snapshot();
@@ -351,13 +357,39 @@ fn run(s: &Scenario) -> String {
             now,
             (&live, &released),
         );
-        dump(&mut out, tick, &o);
-        sim.tick(TickInputs::new(1.0, now, o.setpoints.clone()));
+        sim.tick(TickInputs {
+            pv_irradiance_override: ctx.inject.pv_irradiance,
+            ..TickInputs::new(1.0, now, o.setpoints.clone())
+        });
+        each(tick, &o, &sim);
         ctx.incumbent_lever = o.active_lever.clone();
         ctx.limit_incumbent_lever = o.limit.as_ref().and_then(|l| l.active_lever.clone());
         ctx.bridge_kw_by_asset = super::arbiter_glue::both_passes_bridge_kw(&o);
     }
+}
+
+fn run(s: &Scenario) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "scenario {}", s.name);
+    replay(s, |tick, o, _| dump(&mut out, tick, o));
     out
+}
+
+/// The planned EV command alone is above the 2 kW import limit, and nothing can cover the tick
+/// a lagging command takes to land: no PV, the battery at its floor (R-151).
+pub(super) fn plan_import_limit_no_bridge() -> Scenario {
+    Scenario {
+        import_limit_kw: Some(2.0),
+        inject: crate::entities::sim_inject::SimInjectState {
+            pv_irradiance: Some(0.0),
+            battery_soc: Some(0.1),
+            ..Default::default()
+        },
+        ..Scenario::new(
+            "plan_import_limit_no_bridge",
+            Some(plan_with(&[("ev", 3.0), ("heater", 1.5)])),
+        )
+    }
 }
 
 #[test]

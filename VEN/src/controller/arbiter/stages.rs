@@ -1,6 +1,7 @@
 //! The stages every tick's setpoints pass through after the pass that proposed them (deviation
 //! correction, the opportunistic pass or the plan as it stands): a VTN dispatch window, the
-//! comms-loss fail-safe and last the import-limit pass. One function, `dispatch_stages`, so the
+//! comms-loss fail-safe and last the import-limit pass, which also holds a lagging lever where
+//! its command lands (`limit::hold_where_commands_land`). One function, `dispatch_stages`, so the
 //! live tick and the opportunistic forecast bound a proposal the same way. Reads the tick and
 //! the windows it is given; holds no state and reads no clock.
 
@@ -50,6 +51,9 @@ pub fn dispatch_stages(
         stages.limit_incumbent_lever,
         &bounds_kw,
     );
+    // A lagging lever's command lands a tick late: held where it lands, a cut charger is not
+    // released into the limit a tick later (R-151), whichever pass proposed it.
+    limit::hold_where_commands_land(tick, &mut outcome.setpoints, outcome.limit.as_mut());
     let limit_modes = outcome.limit.iter().flat_map(|l| &l.heater_emergency_mode);
     let limit_modes: Vec<(String, (bool, bool))> =
         limit_modes.map(|(id, m)| (id.clone(), *m)).collect();
