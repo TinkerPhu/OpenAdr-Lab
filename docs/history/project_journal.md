@@ -16452,3 +16452,10 @@ session for a host, and a runner that dies frees its hosts within the 45-minute 
 heartbeat traps TERM and kills its own sleep. The home lane's tree must not be tidied while a remote lane still runs
 `run_all_tests.sh` from it (bash reads a script as it goes), so the home job removes containers only and the ticket
 returns the checkout to `main` last.
+**The fleet command grant is live on Node1 (051, 8.0).** `VTN/mosquitto/fleet-acl.conf` with the
+BFF's one write grant (`openadr-lab/fleet/+/command/objective`) is deployed to the Node1 broker:
+the checkout pulled to main and `lab-mqtt` restarted, not reloaded, because the ACL is a
+single-file bind mount and a pull replaces the file the container still holds. `scripts/test_fleet_acl.sh
+Node1` passes all six probes (the BFF commands ven-1's objective; ven-1 can neither publish as nor
+read ven-2, nor command it; the BFF still cannot publish into the fleet), and all twenty VENs were
+publishing telemetry again within the minute.
