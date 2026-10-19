@@ -30,3 +30,20 @@ Feature: Tariff editor — a tariff that repeats forever
     When I ask the BFF for the pattern of that event
     Then the pattern holds 24 intervals
     And the pattern's prices are the ones published
+
+  # The operator's own path, in a browser: the pointer edits the draft (handles drawn over the
+  # chart), Publish sends it, and the fleet's plans answer. DraftEditLayer.test.tsx proves the
+  # pointer-to-value mapping with hand-made geometry; only a real chart shows that a handle can
+  # be grabbed and dragged, and only a real publish shows the event wins.
+  @ui
+  Scenario: A price dragged up on the chart and published changes what the fleet plans
+    Given I create a rate-system program and save its ID
+    And the tariff editor publishes a daily PRICE pattern that repeats forever
+    When I wait for the VEN /tariffs endpoint to show the pattern's price on the second day
+    And I open the tariff editor on that event
+    And I drag a price handle on the chart to the top of the plot
+    Then exactly one grid price changed, to the value the drag readout showed
+    When I publish the draft from the editor
+    Then the VTN holds a second event for the program carrying the dragged price
+    When I wait for the VEN /tariffs endpoint to show the dragged price
+    Then the fleet plan holds a plan adopted after the editor's publish that the plan of a second before it did not
