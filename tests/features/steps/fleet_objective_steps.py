@@ -172,10 +172,12 @@ def _usage_forecast_reports(token, event_id):
     r = vtn_get("/reports", token, params={"eventID": event_id})
     if not r.ok:
         return {}
+    # The event is untargeted, so every VEN of the stack answers it under its own client.
     return {
         rep["id"]: rep.get("modificationDateTime")
         for rep in r.json()
         if rep.get("eventID") == event_id
+        and rep.get("clientName") == "ven-1"
         and any(
             p.get("type") == "USAGE_FORECAST"
             for res in rep.get("resources", [])
