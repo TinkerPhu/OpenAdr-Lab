@@ -16417,3 +16417,10 @@ raised the poll timeout for the same failure, which only made the race rarer. Th
 switch to opportunistic as their precondition now use `the VEN runs under the "opportunistic"
 objective`, which waits for the adopted plan to carry it; the two that test the switch itself
 still assert the adoption explicitly.
+
+**A named feature runs alone.** `test-runner features/x.feature`, the documented way to run one
+feature, handed its arguments to both passes and to every retry: it ran x, then every isolated
+feature with x again, and each retry reran x whole besides the failed scenario. `tests/entrypoint.sh`
+now sorts the arguments: feature paths pick what each pass runs (a path under `features/isolated/`
+in the isolated pass, a pass with no path of its own is skipped), and the rest (tags, formats)
+applies to every pass and retry. Without paths a run is what it was.
