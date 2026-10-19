@@ -416,6 +416,7 @@ tests/
 | test-vtn | openleadr-rs | VTN server |
 | test-ven-1 | VEN app | VEN with 5s polling |
 | test-ven-2 | VEN app | Second VEN for enrollment/isolation tests |
+| test-ven-no-pv, test-ven-multi, test-ven-penalty, test-ven-usage-sim, test-ven-usage-forecast | VEN app | One profile each (`the VEN is running with profile "..."`), each under its own VTN identity named after the service without `test-` |
 | test-bff | BFF app | Dual-credential API proxy |
 | test-ui | VTN UI (nginx) | React frontend |
 | test-runner | Python test image | Runs behave + playwright |

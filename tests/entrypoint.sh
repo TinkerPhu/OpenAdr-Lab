@@ -21,10 +21,12 @@ echo "Loading the bl-client fixture into the VTN database..."
 PGPASSWORD=openadr psql -h test-db -U openadr -d openadr -v ON_ERROR_STOP=1 -f /fixtures/01_bl_client.sql
 echo "Fixture loaded."
 
-echo "Provisioning ven-1 via API..."
-python provision_ven.py ven-1
-echo "Provisioning ven-2 via API..."
-python provision_ven.py ven-2
+# Every VEN of the stack has its own identity (R-152): the CLIENT_IDs of
+# docker-compose.test.yml, one VTN user and VEN object each.
+for ven in ven-1 ven-2 ven-no-pv ven-multi ven-penalty ven-usage-sim ven-usage-forecast; do
+  echo "Provisioning $ven via API..."
+  python provision_ven.py "$ven"
+done
 echo "Provisioning done."
 
 # The load-settle gate before each timing-sensitive pass (see settle.sh).

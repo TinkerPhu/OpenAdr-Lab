@@ -33,4 +33,4 @@ Feature: Several assets of one kind (W7)
     Given I have a VTN token as "bl-client"
     And I create a program named "multi-soc-test" and save its ID
     And I create an event for the saved program with a reportDescriptor of type "STORAGE_CHARGE_LEVEL" reporting every 5 seconds
-    Then within 120 seconds a report for the event names the resources "ven-1-battery", "ven-1-car-a" and "ven-1-car-b"
+    Then within 120 seconds a report for the event names the resources "ven-multi-battery", "ven-multi-car-a" and "ven-multi-car-b"

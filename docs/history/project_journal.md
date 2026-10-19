@@ -16399,3 +16399,12 @@ ticket had ever been cleared by a retry. Its unit test wrote the rerun file with
 tested a file behave never writes; it now writes behave's real format, the loop skips comment
 lines, and the runner's quick tier runs the test (nothing ran it before). The scenario itself is
 R-152: the multi-asset test VEN logs in as ven-1, so it and test-ven-1 overwrite one report.
+
+**Every test VEN has its own identity (R-152).** The five profile VENs of the E2E stack
+(no-pv, multi, penalty, usage-sim, usage-forecast) logged in as `ven-1`. Each answers every
+untargeted event, and an obligation report's name is `ob-<venName>-<event>-<type>`, so six VENs
+upserted one report on the VTN and a scenario reading it back saw whichever wrote last
+(`ven_multi_asset.feature:32` flaked on it). Each now has a name of its own, `ven-<profile>` after
+its service, provisioned by `tests/entrypoint.sh` with ven-1 and ven-2. They still have no fleet
+broker, so the fleet the BFF counts is unchanged; the multi-asset scenario expects `ven-multi-*`
+resources, and the usage-forecast step reads only ven-1's reports of the event.

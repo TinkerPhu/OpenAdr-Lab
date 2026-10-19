@@ -120,10 +120,9 @@ services:
       POLL_REPORTS_SECS: "2"
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
-      # Live fleet telemetry (fleet-monitor phase 0 §6). Only the two VENs with
-      # distinct VEN_NAMEs publish: test-ven-no-pv and test-ven-penalty also
-      # call themselves "ven-1", and three publishers on one VEN's topic would
-      # make the feed say whatever arrived last.
+      # Live fleet telemetry (fleet-monitor phase 0 §6). Only ven-1 and ven-2
+      # publish: the profile VENs below have their own names but no fleet
+      # broker, so the fleet the BFF sees stays the two VENs its features count.
       FLEET_MQTT_HOST: "mosquitto"
       # Overridable so a scenario can be run against the per-tick cadence the
       # publisher used before D-1 landed, without rebuilding from another
@@ -200,9 +199,11 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
-      CLIENT_ID: "ven-1"
-      CLIENT_SECRET: "ven-1"
-      VEN_NAME: "ven-1"
+      # Its own VTN identity (R-152): as "ven-1" it reported under ven-1's report names and
+      # overwrote test-ven-1's reports on the VTN. Provisioned by tests/entrypoint.sh.
+      CLIENT_ID: "ven-no-pv"
+      CLIENT_SECRET: "ven-no-pv"
+      VEN_NAME: "ven-no-pv"
       POLL_EVENTS_SECS: "2"
       POLL_PROGRAMS_SECS: "2"
       POLL_REPORTS_SECS: "2"
@@ -236,9 +237,11 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
-      CLIENT_ID: "ven-1"
-      CLIENT_SECRET: "ven-1"
-      VEN_NAME: "ven-1"
+      # Its own VTN identity (R-152): as "ven-1" it reported under ven-1's report names and
+      # overwrote test-ven-1's reports on the VTN. Provisioned by tests/entrypoint.sh.
+      CLIENT_ID: "ven-multi"
+      CLIENT_SECRET: "ven-multi"
+      VEN_NAME: "ven-multi"
       POLL_EVENTS_SECS: "2"
       POLL_PROGRAMS_SECS: "2"
       POLL_REPORTS_SECS: "2"
@@ -272,9 +275,11 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
-      CLIENT_ID: "ven-1"
-      CLIENT_SECRET: "ven-1"
-      VEN_NAME: "ven-1"
+      # Its own VTN identity (R-152): as "ven-1" it reported under ven-1's report names and
+      # overwrote test-ven-1's reports on the VTN. Provisioned by tests/entrypoint.sh.
+      CLIENT_ID: "ven-penalty"
+      CLIENT_SECRET: "ven-penalty"
+      VEN_NAME: "ven-penalty"
       POLL_EVENTS_SECS: "2"
       POLL_PROGRAMS_SECS: "2"
       POLL_REPORTS_SECS: "2"
@@ -308,9 +313,11 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
-      CLIENT_ID: "ven-1"
-      CLIENT_SECRET: "ven-1"
-      VEN_NAME: "ven-1"
+      # Its own VTN identity (R-152): as "ven-1" it reported under ven-1's report names and
+      # overwrote test-ven-1's reports on the VTN. Provisioned by tests/entrypoint.sh.
+      CLIENT_ID: "ven-usage-sim"
+      CLIENT_SECRET: "ven-usage-sim"
+      VEN_NAME: "ven-usage-sim"
       POLL_EVENTS_SECS: "2"
       POLL_PROGRAMS_SECS: "2"
       POLL_REPORTS_SECS: "2"
@@ -344,9 +351,11 @@ services:
     environment:
       LISTEN_ADDR: "0.0.0.0:8080"
       VTN_BASE_URL: "http://test-vtn:3000"
-      CLIENT_ID: "ven-1"
-      CLIENT_SECRET: "ven-1"
-      VEN_NAME: "ven-1"
+      # Its own VTN identity (R-152): as "ven-1" it reported under ven-1's report names and
+      # overwrote test-ven-1's reports on the VTN. Provisioned by tests/entrypoint.sh.
+      CLIENT_ID: "ven-usage-forecast"
+      CLIENT_SECRET: "ven-usage-forecast"
+      VEN_NAME: "ven-usage-forecast"
       POLL_EVENTS_SECS: "2"
       POLL_PROGRAMS_SECS: "2"
       POLL_REPORTS_SECS: "2"
