@@ -242,7 +242,8 @@ def step_vtn_holds_published(context):
     expected = list(PATTERN_PRICES)
     expected[context.dragged_row] = context.dragged_price
     assert prices == expected, prices
-    assert event.get("duration") == "P9999Y", event.get("duration")
+    # The VTN stores the duration in its long form ("P9999Y0M0DT0H0M0S").
+    assert (event.get("duration") or "").startswith("P9999Y"), event.get("duration")
     assert event["priority"] <= 0, event["priority"]
 
 
