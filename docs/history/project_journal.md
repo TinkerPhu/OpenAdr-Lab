@@ -16408,3 +16408,12 @@ upserted one report on the VTN and a scenario reading it back saw whichever wrot
 its service, provisioned by `tests/entrypoint.sh` with ven-1 and ven-2. They still have no fleet
 broker, so the fleet the BFF counts is unchanged; the multi-asset scenario expects `ven-multi-*`
 resources, and the usage-forecast step reads only ven-1's reports of the event.
+
+**An objective is in force once its plan is adopted (R-152).** The R-152 run failed UC-11c once
+more: the battery never moved, so the ledger never listed it. A tick dispatches by the adopted
+plan's objective, and `PUT /plan/objective` only asks for a replan; after a 40 s solve in the
+scenario before, the opportunistic arm was not yet in force for the whole 30 s window. 051 had
+raised the poll timeout for the same failure, which only made the race rarer. The scenarios that
+switch to opportunistic as their precondition now use `the VEN runs under the "opportunistic"
+objective`, which waits for the adopted plan to carry it; the two that test the switch itself
+still assert the adoption explicitly.

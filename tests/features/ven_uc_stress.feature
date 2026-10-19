@@ -27,7 +27,7 @@ Feature: UC-11..UC-12 — Stress and Multi-Asset Use Cases
   # opportunistic objective it covers a base-load step from what it holds, at any hour.
   Scenario: UC-11c — Asset ledger tracks energy in active assets
     Given the site has no PV, no EV charging, the heater in its band and the battery at 0.8 SoC
-    And I set the VEN's objective to "opportunistic"
+    And the VEN runs under the "opportunistic" objective
     When a sustained base-load step of 2.0 kW starts
     And I poll VEN /ledger until field "battery" is present
     Then the response JSON has field "battery"
