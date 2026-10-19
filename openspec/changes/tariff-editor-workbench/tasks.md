@@ -24,7 +24,7 @@
 - [x] 4.1 `TariffGrid` component: cells, paste, fill-down, set-selection, invalid marking. Verify: component test pastes 24 lines and finds 24 filled rows.
 - [x] 4.2 Recurrence control with period label ("repeats every 24 h"), truncated notice and DST note. Verify: component tests for the four recurrence states and a window across 2026-10-25.
 - [x] 4.3 `FleetTariffChart` optional `draftBands` dashed series; page `Tariff.tsx` with live/draft overlay, dissent warning, targeting line, and fleet power chart on the same window; route and nav entry in `App.tsx`. Verify: Vitest for the page; `npm run build` and `eslint` clean.
-- [ ] 4.4 (OPEN after merge: the wording follows ui-transparency and is covered by `Tariff.test.tsx`, but the screenshot needs a stack running the new BFF; take it after the next VTN deploy, then delete this change) Layout and wording follow ui-transparency: draft vs live legend, "published at" status, polling hint. Verify: screenshot of the page against the running stack.
+- [ ] 4.4 (OPEN: a hand look at the page's layout and wording against a stack running the new BFF, after the next VTN deploy; then delete this change. The drag itself and the publish are exercised in a real browser by the `@ui` scenario in `tariff_editor.feature`.) Layout and wording follow ui-transparency: draft vs live legend, "published at" status, polling hint. Verify: screenshot of the page against the running stack.
 
 ## 5. Publish
 

@@ -342,6 +342,7 @@ An operator changes the price schedule the fleet is told about and wants to see 
 - A tariff published with a recurrence is in force on the second day on the VEN
 - A stored repeating tariff loads as its 24-interval pattern, not as an expansion
 - The fleet plan: after a VEN adopts a plan it is on `GET /api/fleet/plan`; after a replan, "now" follows and an instant before the new price still answers with the earlier plan (`tests/features/fleet_plan_feed.feature`)
+- A price dragged up on the chart in a browser changes one grid price to the value the drag readout showed; publishing it creates a second event carrying that price and `P9999Y`, the VEN's `/tariffs` shows it, and the fleet plan holds a plan the VENs adopted after the publish that the plan of a second before it did not (`@ui` scenario in `tests/features/tariff_editor.feature`)
 - `tests/features/tariff_editor.feature`; the unit behaviour is in `VTN/ui/src/__tests__/signalDraft.test.ts`, `recurrence.test.ts` and `Tariff.test.tsx`
 
 ---

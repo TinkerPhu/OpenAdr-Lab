@@ -16224,7 +16224,7 @@ the question went to the user before any code.
   one generic `batch_write_loop` and one `queue` helper instead (`one-concept-one-function`).
 - The reference needs no storage: "before" is `GET /api/fleet/plan?at=<createdDateTime − 1 s>`, so a reload
   reproduces it. Plans are 7-day, not the decisions' 90, because each is large; the broker/store size is
-  still to be measured (`tariff-editor-compare-and-chart` task 3).
+  still to be measured (`tariff-editor-compare-and-chart` task 1).
 - A recharts overlay must be a stable component type. An inline `component={(p) => ...}` is a new type every
   render, remounts the layer and drops the drag in progress; `Customized` with a fixed component and the
   data as props keeps it.
@@ -16474,3 +16474,27 @@ planning-mode decisions, so the tick golden is re-recorded: `plan_import_limit` 
 0.3 kW instead of pausing the heater for good after one restore and cut, `plan_alert` keeps the EV
 at 0 instead of alternating EV, heater and battery every tick, and the new
 `plan_import_limit_no_bridge` is recorded; the other sixteen scenarios are unchanged.
+
+## 052: the tariff editor, seen in a browser (052-tariff-editor-e2e)
+
+**What.** One `@ui` scenario in `tests/features/tariff_editor.feature`: it opens the editor on a published
+repeating tariff, grabs a value handle on the real chart with the mouse and drags it to the top of the plot,
+checks that exactly one grid price changed to the value the drag readout showed, publishes from the dialog,
+and then checks the VTN's new event (prices, `P9999Y`, priority), the VEN's `/tariffs`, and the plan feed: a
+plan adopted after the publish that the plan of a second before it did not have.
+
+**Why.** Until now the drag was tested only with stand-in scales and the publish only as a request body, so
+nothing had shown that a handle can be grabbed in recharts' real layout, that the pointer capture survives
+the re-render, or that the editor's event beats the tariff it replaces.
+
+**Learnings.**
+- The first real run proved the drag works: the handle was grabbed, the readout appeared and the grid moved.
+  Both failures after that were in the test (an SVG `<text>` has no `innerText`; the VTN stores `P9999Y` as
+  `P9999Y0M0DT0H0M0S`).
+- The plan check counts only a plan whose `createdAt` is after the event's `createdDateTime`, so a replan
+  caused by the earlier API-published pattern cannot satisfy it. It asserts that the plans differ, not that
+  the energy moved where the price did: whether a given price change moves a given VEN's plan depends on its
+  flexibility.
+- Not done: the hand look at the page's layout (`tariff-editor-workbench` 4.4) and the message-size and broker
+  memory measurement with 20 VENs (`tariff-editor-compare-and-chart` task 1); the plan feed is not deployed on
+  Node1, so there is no recorded table to measure from.
