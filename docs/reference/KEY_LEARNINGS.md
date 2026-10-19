@@ -3686,3 +3686,10 @@ meant the registry endpoint cost no new data. Look at what the shared function h
 - Scenarios in one feature share a VEN. A step that asserts "the objective changed" must anchor
   on the instant of its own command, or the release an earlier scenario's cleanup sent a moment
   before passes for it.
+
+## A fixture for another tool's output must be a copy of that output (2026-10-19)
+
+- `tests/test_retry_failed.sh` fed the retry a hand-written rerun file; behave's real one starts
+  with a comment header, which the retry ran as a scenario, so no flaky run was ever cleared and the
+  test stayed green throughout. Write such a fixture from what the tool actually produced (here, a
+  rerun file copied from a CI log), and run the test somewhere: nothing ran this one.

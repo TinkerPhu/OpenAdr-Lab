@@ -13,7 +13,7 @@ retry_failed_scenarios() {
   echo ""
   echo "=== Retrying the failed $pass scenarios once, each on its own ==="
   while IFS= read -r location; do
-    [ -n "$location" ] || continue
+    case "$location" in ''|'#'*) continue ;; esac   # behave's rerun header and blank lines
     if python -m behave -f pretty "$location" "$@"; then
       echo "FLAKY_SCENARIO: $location"
     else

@@ -16390,3 +16390,12 @@ opportunistic plan from two scenarios earlier counted as the new one. The comman
 its instant; the change and the served plan must come after it; both scenarios start from the
 profile objective. UC-11c's single-field ledger poll got the 30 s budget the several-field form
 has, after 15 s ran out on a fully loaded host.
+
+**A flaky scenario could never turn a run green (051).** The next Node3 run failed one scenario,
+`ven_multi_asset.feature:32`, which then passed on its own retry, and the E2E suite still came out
+red. behave's rerun file starts with a `# -- RERUN: ...` comment line; `tests/retry_failed.sh`
+handed that line to behave as a location, the "retry" of it failed, and the pass stayed red. No
+ticket had ever been cleared by a retry. Its unit test wrote the rerun file without the header, so it
+tested a file behave never writes; it now writes behave's real format, the loop skips comment
+lines, and the runner's quick tier runs the test (nothing ran it before). The scenario itself is
+R-152: the multi-asset test VEN logs in as ven-1, so it and test-ven-1 overwrite one report.
