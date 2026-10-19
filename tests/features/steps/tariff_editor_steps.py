@@ -196,7 +196,7 @@ def step_drag_handle(context):
     page.mouse.down()
     page.mouse.move(x, top, steps=12)
     page.wait_for_selector(tid("drag-readout"), timeout=5000)
-    context.drag_readout = page.locator(tid("drag-readout")).inner_text()
+    context.drag_readout = page.locator(tid("drag-readout")).text_content()
     page.mouse.up()
 
 
