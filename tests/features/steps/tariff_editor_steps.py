@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from behave import given, when, then
 from features.helpers.api_client import bff_get, bff_post, ven_get
 from features.helpers.tariff import price_at
+from features.helpers.ui import tid
 from features.helpers.wait import poll_until
 
 HOURS = 24
@@ -148,3 +149,114 @@ def step_pattern_count(context, count):
 def step_pattern_prices(context):
     got = [iv["payloads"][0]["value"] for iv in context.tariff_pattern]
     assert got == PATTERN_PRICES, got
+
+
+# -- the operator's path: drag on the chart, publish from the editor --
+
+
+def _price_cells(page):
+    """{cell test id: text} of every PRICE cell of the editor's grid."""
+    return page.evaluate(
+        """() => Object.fromEntries([...document.querySelectorAll('[data-testid^="cell-PRICE-"]')]
+            .map(el => [el.dataset.testid, el.value]))"""
+    )
+
+
+@when("I open the tariff editor on that event")
+def step_open_editor(context):
+    page = context.ui.page
+    page.click(tid("nav-tariff"))
+    page.wait_for_selector(tid("tariff-heading"))
+    page.wait_for_selector(
+        f'{tid("tariff-event-select")} option[value="{context.rate_event_id}"]',
+        state="attached",
+        timeout=60000,
+    )
+    page.select_option(tid("tariff-event-select"), context.rate_event_id)
+    # A handle exists only once the BFF has resolved the draft into bands to draw them on.
+    page.wait_for_selector('[data-testid^="handle-value-"]', state="attached", timeout=60000)
+
+
+@when("I drag a price handle on the chart to the top of the plot")
+def step_drag_handle(context):
+    page = context.ui.page
+    context.cells_before = _price_cells(page)
+    handle = page.locator('[data-testid^="handle-value-"]').first
+    box = handle.bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    top = page.locator(f'{tid("tariff-chart-card")} .recharts-cartesian-grid').first.bounding_box()["y"] + 1
+    covering = page.evaluate(
+        "([x, y]) => document.elementFromPoint(x, y)?.dataset?.testid ?? document.elementFromPoint(x, y)?.tagName",
+        [x, y],
+    )
+    assert covering == (handle.get_attribute("data-testid")), (
+        f"something else sits over the handle at ({x:.0f}, {y:.0f}): {covering}"
+    )
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x, top, steps=12)
+    page.wait_for_selector(tid("drag-readout"), timeout=5000)
+    context.drag_readout = page.locator(tid("drag-readout")).inner_text()
+    page.mouse.up()
+
+
+@then("exactly one grid price changed, to the value the drag readout showed")
+def step_one_price_changed(context):
+    page = context.ui.page
+    changed = poll_until(
+        lambda: {k: v for k, v in _price_cells(page).items() if context.cells_before.get(k) != v},
+        lambda c: len(c) >= 1,
+        timeout=10,
+        description="the dragged price reaches the grid",
+    )
+    assert len(changed) == 1, f"a drag edits one row, the grid changed {changed}"
+    (cell, text), = changed.items()
+    context.dragged_row = int(cell.rsplit("-", 1)[1])
+    context.dragged_price = float(text)
+    shown = float(context.drag_readout.split()[0])
+    assert abs(context.dragged_price - shown) < 1e-9, f"grid {text}, readout {context.drag_readout!r}"
+    assert context.dragged_price != PATTERN_PRICES[context.dragged_row], "the drag moved nothing"
+
+
+@when("I publish the draft from the editor")
+def step_publish_draft(context):
+    page = context.ui.page
+    page.click(tid("tariff-publish-btn"))
+    page.click(tid("publish-confirm"))
+    page.wait_for_selector(tid("tariff-published-note"), timeout=30000)
+
+
+@then("the VTN holds a second event for the program carrying the dragged price")
+def step_vtn_holds_published(context):
+    listed = bff_get("/api/events")
+    assert listed.ok, listed.text
+    mine = [
+        e for e in listed.json()
+        if e["programID"] == context.saved_program_id and e["id"] != context.rate_event_id
+    ]
+    assert len(mine) == 1, [e["id"] for e in mine]
+    event = mine[0]
+    context.published_event = event
+    context.created_event = {"id": event["id"]}  # removed by the scenario cleanup
+    prices = [iv["payloads"][0]["values"][0] for iv in event["intervals"]]
+    expected = list(PATTERN_PRICES)
+    expected[context.dragged_row] = context.dragged_price
+    assert prices == expected, prices
+    assert event.get("duration") == "P9999Y", event.get("duration")
+    assert event["priority"] <= 0, event["priority"]
+
+
+@when("I wait for the VEN /tariffs endpoint to show the dragged price")
+def step_wait_dragged_price(context):
+    at = context.pattern_start + timedelta(hours=context.dragged_row, minutes=10)
+
+    def fetch():
+        resp = ven_get("/tariffs")
+        return resp.json() if resp.ok else []
+
+    poll_until(
+        fetch,
+        lambda rates: isinstance(rates, list) and price_at(rates, at) == context.dragged_price,
+        timeout=120,
+        description="VEN /tariffs carries the price dragged on the chart",
+    )

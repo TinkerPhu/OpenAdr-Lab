@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from behave import given, when, then
 from features.helpers.api_client import bff_get, ven_get, vtn_post
+from features.helpers.tariff import parse_ts
 from features.helpers.wait import poll_until
 
 
@@ -115,3 +116,30 @@ def step_fleet_plan_earlier(context):
 def step_fleet_plan_later(context):
     assert context.carried_plan_id != context.earlier_plan_id
     assert _carries(_fleet_plan(), context.carried_plan_id)
+
+
+@then("the fleet plan holds a plan adopted after the editor's publish that the plan of a second before it did not")
+def step_fleet_plan_answers_publish(context):
+    """The question the tariff editor's comparison card asks, asked of the plan feed directly: the
+    instant is the published event's own `createdDateTime` less one second (`instantBefore`), and
+    a plan counts only if the VEN adopted it after the publish, so an earlier replan cannot pass."""
+    created = parse_ts(context.published_event["createdDateTime"])
+    before = _fleet_plan((created - timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
+    assert before is not None, "the plan feed answers nothing for the instant before the publish"
+    had = {(p["venName"], p["planId"]) for p in before["plans"]}
+
+    def newer_plans():
+        now = _fleet_plan()
+        return [
+            p for p in (now or {"plans": []})["plans"]
+            if (p["venName"], p["planId"]) not in had and parse_ts(p["createdAt"]) > created
+        ]
+
+    poll_until(
+        newer_plans,
+        bool,
+        timeout=120,
+        interval=3,
+        description=f"a VEN adopts a plan after the publish at {created}",
+    )
+
