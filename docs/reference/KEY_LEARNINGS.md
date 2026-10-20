@@ -3712,3 +3712,11 @@ stdin, so the script silently stops after the first remote call. Three more trap
 through `tail` hung for the full N seconds); and a lane that tidies the shared checkout while another lane still runs a
 script from it can corrupt that script, since bash reads scripts incrementally. Tidy containers per lane, the tree
 once at the end.
+
+## Match a test runner's verdict lines through its colour codes (CI lanes, 2026-10-19)
+
+`run_all_tests.sh` prints `ESC[0;32mPASS ESC[0m  <suite>`, so a `grep 'PASS  '` never matches and every passing suite looked like an
+infrastructure failure. The stubs wrote plain `PASS  ` lines, which is why the unit tests were green: a stub must emit
+the real tool's bytes. `LANE_PASS_RE` in `ci/lanes.sh` allows the colour code, and `ci/test_lanes.sh` writes coloured lines.
+A first cold build of the Rust suite on a host takes tens of minutes against about two warm: judge a lane's speed on a
+second run.

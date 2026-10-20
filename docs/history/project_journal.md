@@ -16452,6 +16452,14 @@ session for a host, and a runner that dies frees its hosts within the 45-minute 
 heartbeat traps TERM and kills its own sleep. The home lane's tree must not be tidied while a remote lane still runs
 `run_all_tests.sh` from it (bash reads a script as it goes), so the home job removes containers only and the ticket
 returns the checkout to `main` last.
+
+**Live check (2026-10-19).** `resilience` on Node3 and `rust-vtn` on Node2 ran as two lanes under the sessions'
+lock: both passed, Node2 was back on `main` with its lock free and no test containers. It found one bug the stubs
+could not: the lane's "did the suite report a PASS" check missed `run_all_tests.sh`'s coloured verdict line, so every
+suite looked like an infrastructure failure. The suite times measured from Node3's logs became the fallbacks
+(e2e 3300 s, resilience 350 s, rust-vtn 100 s warm; a cold rust-vtn build is far longer). The board gained a Node
+column (where a ticket runs now, or ran) and a node per step. Not yet seen: a real ticket on two lanes with
+Node2 configured in `/srv/ci/runner.env`, and the cancel/tidy path on a real remote host (stubbed and tested only).
 **The fleet command grant is live on Node1 (051, 8.0).** `VTN/mosquitto/fleet-acl.conf` with the
 BFF's one write grant (`openadr-lab/fleet/+/command/objective`) is deployed to the Node1 broker:
 the checkout pulled to main and `lab-mqtt` restarted, not reloaded, because the ACL is a
