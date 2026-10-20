@@ -32,6 +32,8 @@ pub struct MockVtn {
     pub updated_reports: Arc<Mutex<Vec<(String, OadrReportBody)>>>,
     /// When Some(msg), update_report returns Err with this message.
     pub update_error: Option<String>,
+    /// Captures every id passed to delete_report.
+    pub deleted_reports: Arc<Mutex<Vec<String>>>,
     /// What `token_expires_at` answers.
     pub token_expires_at: Option<DateTime<Utc>>,
 }
@@ -48,6 +50,7 @@ impl MockVtn {
             upsert_error_status_for: None,
             updated_reports: Arc::new(Mutex::new(vec![])),
             update_error: None,
+            deleted_reports: Arc::new(Mutex::new(vec![])),
             token_expires_at: None,
         }
     }
@@ -65,6 +68,11 @@ impl MockVtn {
     /// Return a clone of every `(id, body)` update_report received.
     pub fn updated(&self) -> Vec<(String, OadrReportBody)> {
         self.updated_reports.lock().unwrap().clone()
+    }
+
+    /// Return a clone of every id delete_report received.
+    pub fn deleted(&self) -> Vec<String> {
+        self.deleted_reports.lock().unwrap().clone()
     }
 
     pub fn with_events(mut self, events: Vec<OadrEvent>) -> Self {
@@ -175,6 +183,16 @@ impl VtnPort for MockVtn {
         Ok(report)
     }
 
+    /// Answers like the VTN does: the report that was under that id, here only its id.
+    async fn delete_report(&self, id: &str) -> Result<OadrReport> {
+        self.deleted_reports.lock().unwrap().push(id.to_string());
+        Ok(OadrReport {
+            id: id.to_string(),
+            reportName: None,
+            extra: serde_json::Map::new(),
+        })
+    }
+
     async fn token_expires_at(&self, _now: DateTime<Utc>) -> Option<DateTime<Utc>> {
         self.token_expires_at
     }
@@ -183,6 +201,13 @@ impl VtnPort for MockVtn {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn mock_vtn_records_deleted_report_ids() {
+        let mock = MockVtn::new();
+        mock.delete_report("rep-3").await.unwrap();
+        assert_eq!(mock.deleted(), vec!["rep-3".to_string()]);
+    }
 
     #[tokio::test]
     async fn test_mock_vtn_records_submitted_report() {

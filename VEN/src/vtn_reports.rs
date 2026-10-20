@@ -146,6 +146,18 @@ impl VtnClient {
         self.put_json(&path, body).await
     }
 
+    /// Delete a report by id and return it as the VTN had it. Certification only (nothing in the
+    /// VEN calls it outside tests). Drops every remembered `reportName` -> id entry for it, so
+    /// the next submission under that name creates instead of PUTting to a dead id.
+    pub(crate) async fn delete_report(&self, id: &str) -> Result<serde_json::Value> {
+        let answer = self.delete_json(&format!("/reports/{id}")).await?;
+        self.report_ids
+            .write()
+            .await
+            .retain(|_, remembered| remembered != id);
+        Ok(answer)
+    }
+
     /// Search own reports (filtered by client_name) for a matching reportName.
     async fn find_report_by_name(&self, report_name: &str) -> Result<String> {
         let reports = VtnPort::fetch_reports(self).await?;

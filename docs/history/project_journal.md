@@ -16555,3 +16555,15 @@ supersedes the "not changed" note of the polish entry above. Tests: `FleetTariff
 (`FLEET_AXIS_WIDTH` holds the widest tick-plus-unit), `TimeSeriesChart.test.tsx` (room above the plot).
 
 **Follow-up.** The live re-check showed 66 px still wrapped "0.4 €/kWh" (the euro sign is wider than a digit), so the width is 78 px and the test budgets 7 px per character. Lesson: size a label column from a screenshot of the deployed page, not from a character-width estimate.
+### VEN `DELETE /reports/{id}`: a certification call nothing uses
+
+**What.** `VtnPort::delete_report` (`VEN/src/vtn_reports.rs`, `vtn.rs`, `MockVtn`): one DELETE, the deleted report
+returned typed, a non-2xx as `DomainError::VtnRejected`, and the remembered `reportName` -> id entry dropped.
+Tests: `delete_report_*` in `vtn.rs` against an in-process VTN, `mock_vtn_records_deleted_report_ids`.
+
+**Why.** It is one of the four MUSTs left in `BACKLOG_OpenADR_Cert.md` (three now). The VTN already serves it, a
+VEN deleting only its own reports; the VEN lacked the client call.
+
+**Decision.** Certification only, and deliberately without a production caller (user, 2026-10-20): the VEN corrects
+a report with PUT and has no reason to withdraw one. Called by tests only, so `no-half-built-features` is waived
+for this one item; clippy raises no dead-code warning for the trait method.

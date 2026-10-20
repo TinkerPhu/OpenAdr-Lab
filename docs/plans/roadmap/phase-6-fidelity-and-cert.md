@@ -67,9 +67,8 @@ steps), so the proxy has to serve both until they are moved.
 
 ## Bookkeeping
 
-`docs/BACKLOG_OpenADR_Cert.md` was re-audited row by row on 2026-10-11 and lists four open
-MUSTs: TLS, `/auth/server` discovery, the webhook callback with echo challenge, and
-`DELETE /reports/{id}`. The last one is small and belongs to no work package yet; take it with
-WP6.5. At the end of the phase update every touched row and percentage, then journal + `/wiki-sync`
+`docs/BACKLOG_OpenADR_Cert.md` was re-audited row by row on 2026-10-11 and lists three open
+MUSTs: TLS, `/auth/server` discovery and the webhook callback with echo challenge
+(`DELETE /reports/{id}` is done, as a client call only tests use). At the end of the phase update every touched row and percentage, then journal + `/wiki-sync`
 ([[openadr-security]], [[reliability-and-config]], [[vision-and-roadmap]] — the certification
 OPEN QUESTION gets its answer here).

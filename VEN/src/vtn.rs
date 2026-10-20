@@ -257,6 +257,11 @@ impl VtnClient {
         json_or_rejection(path, resp).await
     }
 
+    pub(crate) async fn delete_json(&self, path: &str) -> Result<serde_json::Value> {
+        let resp = self.send(Method::DELETE, path, None).await?;
+        json_or_rejection(path, resp).await
+    }
+
     /// POST JSON, returning the raw response (status + body) without error-mapping.
     pub(crate) async fn post_json_raw(
         &self,
@@ -300,6 +305,12 @@ impl VtnPort for VtnClient {
         let value = serde_json::to_value(&body).context("serialize report body")?;
         // The inherent method: the one PUT, shared with `upsert_report`.
         let answer = self.update_report(id, value).await?;
+        serde_json::from_value(answer).context("parse the report the VTN returned")
+    }
+
+    async fn delete_report(&self, id: &str) -> Result<OadrReport> {
+        // The inherent method: the DELETE, and forgetting the id the upsert cache learned.
+        let answer = self.delete_report(id).await?;
         serde_json::from_value(answer).context("parse the report the VTN returned")
     }
 
@@ -923,5 +934,76 @@ mod tests {
         assert_eq!(report.extra["eventID"], "evt-1");
         assert_eq!(report.extra["clientName"], "test-ven");
         assert_eq!(report.extra["createdDateTime"], "2026-01-01T00:00:00Z");
+    }
+
+    /// A VTN that creates report `rep-1` and deletes by id, answering the deleted report as the
+    /// spec's `DELETE /reports/{reportID}` does; any other id is a 404.
+    async fn spawn_deleting_vtn() -> String {
+        use axum::http::StatusCode;
+        async fn delete_handler(
+            axum::extract::Path(id): axum::extract::Path<String>,
+        ) -> (StatusCode, Json<serde_json::Value>) {
+            if id == "rep-1" {
+                (
+                    StatusCode::OK,
+                    Json(json!({"id": id, "reportName": "r-1", "clientName": "test-ven"})),
+                )
+            } else {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"detail": "no such report"})),
+                )
+            }
+        }
+        let app = Router::new()
+            .route("/auth/token", post(token_handler))
+            .route(
+                "/reports",
+                post(|| async { (StatusCode::CREATED, Json(json!({"id": "rep-1"}))) }),
+            )
+            .route("/reports/:id", axum::routing::delete(delete_handler));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    /// Certification only (OpenADR 3.1 `DELETE /reports/{reportID}`, `write_reports`): the VEN has
+    /// no use for it, so this test is its only caller. The VTN's answer comes back typed.
+    #[tokio::test]
+    async fn delete_report_deletes_by_id_and_returns_the_deleted_report() {
+        let client = make_client(spawn_deleting_vtn().await);
+
+        let report = VtnPort::delete_report(&client, "rep-1").await.unwrap();
+
+        assert_eq!(report.id, "rep-1");
+        assert_eq!(report.reportName.as_deref(), Some("r-1"));
+    }
+
+    #[tokio::test]
+    async fn delete_report_of_an_unknown_id_is_a_domain_rejection_with_404() {
+        let client = make_client(spawn_deleting_vtn().await);
+
+        let err = VtnPort::delete_report(&client, "rep-9").await.unwrap_err();
+
+        assert_eq!(rejected_status(&err), 404);
+    }
+
+    /// The remembered id of a deleted report must go, or the next submission costs a rejected PUT
+    /// (harmless, the cache self-heals, but the cache should not lie).
+    #[tokio::test]
+    async fn delete_report_forgets_the_id_the_upsert_cache_learned() {
+        let client = make_client(spawn_deleting_vtn().await);
+        client
+            .upsert_report(report_body(Some("r-1")))
+            .await
+            .unwrap();
+        assert_eq!(client.report_ids.read().await.len(), 1);
+
+        VtnPort::delete_report(&client, "rep-1").await.unwrap();
+
+        assert!(client.report_ids.read().await.is_empty());
     }
 }
