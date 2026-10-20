@@ -34,10 +34,12 @@ export function fleetChartWindow(
 }
 
 /**
- * Y-axis width [px] for every chart on the Fleet page. 48 is what the VEN
- * Controller tab's tariff axis uses, and it fits the kW labels too.
+ * Y-axis width [px] for every chart on the Fleet page. recharts prints the axis
+ * unit after each tick, so this holds the widest "value unit" on one line
+ * ("1500 kWh", "0.40 €/kWh"); 48 wrapped them. The charts share one width so
+ * their plot areas stay aligned.
  */
-export const FLEET_AXIS_WIDTH = 48;
+export const FLEET_AXIS_WIDTH = 66;
 
 /**
  * The tick instants both Fleet charts label.

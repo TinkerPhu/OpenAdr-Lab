@@ -187,7 +187,8 @@ export function TimeSeriesChart({
   testId,
   legend = true,
   interactiveLegend = false,
-  margin = { top: 4, right: 4, left: 0, bottom: 0 },
+  // The top tick label is centred on the plot's edge: room above it keeps it from being cut.
+  margin = { top: 10, right: 4, left: 0, bottom: 0 },
   onCursorClick,
 }: TimeSeriesChartProps) {
   const { isHidden, toggle } = useLegendToggle();

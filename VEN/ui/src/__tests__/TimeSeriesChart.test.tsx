@@ -496,6 +496,12 @@ describe("TimeSeriesChart â€” rounded Y ticks (applied by the composition, not t
     expect(yAxes.find((a) => a.yAxisId === "cost")!.unit).toBe(" €/h");
   });
 
+  it("leaves room above the plot for the top tick label, which is centred on the plot's edge", () => {
+    charts.length = 0;
+    renderWithAxes([{ id: "power", domain: [-3.2, 1.1] }]);
+    expect((charts[0].margin as { top: number }).top).toBeGreaterThanOrEqual(8);
+  });
+
   it("leaves a hidden (tooltip-only) axis' domain untouched", () => {
     renderWithAxes([{ id: "state", hidden: true, domain: [0, 1] }]);
     const axis = yAxes.find((a) => a.yAxisId === "state")!;

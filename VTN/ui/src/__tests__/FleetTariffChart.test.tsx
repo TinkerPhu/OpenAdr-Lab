@@ -245,3 +245,13 @@ describe("the two Fleet charts line up", () => {
     expect(bands(tariff)).toBe(bands(power));
   });
 });
+
+describe("FLEET_AXIS_WIDTH", () => {
+  // recharts prints the axis unit after every tick, so the column must hold the widest "value unit" a
+  // Fleet chart prints, or the label wraps onto a second line and runs into its neighbour. At the
+  // 10 px tick font a character is about 6 px; 8 px more is the tick mark and its gap.
+  it("holds the widest tick-plus-unit a Fleet chart prints on one line", () => {
+    const widest = ["1500 kWh", "0.4 €/kWh", "-150 kW"].reduce((a, b) => (b.length > a.length ? b : a));
+    expect(FLEET_AXIS_WIDTH).toBeGreaterThanOrEqual(widest.length * 6 + 8);
+  });
+});

@@ -16545,3 +16545,11 @@ on Node1 to all 20 VENs: 20 of 20 replanned within about 2 minutes; planned impo
 1219.6 to 1236.7 kWh (+17.0), peak 163.9 to 171.5 kW, export +2.7 kWh. Removing the event brought every plan
 back within about 2 minutes. Plan messages: 57 to 66 KB each (average 63 KB, 874 stored in 7 days, 53 MB of
 JSON); the broker (`vtn-lab-mqtt-1`) held 3.5 MiB. That closes `tariff-editor-compare-and-chart` task 1.
+
+### Fleet and tariff chart axes: the unit no longer wraps, the top tick is not cut
+
+**What.** The deployed Fleet page showed "1500 kWh" and "0.4 €/kWh" split over two lines in the 48 px axis
+column, and the top tick label cut off by the plot's edge. `FLEET_AXIS_WIDTH` is now 66 px (one constant for
+all Fleet charts, so their plots stay aligned) and `TimeSeriesChart`'s default top margin is 10 px. This
+supersedes the "not changed" note of the polish entry above. Tests: `FleetTariffChart.test.tsx`
+(`FLEET_AXIS_WIDTH` holds the widest tick-plus-unit), `TimeSeriesChart.test.tsx` (room above the plot).
