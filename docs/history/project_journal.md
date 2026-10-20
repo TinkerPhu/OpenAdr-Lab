@@ -16506,3 +16506,17 @@ the re-render, or that the editor's event beats the tariff it replaces.
 - Not done: the hand look at the page's layout (`tariff-editor-workbench` 4.4) and the message-size and broker
   memory measurement with 20 VENs (`tariff-editor-compare-and-chart` task 1); the plan feed is not deployed on
   Node1, so there is no recorded table to measure from.
+
+### Tariff editor polish: unit doubled on the power axis, duration shown raw
+
+**What.** A screenshot of the deployed Tariff page showed two faults. The fleet power axis read "150 kWkW";
+`P9999Y0M0DT0H0M0S` was offered as "for a span" with the hint "repeats every 24 h, for P9999Y0M0DT0H0M0S".
+Fixed: `TimeSeriesChart` no longer hands `unit` to the axis when the axis declares a `tickFormatter` (one rule
+in the shared component, the two callers' redundant `unit: "kW"` removed), and `recurrenceFromDuration` reads
+the VTN's long form of `P9999Y` as forever. Tests: `TimeSeriesChart.test.tsx`, `recurrence.test.ts`.
+
+**Why.** recharts appends `unit` to every tick text, and `formatPowerTick` already prints its own unit. The VTN
+returns the duration it stores, not the string it was sent; the editor compared against one spelling.
+
+**Not changed.** The tariff chart's "€/kWh" unit wraps under each tick in the 48 px axis column that the
+fleet charts share so their plots line up; widening it moves all three charts.

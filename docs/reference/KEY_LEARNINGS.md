@@ -3720,3 +3720,8 @@ infrastructure failure. The stubs wrote plain `PASS  ` lines, which is why the u
 the real tool's bytes. `LANE_PASS_RE` in `ci/lanes.sh` allows the colour code, and `ci/test_lanes.sh` writes coloured lines.
 A first cold build of the Rust suite on a host takes tens of minutes against about two warm: judge a lane's speed on a
 second run.
+
+A recharts `YAxis` `unit` is appended to every tick text, after the `tickFormatter`: an axis that formats its own
+ticks with a unit ("150 kW") and also declares `unit` prints it twice. `TimeSeriesChart` drops `unit` when a
+`tickFormatter` is declared. A value read back from the VTN is its stored form, not what was sent: compare an
+ISO duration by its parsed parts (`P9999Y` comes back as `P9999Y0M0DT0H0M0S`).
