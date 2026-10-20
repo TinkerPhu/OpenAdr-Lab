@@ -17,7 +17,10 @@ from features.helpers.api_client import (
     vtn_get,
     vtn_post,
 )
+from features.helpers.ui import tid
 from features.helpers.wait import poll_until
+import re
+
 import requests
 
 VEN_URLS = {"VEN-1": VEN_BASE_URL, "VEN-2": VEN2_BASE_URL}
@@ -265,3 +268,49 @@ def step_bff_serves_ven_plan(context, seconds, ven, objective):
 @then("that plan is not the one the fleet plan listed from before the change")
 def step_served_plan_is_new(context):
     assert context.served_plan["id"] != context.plan_before_change, context.served_plan["id"]
+
+
+@when("I open the Fleet page")
+def step_open_fleet_page(context):
+    page = context.ui.page
+    page.click(tid("nav-fleet"))
+    page.wait_for_selector(tid("fleet-total-card"), timeout=60000)
+
+
+def _replan_progress(page):
+    """(replanned, total) from the comparison card's label, or None until the card shows."""
+    label = page.locator(tid("plan-replan-progress"))
+    if label.count() == 0:
+        return None
+    m = re.search(r"(\d+) of (\d+) VENs replanned", label.first.text_content())
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+@then("within {seconds:d} seconds the Fleet page reports every VEN replanned since the switch")
+def step_fleet_page_replanned(context, seconds):
+    page = context.ui.page
+    # The page polls its feeds; a reload per attempt would also lose nothing, but the poll is enough.
+    poll_until(
+        lambda: _replan_progress(page),
+        lambda p: p is not None and p[1] > 0 and p[0] == p[1],
+        timeout=seconds,
+        interval=5,
+        description="the Fleet page's replan progress reading 'n of n VENs replanned'",
+    )
+
+
+@then("the Fleet plan chart opens on accumulated energy")
+def step_fleet_chart_accumulated(context):
+    pressed = context.ui.page.locator(f'{tid("fleet-plan-quantity")} button[aria-pressed="true"]')
+    assert pressed.text_content() == "Accumulated energy", pressed.text_content()
+
+
+@when("I choose the power view of the Fleet plan chart")
+def step_fleet_chart_choose_power(context):
+    context.ui.page.click(f'{tid("fleet-plan-quantity")} button:has-text("Power")')
+
+
+@then("the Fleet plan chart shows power")
+def step_fleet_chart_power(context):
+    pressed = context.ui.page.locator(f'{tid("fleet-plan-quantity")} button[aria-pressed="true"]')
+    assert pressed.text_content() == "Power", pressed.text_content()

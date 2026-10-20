@@ -51,6 +51,20 @@ Feature: The fleet commands its VENs' objectives (fleet objective control)
     When the fleet commands "ven-1" to run "opportunistic"
     Then within 150 seconds VEN-1 reports a newer usage forecast for the event
 
+  # The Fleet page compares the plans around a switch the way the Tariff page does around a publish:
+  # the same VENs under one objective, then the other, read from their accumulated planned energy
+  # as each VEN replans.
+  @ui
+  Scenario: The Fleet page compares the fleet's accumulated plan before and after a switch
+    Given within 30 seconds VEN-1 runs its profile objective and no fleet command
+    And I wait for the fleet plan to carry the plan the VEN is working to
+    When the fleet switches every VEN to "opportunistic"
+    And I open the Fleet page
+    Then within 240 seconds the Fleet page reports every VEN replanned since the switch
+    And the Fleet plan chart opens on accumulated energy
+    When I choose the power view of the Fleet plan chart
+    Then the Fleet plan chart shows power
+
   @resilience
   Scenario: A restarted VEN applies the fleet's retained command again
     Given the fleet commands "ven-1" to run "opportunistic"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  fleetObjectiveChoices, latestObjectiveChange, objectiveCounts, objectiveMix, sourceLabel,
+  fleetObjectiveChoices, latestObjectiveSwitch, objectiveCounts, objectiveMix, sourceLabel,
 } from "../utils/fleetObjective";
 import { instantBefore } from "../utils/fleetPlan";
 import type { FleetVenLive } from "../api/types";
@@ -53,15 +53,32 @@ describe("objectiveCounts", () => {
   });
 });
 
-describe("latestObjectiveChange", () => {
-  it("is the newest change any VEN reported, or none", () => {
+describe("latestObjectiveSwitch", () => {
+  const changed = (name: string, at: string | null) => ({ ...ven(name), objectiveChangedAt: at });
+
+  it("is the first change of the newest switch: a fleet switch moves its VENs one at a time", () => {
     const vens = [
-      { ...ven("ven-1"), objectiveChangedAt: "2026-10-17T12:05:00Z" },
-      { ...ven("ven-2"), objectiveChangedAt: "2026-10-17T12:20:00+02:00" },
-      { ...ven("ven-3"), objectiveChangedAt: null },
+      changed("ven-1", "2026-10-17T10:00:00Z"),
+      changed("ven-2", "2026-10-17T10:04:00Z"),
+      changed("ven-3", "2026-10-17T10:08:00Z"),
     ];
-    expect(latestObjectiveChange(vens)).toBe("2026-10-17T12:05:00Z");
-    expect(latestObjectiveChange([ven("ven-1")])).toBeUndefined();
+    expect(latestObjectiveSwitch(vens)).toBe("2026-10-17T10:00:00Z");
+  });
+
+  it("starts a new switch after a gap, and ignores an older one", () => {
+    const vens = [
+      changed("ven-1", "2026-10-17T08:00:00Z"),
+      changed("ven-2", "2026-10-17T10:00:00Z"),
+      changed("ven-3", "2026-10-17T10:04:00+00:00"),
+    ];
+    expect(latestObjectiveSwitch(vens)).toBe("2026-10-17T10:00:00Z");
+  });
+
+  it("is a single change when only one VEN changed, and none when none did", () => {
+    expect(latestObjectiveSwitch([changed("ven-1", "2026-10-17T12:05:00Z"), changed("ven-2", null)])).toBe(
+      "2026-10-17T12:05:00Z",
+    );
+    expect(latestObjectiveSwitch([ven("ven-1")])).toBeUndefined();
   });
 });
 

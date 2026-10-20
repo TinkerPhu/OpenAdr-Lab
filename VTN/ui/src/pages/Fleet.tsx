@@ -11,12 +11,12 @@ import {
 } from "../api/hooks";
 import type { FleetVenLive } from "../api/types";
 import { FleetPlanChart } from "../components/FleetPlanChart";
+import { PlanComparison } from "../components/PlanComparison";
 import { FleetPowerChart } from "../components/FleetPowerChart";
 import { VenPlanChart } from "../components/VenPlanChart";
 import {
-  fleetObjectiveChoices, latestObjectiveChange, objectiveCounts, objectiveMix, sourceLabel,
+  fleetObjectiveChoices, latestObjectiveSwitch, objectiveCounts, objectiveMix, sourceLabel,
 } from "../utils/fleetObjective";
-import { instantBefore } from "../utils/fleetPlan";
 import { FleetTariffChart } from "../components/FleetTariffChart";
 import { FleetReactions } from "../components/FleetReactions";
 import { formatAge } from "../utils/relativeTime";
@@ -164,10 +164,9 @@ export function FleetPage() {
   const history = useFleetHistory(chosen.minutes, chosen.stepSeconds);
   const signals = useFleetSignals(chosen.minutes);
   const plan = useFleetPlan();
-  // The plan as it stood just before the last objective change, drawn faint behind the current one:
-  // what the change did to what the fleet intends (openspec `opportunistic-objective` D12).
-  const changedAt = latestObjectiveChange(live.data?.vens ?? []);
-  const beforeChange = useFleetPlan(changedAt && instantBefore(changedAt), changedAt !== undefined);
+  // The newest objective switch, compared the way a published tariff is: the plan as it stood just
+  // before the first VEN changed against the plan now, with how many VENs have replanned.
+  const changedAt = latestObjectiveSwitch(live.data?.vens ?? []);
   const now = new Date();
   const newestPlan = plan.data?.plans
     .map((p) => p.createdAt)
@@ -275,16 +274,19 @@ export function FleetPage() {
             {live.data && (
               <Typography variant="body2" data-testid="fleet-plan-objectives">
                 Objectives: {objectiveMix(objectiveCounts(live.data.vens)) || "none reported"}
-                {changedAt && (
-                  <> · faint: the plan before the objective change at {new Date(changedAt).toLocaleTimeString()}</>
-                )}
+                {changedAt && <> · objective switched at {new Date(changedAt).toLocaleTimeString()}</>}
               </Typography>
             )}
-            <FleetPlanChart
-              plan={plan.data}
-              reference={changedAt ? beforeChange.data : undefined}
-              nowMs={now.getTime()}
-            />
+            {changedAt ? (
+              <PlanComparison
+                changedAt={changedAt}
+                what="the objective switch"
+                targets={[]}
+                nowMs={now.getTime()}
+              />
+            ) : (
+              <FleetPlanChart plan={plan.data} nowMs={now.getTime()} />
+            )}
           </>
         )}
       </Paper>

@@ -3725,3 +3725,7 @@ A recharts `YAxis` `unit` is appended to every tick text, after the `tickFormatt
 ticks with a unit ("150 kW") and also declares `unit` prints it twice. `TimeSeriesChart` drops `unit` when a
 `tickFormatter` is declared. A value read back from the VTN is its stored form, not what was sent: compare an
 ISO duration by its parsed parts (`P9999Y` comes back as `P9999Y0M0DT0H0M0S`).
+To see what a change did to the fleet, read the plans as accumulated energy, not as power: each VEN's plan shows
+its effect the moment that VEN has replanned, and the running totals separate long before the hours they
+cover have happened. Compare the same fleet under two conditions in turn, over the window both plans cover;
+two groups of VENs confound the condition with each VEN's assets.

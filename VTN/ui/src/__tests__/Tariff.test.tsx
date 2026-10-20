@@ -38,8 +38,8 @@ const PATTERN: PatternInterval[] = Array.from({ length: 24 }, (_, h) => ({
 let eventsData: Record<string, unknown>[] = [SEED_EVENT, OTHER_EVENT];
 
 vi.mock("../components/PlanComparison", () => ({
-  PlanComparison: (props: { publishedAt: string; targets: string[] }) => (
-    <div data-testid="plan-comparison-stub" data-published-at={props.publishedAt} data-targets={props.targets.join(",")} />
+  PlanComparison: (props: { changedAt: string; targets: string[] }) => (
+    <div data-testid="plan-comparison-stub" data-published-at={props.changedAt} data-targets={props.targets.join(",")} />
   ),
 }));
 

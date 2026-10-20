@@ -258,7 +258,7 @@ export function TariffPage() {
                 What the fleet planned: before and after “{lastPublished.eventName}”
               </Typography>
               <PlanComparison
-                publishedAt={lastPublished.createdDateTime}
+                changedAt={lastPublished.createdDateTime}
                 targets={lastPublished.targets ?? []}
                 nowMs={nowMs}
               />

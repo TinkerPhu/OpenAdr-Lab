@@ -361,9 +361,14 @@ a view of what the fleet expects to draw either way, and a way back.
   `objective` leaf. The Objective column shows what each VEN reports, and "pending" until it
   reports the command applied.
 - **Before and after:** the Fleet plan card (the fleet's adopted plans summed, `GET
-  /api/fleet/plan`) names the objectives the fleet runs under and draws, faint behind the current
-  plan, the plan as of just before the last objective change (the BFF notes when each VEN's
-  objective changed): what the fleet intended before the switch, and what it intends now. Every
+  /api/fleet/plan`) names the objectives the fleet runs under and compares the plan as of just
+  before the first VEN of the newest switch changed (the BFF notes when each VEN's objective
+  changed) with the plan now, the way the Tariff page compares a published tariff: "n of m VENs
+  replanned", the planned import and export energy and peak before against now, and a chart that
+  opens on the accumulated planned energy (kWh) with the faint "before" curve beside it, power one
+  click away. Accumulated energy is the quickest reading: each VEN's plan shows its effect the
+  moment that VEN has replanned. The experiment is the same fleet under one objective and then the
+  other, one after the other. Every
   VEN also reports a `USAGE_FORECAST` to the VTN, ad hoc: at once when its plan's objective
   changes, else every 15 minutes (`WIRE_PROFILE.md` v3).
 - **Drill-down:** a row opens to that VEN's adopted plan (net and per-asset power, from the same
@@ -377,7 +382,8 @@ a view of what the fleet expects to draw either way, and a way back.
 **What to test:**
 - `tests/features/fleet_objective_control.feature`: one VEN and the fleet switched, the VEN
   reporting the fleet as source, release, a refused objective, the plan from before a switch and
-  the VEN's new plan, the ad hoc usage forecast, restart (`@resilience`)
+  the VEN's new plan, the ad hoc usage forecast, the Fleet page's comparison and accumulated chart
+  (`@ui`), restart (`@resilience`)
 - The VEN side of the same objective: UC-19 in `HEMS-USE-CASE-OBSERVATION-MANUAL.md`
 
 ---

@@ -9,7 +9,8 @@
  */
 import { mergeTimestampedSeries } from "@lab/ui/mergeSeries";
 import type { NamedSample, TimestampedRow } from "@lab/ui/mergeSeries";
-import type { FleetPlan } from "../api/types";
+import type { FleetPlan, FleetPlanPoint } from "../api/types";
+import { cumulativeEnergyKwh, overlapWindow, pointsWithin } from "./planDelta";
 
 /** Series keys, which are also the legend labels. */
 export const PLANNED_IMPORT_KEY = "Planned import";
@@ -17,14 +18,45 @@ export const PLANNED_EXPORT_KEY = "Planned export";
 export const REFERENCE_IMPORT_KEY = "Planned import (before)";
 export const REFERENCE_EXPORT_KEY = "Planned export (before)";
 
-const samplesOf = (plan: FleetPlan, importKey: string, exportKey: string): NamedSample[] =>
-  plan.points.flatMap((p) => {
-    const ts = Date.parse(p.ts);
-    return [
-      { ts, key: importKey, value: p.netImportKw },
-      { ts, key: exportKey, value: p.netExportKw },
-    ];
-  });
+export type PlanQuantity = "power" | "energy";
+
+/**
+ * One plan's samples under its two series keys. Power is each slot's kW at the slot's start. Energy is
+ * the running kWh: zero at `points[0]`, then the total at the end of each slot, so the curve rises
+ * through the slots instead of stepping at their starts.
+ */
+const samplesOf = (
+  points: FleetPlanPoint[],
+  stepSeconds: number,
+  importKey: string,
+  exportKey: string,
+  quantity: PlanQuantity,
+): NamedSample[] => {
+  if (quantity === "power") {
+    return points.flatMap((p) => {
+      const ts = Date.parse(p.ts);
+      return [
+        { ts, key: importKey, value: p.netImportKw },
+        { ts, key: exportKey, value: p.netExportKw },
+      ];
+    });
+  }
+  if (points.length === 0) return [];
+  const importKwh = cumulativeEnergyKwh(points, stepSeconds, "netImportKw");
+  const exportKwh = cumulativeEnergyKwh(points, stepSeconds, "netExportKw");
+  const start = Date.parse(points[0].ts);
+  return [
+    { ts: start, key: importKey, value: 0 },
+    { ts: start, key: exportKey, value: 0 },
+    ...points.flatMap((p, i) => {
+      const ts = Date.parse(p.ts) + stepSeconds * 1000;
+      return [
+        { ts, key: importKey, value: importKwh[i] },
+        { ts, key: exportKey, value: exportKwh[i] },
+      ];
+    }),
+  ];
+};
 
 /**
  * The instant to ask the fleet plan "as of" for the plan that stood before something happened at
@@ -35,12 +67,31 @@ export function instantBefore(iso: string): string {
   return new Date(Date.parse(iso) - 1000).toISOString();
 }
 
-export function planRows(plan: FleetPlan, reference?: FleetPlan): TimestampedRow[] {
+/**
+ * The chart rows for a plan and, optionally, the plan from before a change. Accumulated energy is
+ * compared over the window both plans cover, so both curves start level at zero and the gap between
+ * them is what the change added, not the longer horizon of the newer plan.
+ */
+export function planRows(
+  plan: FleetPlan,
+  reference?: FleetPlan,
+  quantity: PlanQuantity = "power",
+): TimestampedRow[] {
+  const window = quantity === "energy" && reference ? overlapWindow(reference, plan) : null;
+  const pointsOf = (p: FleetPlan) => (window ? pointsWithin(p, window) : p.points);
   return mergeTimestampedSeries(
     [],
     [
-      ...samplesOf(plan, PLANNED_IMPORT_KEY, PLANNED_EXPORT_KEY),
-      ...(reference ? samplesOf(reference, REFERENCE_IMPORT_KEY, REFERENCE_EXPORT_KEY) : []),
+      ...samplesOf(pointsOf(plan), plan.stepSeconds, PLANNED_IMPORT_KEY, PLANNED_EXPORT_KEY, quantity),
+      ...(reference
+        ? samplesOf(
+            pointsOf(reference),
+            reference.stepSeconds,
+            REFERENCE_IMPORT_KEY,
+            REFERENCE_EXPORT_KEY,
+            quantity,
+          )
+        : []),
     ],
   );
 }

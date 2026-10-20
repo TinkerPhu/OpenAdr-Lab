@@ -24,26 +24,30 @@ function DirectionRow({ id, label, d }: { id: string; label: string; d: Directio
 }
 
 /**
- * What a publish did to the fleet's plans: the plan as of just before it, against the plan now.
+ * What a change did to the fleet's plans: the plan as of just before it, against the plan now. The
+ * change is a published tariff (the event's own `createdDateTime`) or an objective switch (the first
+ * VEN's `objectiveChangedAt`).
  *
- * Both come from `GET /api/fleet/plan`, which sums stored plans as of an instant, so a reload
- * reproduces this and the page keeps no copy. The publish instant is the event's own
- * `createdDateTime`. Progress is stated, because the delta is only the effect of the tariff once
- * every targeted VEN has replanned; until then it is part way there.
+ * Both plans come from `GET /api/fleet/plan`, which sums stored plans as of an instant, so a reload
+ * reproduces this and the page keeps no copy. Progress is stated, because the delta is only the
+ * effect of the change once every targeted VEN has replanned; until then it is part way there.
  */
 export function PlanComparison({
-  publishedAt,
+  changedAt,
+  what = "the publish",
   targets,
   nowMs,
 }: {
-  /** The published event's `createdDateTime`. */
-  publishedAt: string;
-  /** The event's targets; empty means every VEN. */
+  /** When the change happened (ISO 8601). */
+  changedAt: string;
+  /** The change in words, after "just before": "the publish", "the objective switch". */
+  what?: string;
+  /** The VENs it targeted; empty means every VEN. */
   targets: string[];
   nowMs: number;
 }) {
-  const publishedMs = Date.parse(publishedAt);
-  const reference = useFleetPlan(instantBefore(publishedAt));
+  const changedMs = Date.parse(changedAt);
+  const reference = useFleetPlan(instantBefore(changedAt));
   const result = useFleetPlan();
 
   if (reference.isError || result.isError) {
@@ -64,7 +68,7 @@ export function PlanComparison({
     const missing = reference.data.vensWithoutPlan;
     return (
       <Alert severity="info" data-testid="plan-comparison-no-reference">
-        No VEN had a plan stored just before this was published
+        No VEN had a plan stored just before {what}
         {missing.length > 0 && ` (${missing.slice(0, 5).join(", ")}${missing.length > 5 ? ", …" : ""})`}
         , so there is no earlier plan to compare with.
       </Alert>
@@ -72,7 +76,7 @@ export function PlanComparison({
   }
 
   const delta = planDelta(reference.data, result.data);
-  const progress = replanProgress(result.data, publishedMs, targets);
+  const progress = replanProgress(result.data, changedMs, targets);
 
   return (
     <Stack spacing={1}>
@@ -101,7 +105,7 @@ export function PlanComparison({
         </Table>
       )}
       <Typography variant="caption" color="text.secondary">
-        Faint: the plan as of just before the publish at {new Date(publishedMs).toLocaleTimeString()}.
+        Faint: the plan as of just before {what} at {new Date(changedMs).toLocaleTimeString()}.
         Solid: the plan now. Forecast changes move plans too, not only the tariff.
       </Typography>
     </Stack>

@@ -147,9 +147,14 @@ import and export per grid point with `contributingVens`, the contributing plan 
 with no plan. "Now" and "an earlier instant" are one function, so the tariff editor's before/after
 comparison (`PlanComparison`) cannot add the two sides up differently; the publish instant is the
 published event's own `createdDateTime`, so nothing is stored by the page. The Fleet page asks the
-same question one second before the last objective change (`objectiveChangedAt`, which the BFF sets
-per VEN on `GET /api/fleet/power` when a VEN's `objective` leaf changes; `utils/fleetPlan.ts`
-`instantBefore` is the rule both pages use) and draws that plan faint behind the current one. The
+same question one second before the first VEN of the newest objective switch changed
+(`objectiveChangedAt`, which the BFF sets per VEN on `GET /api/fleet/power` when a VEN's `objective`
+leaf changes; `utils/fleetObjective.ts` `latestObjectiveSwitch` groups changes less than ten minutes
+apart into one switch, because a fleet switch moves its VENs one at a time; `utils/fleetPlan.ts`
+`instantBefore` is the rule both pages use) and renders it with the same `PlanComparison`. The plan
+chart (`FleetPlanChart`) opens on accumulated energy per direction (`cumulativeEnergyKwh`, over the
+window both plans cover, so both curves start level), with power one click away; kW and a step
+become kWh in one place (`planDelta.ts`). The
 message carries each slot's `planned_kw_by_asset` and the plan's `objective` and `solve_status` as
 well, for the per-VEN plan the Fleet page opens: `GET /api/fleet/vens/:ven/plan` answers the newest
 stored payload of that VEN (`latest_plans_at`, the rows the sum reads). A VEN is absent past its

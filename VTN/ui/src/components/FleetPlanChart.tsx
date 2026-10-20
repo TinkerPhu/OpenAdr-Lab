@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Stack, ToggleButton, ToggleButtonGroup } from "@mui/material";
 import { TimeSeriesChart } from "@lab/ui/TimeSeriesChart";
 import type { TimeSeriesSeriesSpec } from "@lab/ui/TimeSeriesChart";
 import { EmptyState } from "@lab/ui/EmptyState";
@@ -6,6 +7,7 @@ import { minSpanDomain } from "@lab/ui/axisDomain";
 import { CELL_CHART_HEIGHT } from "@lab/ui/chartLayout";
 import type { FleetPlan } from "../api/types";
 import {
+  type PlanQuantity,
   PLANNED_EXPORT_KEY,
   PLANNED_IMPORT_KEY,
   REFERENCE_EXPORT_KEY,
@@ -29,6 +31,40 @@ const SERIES = [
 const endOf = (plan: FleetPlan) =>
   Date.parse(plan.points[plan.points.length - 1].ts) + plan.stepSeconds * 1000;
 
+type Span = { tMin: number; tMax: number };
+
+/** How the chart reads a quantity: declared here, looked up by the one chart below. */
+const QUANTITIES: Record<
+  PlanQuantity,
+  {
+    label: string;
+    unit: string;
+    /** A planned kW holds for its slot; accumulated energy rises through it. */
+    type: "stepAfter" | "linear";
+    format: (v: number) => string;
+    /** The time the chart spans: every plan's own extent, or the (clipped) rows. */
+    span: (rows: { ts: number }[], plans: FleetPlan[], nowMs: number) => Span;
+  }
+> = {
+  power: {
+    label: "Power",
+    unit: " kW",
+    type: "stepAfter",
+    format: (v) => `${v.toFixed(2)} kW`,
+    span: (_rows, plans, nowMs) => ({
+      tMin: plans.length ? Math.min(...plans.map((p) => Date.parse(p.points[0].ts))) : nowMs,
+      tMax: plans.length ? Math.max(...plans.map(endOf)) : nowMs,
+    }),
+  },
+  energy: {
+    label: "Accumulated energy",
+    unit: " kWh",
+    type: "linear",
+    format: (v) => `${v.toFixed(2)} kWh`,
+    span: (rows) => ({ tMin: rows[0].ts, tMax: rows[rows.length - 1].ts }),
+  },
+};
+
 /**
  * What the fleet intends to import and export over the plan horizon, summed across VENs.
  *
@@ -37,6 +73,10 @@ const endOf = (plan: FleetPlan) =>
  * happened. Import and export are separate series because that is how the plan states them; a
  * single signed line would hide a site importing while another exports. With a `reference` (the plan
  * as it stood before a tariff was published) it is drawn faint behind the current one.
+ *
+ * Opens on the plan as accumulated energy: each VEN's plan shows its effect the moment that VEN has
+ * replanned, and the running totals separate long before the hours they concern have happened.
+ * Power is one click away.
  */
 export function FleetPlanChart({
   plan,
@@ -50,16 +90,17 @@ export function FleetPlanChart({
   /** Tick spacing; the plan runs ahead for a day, so hours, not minutes. */
   tickMinutes?: number;
 }) {
+  const [quantity, setQuantity] = useState<PlanQuantity>("energy");
   const { rows, tMin, tMax, values } = useMemo(() => {
-    const rows = planRows(plan, reference?.points.length ? reference : undefined);
+    const rows = planRows(plan, reference?.points.length ? reference : undefined, quantity);
     const all = [plan, reference].filter((p): p is FleetPlan => !!p && p.points.length > 0);
     return {
       rows,
-      tMin: all.length ? Math.min(...all.map((p) => Date.parse(p.points[0].ts))) : nowMs,
-      tMax: all.length ? Math.max(...all.map(endOf)) : nowMs,
+      ...(rows.length ? QUANTITIES[quantity].span(rows, all, nowMs) : { tMin: nowMs, tMax: nowMs }),
       values: rows.flatMap((r) => Object.values(r.values ?? {})),
     };
-  }, [plan, reference, nowMs]);
+  }, [plan, reference, nowMs, quantity]);
+  const declared = QUANTITIES[quantity];
 
   if (rows.length === 0) {
     return (
@@ -77,37 +118,52 @@ export function FleetPlanChart({
     axisId: AXIS_ID,
     dataKey: (row) => row.values?.[key] ?? null,
     color,
-    // A planned kW holds for its slot.
-    type: "stepAfter",
+    type: declared.type,
     // Within a plan's horizon a missing point is a different grid, not a gap; past the horizon
     // there are no later points to bridge to.
     connectNulls: true,
     ...(isReference ? { strokeOpacity: 0.45, strokeDasharray: "5 5" } : {}),
-    formatter: (v: number) => `${v.toFixed(2)} kW`,
+    formatter: declared.format,
   }));
 
   return (
-    <TimeSeriesChart
-      data={rows}
-      tMin={tMin}
-      tMax={tMax}
-      axes={[
-        {
-          id: AXIS_ID,
-          unit: " kW",
-          width: FLEET_AXIS_WIDTH,
-          domain: minSpanDomain(values, 1),
-        },
-      ]}
-      series={series}
-      nowMs={nowMs}
-      referenceAxisId={AXIS_ID}
-      xAxisTicks={fleetChartTicks(tMin, tMax, tickMinutes)}
-      xAxisInterval={FLEET_TICK_INTERVAL}
-      height={CELL_CHART_HEIGHT}
-      xAxisTickFormatter={(ts: number) => new Date(ts).toLocaleTimeString()}
-      interactiveLegend
-      testId="fleet-plan-chart"
-    />
+    <Stack spacing={1}>
+      <ToggleButtonGroup
+        exclusive
+        size="small"
+        value={quantity}
+        onChange={(_, next: PlanQuantity | null) => next && setQuantity(next)}
+        aria-label="Plan quantity"
+        data-testid="fleet-plan-quantity"
+      >
+        {(Object.keys(QUANTITIES) as PlanQuantity[]).map((q) => (
+          <ToggleButton key={q} value={q}>
+            {QUANTITIES[q].label}
+          </ToggleButton>
+        ))}
+      </ToggleButtonGroup>
+      <TimeSeriesChart
+        data={rows}
+        tMin={tMin}
+        tMax={tMax}
+        axes={[
+          {
+            id: AXIS_ID,
+            unit: declared.unit,
+            width: FLEET_AXIS_WIDTH,
+            domain: minSpanDomain(values, 1),
+          },
+        ]}
+        series={series}
+        nowMs={nowMs}
+        referenceAxisId={AXIS_ID}
+        xAxisTicks={fleetChartTicks(tMin, tMax, tickMinutes)}
+        xAxisInterval={FLEET_TICK_INTERVAL}
+        height={CELL_CHART_HEIGHT}
+        xAxisTickFormatter={(ts: number) => new Date(ts).toLocaleTimeString()}
+        interactiveLegend
+        testId="fleet-plan-chart"
+      />
+    </Stack>
   );
 }
