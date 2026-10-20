@@ -36,10 +36,10 @@ export function fleetChartWindow(
 /**
  * Y-axis width [px] for every chart on the Fleet page. recharts prints the axis
  * unit after each tick, so this holds the widest "value unit" on one line
- * ("1500 kWh", "0.40 €/kWh"); 48 wrapped them. The charts share one width so
+ * ("1500 kWh", "0.4 €/kWh"); 48 and 66 wrapped them (66 still broke the euro tariff label). The charts share one width so
  * their plot areas stay aligned.
  */
-export const FLEET_AXIS_WIDTH = 66;
+export const FLEET_AXIS_WIDTH = 78;
 
 /**
  * The tick instants both Fleet charts label.
