@@ -16553,3 +16553,5 @@ column, and the top tick label cut off by the plot's edge. `FLEET_AXIS_WIDTH` is
 all Fleet charts, so their plots stay aligned) and `TimeSeriesChart`'s default top margin is 10 px. This
 supersedes the "not changed" note of the polish entry above. Tests: `FleetTariffChart.test.tsx`
 (`FLEET_AXIS_WIDTH` holds the widest tick-plus-unit), `TimeSeriesChart.test.tsx` (room above the plot).
+
+**Follow-up.** The live re-check showed 66 px still wrapped "0.4 €/kWh" (the euro sign is wider than a digit), so the width is 78 px and the test budgets 7 px per character. Lesson: size a label column from a screenshot of the deployed page, not from a character-width estimate.
