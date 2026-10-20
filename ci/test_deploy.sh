@@ -26,6 +26,8 @@ check "the lock is taken first"               1 "$(order 'docker_host_lock.sh ac
 check "the VEN ui restarts after a ven backend" 1 "$(grep -c 'restart ui' <<<"$OUT")"
 check "the lock is released last"             1 "$(tail -1 <<<"$OUT" | grep -c 'release')"
 check "a non-VEN stack does not restart ui"   0 "$(deploy Node1 VTN vtn | grep -c 'restart ui')"
+check "only the named services' images are shipped, not their dependencies'" "+ docker save vtn-bff vtn-ui | ssh Node1 docker load" "$(deploy Node1 VTN bff ui | grep 'docker save')"
+check "a service of the node2 stack is named by that stack's project" "+ docker save node2-ven-7 | ssh Node2 docker load" "$(deploy Node2 VEN/scale_out/node2 ven-7 | grep 'docker save')"
 check "rollback tags :previous back and builds nothing" 0 "$(deploy --rollback Node2 VEN/scale_out/node2 ven-7 | grep -c ' build ')"
 
 echo; [ "$FAILS" -eq 0 ] && echo "all passed" || { echo "$FAILS failed"; exit 1; }
