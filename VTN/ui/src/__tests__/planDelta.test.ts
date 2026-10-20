@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { planDelta, replanProgress, seriesStats } from "../utils/planDelta";
+import {
+  cumulativeEnergyKwh,
+  overlapWindow,
+  planDelta,
+  replanProgress,
+  seriesStats,
+} from "../utils/planDelta";
 import type { FleetPlan, FleetPlanPoint } from "../api/types";
 
 const T0 = Date.parse("2026-10-18T10:00:00Z");
@@ -36,6 +42,37 @@ describe("seriesStats", () => {
 
   it("uses the step it is given: 15-minute slots hold a quarter of a kWh per kW", () => {
     expect(seriesStats([point(0, 4), point(1, 4)], 900, "netImportKw").energyKwh).toBe(2);
+  });
+});
+
+describe("cumulativeEnergyKwh", () => {
+  it("is the running energy in kWh at the end of each slot", () => {
+    expect(cumulativeEnergyKwh([point(0, 2), point(1, 4), point(2, 1)], STEP, "netImportKw")).toEqual([2, 6, 7]);
+  });
+
+  it("ends where seriesStats ends: one conversion from kW and a step to kWh", () => {
+    const points = [point(0, 4), point(1, 4), point(2, 3)];
+    const running = cumulativeEnergyKwh(points, 900, "netImportKw");
+    expect(running[running.length - 1]).toBe(
+      seriesStats(points, 900, "netImportKw").energyKwh,
+    );
+  });
+
+  it("is empty for no points", () => {
+    expect(cumulativeEnergyKwh([], STEP, "netImportKw")).toEqual([]);
+  });
+});
+
+describe("overlapWindow", () => {
+  it("is the time both plans cover, from the later start to the earlier end", () => {
+    const before = plan([point(0, 4), point(1, 4), point(2, 4)]);
+    const after = plan([point(1, 4), point(2, 4), point(3, 4)]);
+    expect(overlapWindow(before, after)).toEqual({ fromMs: T0 + STEP * 1000, toMs: T0 + 3 * STEP * 1000 });
+  });
+
+  it("is null when the plans do not overlap or one has no plan", () => {
+    expect(overlapWindow(plan([point(0, 4)]), plan([point(5, 4)]))).toBeNull();
+    expect(overlapWindow(plan([]), plan([point(0, 4)]))).toBeNull();
   });
 });
 

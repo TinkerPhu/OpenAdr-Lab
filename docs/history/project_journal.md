@@ -16520,3 +16520,28 @@ returns the duration it stores, not the string it was sent; the editor compared 
 
 **Not changed.** The tariff chart's "€/kWh" unit wraps under each tick in the 48 px axis column that the
 fleet charts share so their plots line up; widening it moves all three charts.
+
+### 053: the fleet-switch experiment on the Fleet page
+
+**What.** The Fleet page compared the plans around an objective switch only as a faint curve behind the
+current one. It now uses `PlanComparison` (replan progress, provisional marking, import and export energy and
+peak before against now) and `FleetPlanChart` opens on accumulated planned energy (kWh per direction, both
+curves level at the start of the window both plans cover), with power one click away. The switch instant is
+the first change of the newest switch (`latestObjectiveSwitch`), not the last VEN's. The Tariff page gets the
+accumulated view too, since it is the same chart. Tests: `planDelta.test.ts`, `fleetObjective.test.ts`,
+`FleetPlanChart.test.tsx`, `PlanComparison.test.tsx`, `Fleet.test.tsx`; the `@ui` scenario in
+`fleet_objective_control.feature`.
+
+**Why.** The lab's cleanest experiment is the same 20 VENs under one objective and then the other. The user
+asked for accumulated forecasts because they show a result as each VEN replans, long before the hours they
+cover have happened. A comparison of two groups of VENs would confound the objective with each VEN's assets.
+
+**Changed on purpose.** `FleetPlanChart.test.tsx` and `Fleet.test.tsx` expected the power chart and the faint
+overlay; the chart now opens on energy, so those tests choose the Power view, and the Fleet test asserts the
+comparison card instead of the overlay's caption.
+
+**Live check of the Tariff page card (2026-10-20, before this change).** Publishing `tou-pricing-day-ahead` x1.2
+on Node1 to all 20 VENs: 20 of 20 replanned within about 2 minutes; planned import over the common window
+1219.6 to 1236.7 kWh (+17.0), peak 163.9 to 171.5 kW, export +2.7 kWh. Removing the event brought every plan
+back within about 2 minutes. Plan messages: 57 to 66 KB each (average 63 KB, 874 stored in 7 days, 53 MB of
+JSON); the broker (`vtn-lab-mqtt-1`) held 3.5 MiB. That closes `tariff-editor-compare-and-chart` task 1.

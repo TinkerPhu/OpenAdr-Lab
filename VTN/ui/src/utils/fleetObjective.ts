@@ -23,12 +23,26 @@ export function objectiveCounts(vens: FleetVenLive[]): Record<string, number> {
   return counts;
 }
 
-/** The last time any VEN's objective changed, as the BFF saw it (`objectiveChangedAt`). */
-export function latestObjectiveChange(vens: FleetVenLive[]): string | undefined {
-  return vens
+/** Objective changes this close together are one switch: the BFF moves a fleet one VEN at a time. */
+const SWITCH_GAP_MS = 10 * 60_000;
+
+/**
+ * When the newest objective switch began: the first change of the newest run of changes (as the BFF
+ * saw them, `objectiveChangedAt`), so a fleet switch is measured from before its first VEN changed,
+ * not from its last.
+ */
+export function latestObjectiveSwitch(vens: FleetVenLive[]): string | undefined {
+  const changes = vens
     .map((v) => v.objectiveChangedAt)
     .filter((t): t is string => typeof t === "string")
-    .reduce<string | undefined>((a, b) => (a === undefined || Date.parse(b) > Date.parse(a) ? b : a), undefined);
+    .sort((a, b) => Date.parse(a) - Date.parse(b));
+  let start: string | undefined;
+  let previousMs = -Infinity;
+  for (const t of changes) {
+    if (Date.parse(t) - previousMs > SWITCH_GAP_MS) start = t;
+    previousMs = Date.parse(t);
+  }
+  return start;
 }
 
 /** "opportunistic 3 · min_cost 2": the objectives behind a fleet view, most VENs first. */

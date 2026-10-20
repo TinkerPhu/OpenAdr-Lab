@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FleetPlanChart } from "../components/FleetPlanChart";
 import {
@@ -43,6 +43,35 @@ describe("planRows", () => {
   });
 });
 
+describe("planRows by quantity", () => {
+  it("accumulated energy starts at zero and rises by each slot's kWh, at the slot's end", () => {
+    // 4 kW import for 5 minutes, then 1.5 kW export for 5 minutes.
+    const rows = planRows(plan(), undefined, "energy");
+    expect(rows.map((r) => r.ts)).toEqual([T0, T0 + 300_000, T0 + 600_000]);
+    expect(rows[0].values).toEqual({ [PLANNED_IMPORT_KEY]: 0, [PLANNED_EXPORT_KEY]: 0 });
+    expect(rows[1].values?.[PLANNED_IMPORT_KEY]).toBeCloseTo(4 / 12);
+    expect(rows[2].values?.[PLANNED_EXPORT_KEY]).toBeCloseTo(1.5 / 12);
+    expect(rows[2].values?.[PLANNED_IMPORT_KEY]).toBeCloseTo(4 / 12);
+  });
+
+  it("starts both curves at zero at the start of the window both plans cover", () => {
+    const earlier = plan({
+      points: [
+        { ts: new Date(T0 - 300_000).toISOString(), netImportKw: 12, netExportKw: 0, contributingVens: 2 },
+        ...plan().points,
+      ],
+    });
+    const rows = planRows(plan(), earlier, "energy");
+    expect(rows[0].ts).toBe(T0);
+    expect(rows[0].values).toEqual({
+      [PLANNED_IMPORT_KEY]: 0,
+      [PLANNED_EXPORT_KEY]: 0,
+      [REFERENCE_IMPORT_KEY]: 0,
+      [REFERENCE_EXPORT_KEY]: 0,
+    });
+  });
+});
+
 describe("FleetPlanChart", () => {
   beforeEach(() => {
     chartProps.length = 0;
@@ -50,10 +79,23 @@ describe("FleetPlanChart", () => {
 
   it("draws planned import and planned export as separate step series in kW", () => {
     render(<FleetPlanChart plan={plan()} nowMs={T0} />);
-    const series = chartProps[0].series as { key: string; type?: string }[];
+    fireEvent.click(screen.getByRole("button", { name: "Power" }));
+    const props = chartProps[chartProps.length - 1];
+    const series = props.series as { key: string; type?: string }[];
     expect(series.map((s) => s.key)).toEqual([PLANNED_IMPORT_KEY, PLANNED_EXPORT_KEY]);
     expect(series.every((s) => s.type === "stepAfter")).toBe(true);
-    expect((chartProps[0].axes as { unit: string }[])[0].unit).toBe(" kW");
+    expect((props.axes as { unit: string }[])[0].unit).toBe(" kW");
+  });
+
+  it("opens on the accumulated plan in kWh, because that is the view that shows a result first", () => {
+    render(<FleetPlanChart plan={plan()} nowMs={T0} />);
+    const series = chartProps[0].series as { key: string; type?: string }[];
+    expect(series.map((s) => s.key)).toEqual([PLANNED_IMPORT_KEY, PLANNED_EXPORT_KEY]);
+    expect(series.every((s) => s.type === "linear")).toBe(true);
+    expect((chartProps[0].axes as { unit: string }[])[0].unit).toBe(" kWh");
+    const data = chartProps[0].data as { values: Record<string, number> }[];
+    const last = data[data.length - 1].values;
+    expect(last[PLANNED_IMPORT_KEY]).toBeCloseTo(4 / 12);
   });
 
   it("spans the plan, to the end of its last slot", () => {
@@ -67,7 +109,9 @@ describe("FleetPlanChart", () => {
       points: [{ ts: new Date(T0).toISOString(), netImportKw: 9, netExportKw: 0, contributingVens: 2 }],
     });
     render(<FleetPlanChart plan={plan()} reference={before} nowMs={T0} />);
-    const series = chartProps[0].series as {
+    fireEvent.click(screen.getByRole("button", { name: "Power" }));
+    const props = chartProps[chartProps.length - 1];
+    const series = props.series as {
       key: string;
       strokeOpacity?: number;
       strokeDasharray?: string;
@@ -82,7 +126,7 @@ describe("FleetPlanChart", () => {
     expect(series[2].strokeOpacity).toBeLessThan(1);
     expect(series[2].strokeDasharray).toBeTruthy();
     // The reference's value is in the same row as the current plan's.
-    const first = (chartProps[0].data as { values: Record<string, number> }[])[0].values;
+    const first = (props.data as { values: Record<string, number> }[])[0].values;
     expect(first[REFERENCE_IMPORT_KEY]).toBe(9);
     expect(first[PLANNED_IMPORT_KEY]).toBe(4);
   });

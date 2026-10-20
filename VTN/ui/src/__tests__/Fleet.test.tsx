@@ -259,15 +259,16 @@ describe("FleetPage", () => {
     expect(screen.getByTestId("fleet-plan-row-ven-1")).toHaveTextContent("opportunistic");
   });
 
-  // openspec opportunistic-objective D12: what an objective change did to what the fleet intends —
-  // the plan as of just before the last change, faint behind the current one, and the objectives
-  // the fleet runs under.
-  it("draws the plan from before the last objective change behind the current one", () => {
+  // openspec opportunistic-objective D12: what an objective change did to what the fleet intends.
+  // The switch is compared like a published tariff (PlanComparison): the plan as of just before the
+  // first VEN changed against the plan now, and how many VENs have replanned since.
+  it("compares the plan from before the objective switch with the plan now", () => {
     useFleetPlanMock.mockClear();
     renderFleet();
-    expect(useFleetPlanMock).toHaveBeenCalledWith("2026-09-22T09:09:59.000Z", true);
+    expect(useFleetPlanMock).toHaveBeenCalledWith("2026-09-22T09:09:59.000Z", undefined);
+    expect(screen.getByTestId("plan-replan-progress")).toHaveTextContent("of 3 VENs replanned");
     expect(screen.getByTestId("fleet-plan-chart-stub")).toHaveAttribute("data-reference", mockPlan.at);
     expect(screen.getByTestId("fleet-plan-objectives")).toHaveTextContent("Objectives: min_cost 1");
-    expect(screen.getByTestId("fleet-plan-objectives")).toHaveTextContent("before the objective change");
+    expect(screen.getByTestId("fleet-plan-objectives")).toHaveTextContent("objective switched at");
   });
 });

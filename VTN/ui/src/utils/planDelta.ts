@@ -18,12 +18,24 @@ type Flow = "netImportKw" | "netExportKw";
 
 const SECONDS_PER_HOUR = 3600;
 
+/** Energy in kWh of `kw` held for one grid step: the one place a plan's kW and step become kWh. */
+const stepEnergyKwh = (kw: number, stepSeconds: number) => (kw * stepSeconds) / SECONDS_PER_HOUR;
+
 export function seriesStats(points: FleetPlanPoint[], stepSeconds: number, flow: Flow): SeriesStats {
   const kw = points.map((p) => p[flow]);
   return {
-    energyKwh: (kw.reduce((a, b) => a + b, 0) * stepSeconds) / SECONDS_PER_HOUR,
+    energyKwh: stepEnergyKwh(
+      kw.reduce((a, b) => a + b, 0),
+      stepSeconds,
+    ),
     peakKw: kw.length === 0 ? 0 : Math.max(...kw),
   };
+}
+
+/** The running energy in kWh at the end of each slot, one value per point. */
+export function cumulativeEnergyKwh(points: FleetPlanPoint[], stepSeconds: number, flow: Flow): number[] {
+  let total = 0;
+  return points.map((p) => (total += stepEnergyKwh(p[flow], stepSeconds)));
 }
 
 export interface DirectionDelta {
@@ -46,37 +58,45 @@ const endOf = (plan: FleetPlan) =>
     ? null
     : Date.parse(plan.points[plan.points.length - 1].ts) + plan.stepSeconds * 1000;
 
-export function planDelta(before: FleetPlan, after: FleetPlan): PlanDelta {
+export interface PlanWindow {
+  fromMs: number;
+  toMs: number;
+}
+
+/** The time both plans cover, or null when either has no plan or they do not overlap. */
+export function overlapWindow(before: FleetPlan, after: FleetPlan): PlanWindow | null {
   const beforeEnd = endOf(before);
   const afterEnd = endOf(after);
-  const from =
-    before.points.length && after.points.length
-      ? Math.max(Date.parse(before.points[0].ts), Date.parse(after.points[0].ts))
-      : null;
-  const to = beforeEnd !== null && afterEnd !== null ? Math.min(beforeEnd, afterEnd) : null;
-  const overlaps = from !== null && to !== null && from < to;
+  if (beforeEnd === null || afterEnd === null) return null;
+  const fromMs = Math.max(Date.parse(before.points[0].ts), Date.parse(after.points[0].ts));
+  const toMs = Math.min(beforeEnd, afterEnd);
+  return fromMs < toMs ? { fromMs, toMs } : null;
+}
 
-  const within = (plan: FleetPlan) =>
-    overlaps
-      ? plan.points.filter((p) => Date.parse(p.ts) >= from && Date.parse(p.ts) < to)
-      : [];
+/** The plan's points that start inside `window`. */
+export function pointsWithin(plan: FleetPlan, window: PlanWindow): FleetPlanPoint[] {
+  return plan.points.filter((p) => Date.parse(p.ts) >= window.fromMs && Date.parse(p.ts) < window.toMs);
+}
+
+export function planDelta(before: FleetPlan, after: FleetPlan): PlanDelta {
+  const window = overlapWindow(before, after);
 
   const direction = (flow: Flow): DirectionDelta => {
-    const b = seriesStats(within(before), before.stepSeconds, flow);
-    const a = seriesStats(within(after), after.stepSeconds, flow);
+    const b = seriesStats(window ? pointsWithin(before, window) : [], before.stepSeconds, flow);
+    const a = seriesStats(window ? pointsWithin(after, window) : [], after.stepSeconds, flow);
     return {
       before: b,
       after: a,
-      deltaEnergyKwh: overlaps ? a.energyKwh - b.energyKwh : null,
-      deltaPeakKw: overlaps ? a.peakKw - b.peakKw : null,
+      deltaEnergyKwh: window ? a.energyKwh - b.energyKwh : null,
+      deltaPeakKw: window ? a.peakKw - b.peakKw : null,
     };
   };
 
   return {
     import: direction("netImportKw"),
     export: direction("netExportKw"),
-    window: overlaps
-      ? { from: new Date(from).toISOString(), to: new Date(to).toISOString() }
+    window: window
+      ? { from: new Date(window.fromMs).toISOString(), to: new Date(window.toMs).toISOString() }
       : null,
   };
 }

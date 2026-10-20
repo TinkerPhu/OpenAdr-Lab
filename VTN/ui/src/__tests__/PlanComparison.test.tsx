@@ -39,10 +39,11 @@ vi.mock("../components/FleetPlanChart", () => ({
   ),
 }));
 
-function show(targets: string[] = []) {
+function show(targets: string[] = [], what?: string) {
   render(
     <PlanComparison
-      publishedAt={new Date(PUBLISHED).toISOString()}
+      changedAt={new Date(PUBLISHED).toISOString()}
+      what={what}
       targets={targets}
       nowMs={PUBLISHED + 600_000}
     />,
@@ -69,6 +70,11 @@ describe("PlanComparison", () => {
         ],
       }),
     };
+  });
+
+  it("names the change it compares around, so an objective switch does not read as a publish", () => {
+    show([], "the objective switch");
+    expect(screen.getByText(/just before the objective switch at/)).toBeVisible();
   });
 
   it("asks for the plan as of one second before the publish, and for now", () => {
