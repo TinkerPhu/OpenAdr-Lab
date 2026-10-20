@@ -61,12 +61,22 @@ export function formatIsoDuration(ms: number): string {
   return `PT${h ? `${h}H` : ""}${m ? `${m}M` : ""}${s || (!h && !m) ? `${s}S` : ""}`;
 }
 
+/** Is `duration` the spec's "infinity" in any spelling: "P9999Y", or the long form the VTN
+ *  stores and returns ("P9999Y0M0DT0H0M0S")? */
+function isForeverDuration(duration: string): boolean {
+  const m = ISO_DURATION.exec(duration);
+  if (!m) return false;
+  const [years, ...rest] = m.slice(1).map((g) => (g === undefined ? 0 : Number(g)));
+  return years === 9999 && rest.every((n) => n === 0);
+}
+
 /**
  * An event's `duration` as a recurrence, given where its interval sequence
  * starts and ends.
  *
  * The string is kept for `span`, `truncated` and `invalid` so that loading an
- * event and publishing it unedited writes back exactly what was read.
+ * event and publishing it unedited writes back exactly what was read; `forever` is
+ * written back as `FOREVER_DURATION`, which the VTN stores as the same value.
  */
 export function recurrenceFromDuration(
   duration: string | null | undefined,
@@ -74,7 +84,7 @@ export function recurrenceFromDuration(
   patternEnd: Date,
 ): Recurrence {
   if (!duration) return { kind: "once" };
-  if (duration === FOREVER_DURATION) return { kind: "forever" };
+  if (isForeverDuration(duration)) return { kind: "forever" };
   const end = addIsoDuration(patternStart, duration);
   if (!end) return { kind: "invalid", duration };
   return end.getTime() < patternEnd.getTime()

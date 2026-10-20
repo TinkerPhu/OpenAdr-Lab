@@ -64,7 +64,6 @@ export function VenPlanChart({ plan, nowMs }: { plan: VenPlan; nowMs: number }) 
         axes={[
           {
             id: AXIS_ID,
-            unit: "kW",
             autoScale: true,
             autoScaleMinSpan: 1,
             domain: tightSpanDomain([...values, 0], 1),

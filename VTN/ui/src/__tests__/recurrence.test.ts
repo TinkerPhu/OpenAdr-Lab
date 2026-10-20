@@ -44,6 +44,13 @@ describe("recurrenceFromDuration", () => {
     expect(recurrenceFromDuration("P9999Y", START, PATTERN_END)).toEqual({ kind: "forever" });
   });
 
+  it("the VTN's long form of P9999Y is forever too", () => {
+    // The VTN stores and returns the duration it was given as P9999Y0M0DT0H0M0S.
+    expect(recurrenceFromDuration("P9999Y0M0DT0H0M0S", START, PATTERN_END)).toEqual({
+      kind: "forever",
+    });
+  });
+
   it("a duration reaching the end of the pattern is a span", () => {
     expect(recurrenceFromDuration("P7D", START, PATTERN_END)).toEqual({
       kind: "span",
