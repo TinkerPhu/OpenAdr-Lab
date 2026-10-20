@@ -31,6 +31,10 @@ pub trait VtnPort: Send + Sync {
     async fn upsert_report(&self, body: OadrReportBody) -> Result<()>;
     /// Replace the report the VTN holds under `id`. Returns the report as the VTN now has it.
     async fn update_report(&self, id: &str, body: OadrReportBody) -> Result<OadrReport>;
+    /// Delete the report the VTN holds under `id` (OpenADR 3.1 `DELETE /reports/{reportID}`,
+    /// scope `write_reports`) and return it as it was. Certification only: the VEN corrects a
+    /// report with `update_report` and has no production caller for this; tests are its callers.
+    async fn delete_report(&self, id: &str) -> Result<OadrReport>;
     /// When the access token this client holds runs out, for `GET /vtn/status`. `None` when
     /// no token has been fetched yet. An expired token gives a time in the past.
     async fn token_expires_at(&self, _now: DateTime<Utc>) -> Option<DateTime<Utc>> {

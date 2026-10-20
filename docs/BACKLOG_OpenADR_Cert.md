@@ -116,7 +116,7 @@ A payload type the profile does not list is passed through and nothing acts on i
 |---|---|---|---|
 | Create reports (`POST /reports`) | MUST | Full | Upsert: on 409 Conflict the report is found by name and updated with PUT |
 | Update reports (`PUT /reports/{id}`) | MUST | Full | Used by the upsert and by the VEN's own `PUT /reports/{id}` route |
-| Delete reports (`DELETE /reports/{id}`) | MUST | Missing | No delete operation in `vtn.rs` |
+| Delete reports (`DELETE /reports/{id}`) | MUST | Full | `VtnPort::delete_report` (`vtn_reports.rs`), tested against an in-process VTN. Certification only: nothing in the VEN calls it, it corrects a report with PUT. The VTN serves it (a VEN deletes only its own reports) |
 | Read own reports (`GET /reports`) | read_ven_objects | Full | Polls `?clientName={ven_name}` |
 | Measurement reports | — | Full | Per active event; site power or energy plus `OPERATING_STATE` and storage state of charge |
 | Status reports (event-driven) | — | Missing | Plan cycles are logged (`/trace/events`) and streamed (`/plan/events`), but no report is built from them |
@@ -128,7 +128,7 @@ A payload type the profile does not list is passed through and nothing acts on i
 | Historical / forecast / rolling reports | — | Partial | `historical: false` serves plan-slot forecasts; `historical: true` serves measured history. Rolling reports are not built |
 | `resourceName` in report resources | — | Full | `"{ven_name}-meter"` |
 
-**Fulfilment: ~75%**
+**Fulfilment: ~80%**
 
 3.1 makes `eventID` a report's only object link; every report from this lab carries one and
 there is no program-level reporting.
@@ -246,8 +246,8 @@ One deviation on the other side of the wire: the stack requires `intervalPeriod.
 | **Continuous Pricing (CP)** — Price Receiving, GHG, Emergency Alert VEN | Partial | Prices, GHG, the two grid alerts, reporting, pagination and problem parsing are done. Missing: TLS, `/auth/server`, subscriptions |
 | **Baseline Profile (BP)** — General Flexibility System | Partial | DISPATCH_SETPOINT, capacity limits and baseline reports are done. Missing: CONTROL payloads, opt-in/out, resource management, and everything CP misses |
 
-**Overall: the sections average about 50 %, and four MUSTs are open** (TLS, `/auth/server`
-discovery, the webhook callback with echo challenge, `DELETE /reports/{id}`). The VEN is not
+**Overall: the sections average about 50 %, and three MUSTs are open** (TLS, `/auth/server`
+discovery, the webhook callback with echo challenge). The VEN is not
 certifiable until those are closed.
 
 ---
@@ -261,7 +261,7 @@ certifiable until those are closed.
 | 3 | Authentication | **~50%** | No `/auth/server` discovery, no unauthenticated mode |
 | 4 | Program Access | **~65%** | No individual fetch, no `targets` query parameter |
 | 5 | Event Handling | **~55%** | CONTROL and CURVE/OLS payloads, five alert types, opt-in/out, DISPATCH_INSTRUCTION |
-| 6 | Report Submission | **~75%** | No delete, no status reports, three descriptor fields ignored |
+| 6 | Report Submission | **~80%** | No status reports, three descriptor fields ignored |
 | 7 | Subscriptions & Notifications | **0%** | Entirely missing — pure polling |
 | 8 | VEN & Resource Management | **~5%** | Provisioned by the seed script, by decision |
 | 9 | Targeting & Enrollment | **~65%** | Server-side only; the VEN is passive |
@@ -280,7 +280,7 @@ certifiable until those are closed.
    challenge, subscription lifecycle, polling kept as fallback. Planned: WP6.6.
 3. **Token endpoint discovery** (MUST, §3). `GET /auth/server`, fall back to `/auth/token`,
    cache the result. Planned: WP6.5.
-4. **`DELETE /reports/{id}`** (MUST, §6). Small; not planned anywhere yet.
+4. ~~`DELETE /reports/{id}`~~ (MUST, §6): done as a client call that only tests use; the VEN has no purpose for it.
 5. **VEN and resource self-management** (§8). Closed by decision for the lab (GB-51).
 6. **Payload families not handled** (§5): CONTROL_SETPOINT / CONTROL_LEVEL_OFFSET,
    DISPATCH_INSTRUCTION, CURVE / OLS, and the alerts OUTAGE, FLEX_ALERT, FIRE, FREEZING, WIND.
