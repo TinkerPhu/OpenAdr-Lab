@@ -42,12 +42,13 @@ export LOCK_HOST="$TARGET" LOCK_OWNER=ci-runner
 run $LOCK acquire -l 30 -m "ci deploy: $STACK ${SERVICES[*]}"
 trap 'run $LOCK release' EXIT
 
-# The images this stack builds for the named services: `config --images` prints the names
-# compose would build or pull under.
-if [ -n "$DRY" ]; then IMAGES=("${STACK//\//-}-${SERVICES[0]}"); else
-    mapfile -t IMAGES < <($COMPOSE config --images "${SERVICES[@]}" | sort -u)
-fi
-[ "${#IMAGES[@]}" -gt 0 ] || die "no images for ${SERVICES[*]} in $STACK"
+# The image each named service builds. Compose names it <project>-<service>, the project being the
+# stack directory's own name (VEN -> ven, VEN/scale_out/node2 -> node2). `compose config --images`
+# is not used: it also lists the images of the services these depend on (bff -> vtn), which are
+# neither built here nor meant to change on the target.
+PROJECT="$(basename "$STACK" | tr '[:upper:]' '[:lower:]')"
+IMAGES=()
+for s in "${SERVICES[@]}"; do IMAGES+=("$PROJECT-$s"); done
 
 if [ "$ROLLBACK" = yes ]; then
     for img in "${IMAGES[@]}"; do
