@@ -305,7 +305,8 @@ there is one lane and the suites run one after the other. The mechanism is `ci/l
 - **Locks cannot outlive the runner.** An extra lane's lease is 45 minutes and is renewed every 15 while the
   lane runs; a runner that dies frees its hosts within 45 minutes.
 - **Seeing it.** `result.md` has a `## Lanes` table; the board shows a chip per lane and a log per extra lane
-  (`full.<host>.log`). `ci/install.sh` leaves an example `/srv/ci/runner.env` and warns when a configured
+  (`full.<host>.log`). The ticket list has a Node column (where a running ticket works now, or where a finished one
+  ran) and each step in the detail chart carries its node, so the durations can be read per host. `ci/install.sh` leaves an example `/srv/ci/runner.env` and warns when a configured
   lane host does not answer over ssh as the CI user.
 
 Pinned by `ci/test_lanes.sh` (planning, acquisition, cancel, infrastructure move, `result.md`) and `ci/test_web.py`.
