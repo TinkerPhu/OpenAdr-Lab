@@ -174,11 +174,17 @@ a running heater would latch it. `scenario_cleanup.feature` pins the restore.
 
 Tests that services recover from restarts and outages. Uses Docker socket to stop/start compose services mid-test.
 
-**4 behave scenarios:**
+**7 behave scenarios** (`ven_resilience.feature` and one in `fleet_objective_control.feature`, all tagged `@resilience`):
 - VEN retains cached events when VTN goes down
 - VEN re-syncs after VTN restart
 - Both VENs converge after VTN restart
 - VEN recovers after its own restart
+- VEN backs off exponentially during a sustained VTN outage
+- VEN curtails power once VTN comms-loss is confirmed
+- A restarted VEN applies the fleet's retained command again
+
+`entrypoint.sh` runs a main pass with `--tags=~@isolated` and then an isolated pass; the `--tags=@resilience`
+you give is added to both, so the main pass runs exactly these scenarios and the isolated pass skips all of its own.
 
 **Run:**
 
