@@ -164,7 +164,6 @@ export function FleetPowerChart({
         axes={[
           {
             id: AXIS_ID,
-            unit: "kW",
             // Fitted to the curves actually on screen, and refitted when one is
             // toggled off: with twenty VENs plus a total that is their sum, the
             // total's range is an order of magnitude larger than any single

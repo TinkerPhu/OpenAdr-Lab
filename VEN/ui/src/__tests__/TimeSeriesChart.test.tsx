@@ -483,6 +483,19 @@ describe("TimeSeriesChart â€” rounded Y ticks (applied by the composition, not t
     expect(yAxes.find((a) => a.yAxisId === "power")!.tickFormatter).toBe(formatter);
   });
 
+  it("does not append the axis unit to ticks that a tickFormatter already labels", () => {
+    // recharts adds `unit` to every tick text, so formatPowerTick's "150 kW" plus unit "kW"
+    // read "150 kWkW" on the fleet power chart.
+    const formatter = (v: number) => `${v} kW`;
+    renderWithAxes([{ id: "power", domain: [-3.2, 1.1], tickFormatter: formatter, unit: "kW" }]);
+    expect(yAxes.find((a) => a.yAxisId === "power")!.unit).toBeUndefined();
+  });
+
+  it("appends the axis unit to ticks formatted by the step-derived default", () => {
+    renderWithAxes([{ id: "cost", domain: [-0.4172, 0], unit: " €/h" }]);
+    expect(yAxes.find((a) => a.yAxisId === "cost")!.unit).toBe(" €/h");
+  });
+
   it("leaves a hidden (tooltip-only) axis' domain untouched", () => {
     renderWithAxes([{ id: "state", hidden: true, domain: [0, 1] }]);
     const axis = yAxes.find((a) => a.yAxisId === "state")!;

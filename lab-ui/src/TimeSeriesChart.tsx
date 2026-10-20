@@ -288,7 +288,9 @@ export function TimeSeriesChart({
                 orientation={axis.orientation ?? "left"}
                 tick={{ fontSize: 10 }}
                 width={axis.width ?? 46}
-                unit={axis.unit}
+                // recharts appends `unit` to every tick text, so it would double the unit a
+                // declared tickFormatter already prints ("150 kWkW").
+                unit={axis.tickFormatter ? undefined : axis.unit}
                 tickFormatter={axis.tickFormatter ?? tickFormatterForStep(nice.step)}
                 domain={nice.domain}
                 ticks={nice.ticks}
