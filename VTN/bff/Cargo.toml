@@ -33,7 +33,7 @@ rumqttc = { version = "0.25", default-features = false }
 # series is resampled onto a grid, and when an interval runs (D-06). A path
 # dependency, which is why this crate's Docker build context is the repo root.
 lab-core = { path = "../../lab-core" }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "json"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-native-roots", "postgres", "chrono", "json"] }
 
 [dev-dependencies]
 # `test-util` lets a test run tokio's clock paused, so the fleet switch's spacing is

@@ -16567,3 +16567,10 @@ VEN deleting only its own reports; the VEN lacked the client call.
 **Decision.** Certification only, and deliberately without a production caller (user, 2026-10-20): the VEN corrects
 a report with PUT and has no reason to withdraw one. Called by tests only, so `no-half-built-features` is waived
 for this one item; clippy raises no dead-code warning for the trait method.
+
+### Advisories on 2026-10-19/20: webpki and the BFF's sqlx TLS roots
+
+`cargo audit` on the runner failed on RUSTSEC-2026-0382 (`rustls-webpki`) and -0381 (`webpki-roots`). The VEN
+and BFF lockfiles took the fixed releases with `cargo update -p`. The BFF still held `webpki-roots` 0.26.11
+through sqlx 0.8.6's `runtime-tokio-rustls` feature, which has no fixed 0.26; its sqlx features are now
+`runtime-tokio` + `tls-rustls-ring-native-roots` (the system's CA store instead of the bundled roots).
