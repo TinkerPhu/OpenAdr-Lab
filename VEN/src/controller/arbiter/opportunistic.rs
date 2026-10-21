@@ -38,7 +38,24 @@ pub struct OpportunisticOutcome {
     pub absorbing: bool,
     /// What no asset could take (kW, import positive): exported surplus or uncovered import.
     pub unresolved_kw: f64,
+    /// Assets holding a BY_DEADLINE request that wait for their latest start, taking surplus
+    /// meanwhile (`request_regime`).
+    pub waiting: Vec<WaitingAsset>,
 }
+
+/// An asset waiting for the latest start of its BY_DEADLINE request.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
+pub struct WaitingAsset {
+    pub asset_id: String,
+    /// When it starts at full effort unless surplus has shortened its time to target by then.
+    pub start_by: chrono::DateTime<chrono::Utc>,
+}
+
+/// How long before the latest possible start a BY_DEADLINE request starts anyway (15 minutes).
+/// Additive, not proportional: once the asset runs at full effort its time to target falls
+/// by exactly what the clock advances, so the slack stays put and the request stays started
+/// with nothing stored (openspec `opportunistic-deadline-dispatch` D3).
+pub const DEADLINE_MARGIN_S: f64 = 900.0;
 
 /// The active requests under the opportunistic objective, per asset: how each is served
 /// (`UserRequestMode::non_planning_dispatch`) and the targets the assets must know to say
@@ -68,16 +85,18 @@ pub fn opportunistic_requests(
 ) -> OpportunisticRequests {
     let mut out = OpportunisticRequests::default();
     for (id, session) in ev_sessions_now {
-        out.dispatch_by_asset
-            .insert(id.clone(), session.mode.non_planning_dispatch());
+        out.dispatch_by_asset.insert(
+            id.clone(),
+            session.mode.non_planning_dispatch(session.departure_time),
+        );
         out.targets
             .ev_soc_target_frac_by_asset
             .insert(id.clone(), session.target_soc_frac);
     }
     for (id, target) in heater_targets {
-        let dispatch = target.mode.non_planning_dispatch();
+        let dispatch = target.mode.non_planning_dispatch(target.ready_by);
         out.dispatch_by_asset.insert(id.clone(), dispatch);
-        if dispatch == NonPlanningDispatch::StartNow {
+        if dispatch != NonPlanningDispatch::SurplusOnly {
             out.targets
                 .heater_ceiling_c_by_asset
                 .insert(id.clone(), target.target_temp_c);
@@ -87,46 +106,88 @@ pub fn opportunistic_requests(
         .iter()
         .filter(|l| l.earliest_start <= now && now < l.latest_end)
     {
-        out.dispatch_by_asset
-            .insert(load.asset_id.clone(), load.mode.non_planning_dispatch());
+        out.dispatch_by_asset.insert(
+            load.asset_id.clone(),
+            load.mode.non_planning_dispatch(load.latest_end),
+        );
     }
     out
 }
 
-/// How the active requests shape this tick (openspec `opportunistic-objective` D4): the base
-/// commands the pass starts from, and the assets it leaves alone.
+/// What the requests (and the assets' own declarations) make of this tick: the base commands
+/// the pass starts from, the assets it leaves alone, and the ones still waiting to start.
+pub struct RequestRegime {
+    pub base: HashMap<String, f64>,
+    pub excluded: BTreeSet<String>,
+    pub waiting: Vec<WaitingAsset>,
+}
+
+/// How the active requests shape this tick (openspec `opportunistic-objective` D4 and
+/// `opportunistic-deadline-dispatch` D3, D4).
 ///
 /// A start-now request runs its asset at full effort (`cap_max_import_kw`, which the asset
 /// already reports as zero once the request's target, injected into the asset, is reached) and
-/// takes no surplus on top. A surplus-only request makes its asset take surplus whatever its
-/// surplus switch says. An asset with no request takes surplus unless it is a surplus-charging
-/// asset (an EV, by its declared lever kind) whose own switch is off (`ev_surplus_switch_on`:
-/// its opportunistic-charging setting, `PUT /ev-settings`).
+/// takes no surplus on top. A start-by request does the same from its latest start, the
+/// deadline less the asset's own time to target and `DEADLINE_MARGIN_S`; until then it takes
+/// part in the pass like a surplus-only request, and an asset that declares no time to target
+/// starts at once. A surplus-only request makes its asset take surplus whatever its surplus
+/// switch says. An asset with no request is served as it declares
+/// (`AssetSnapshot::dispatch_without_request`, a plugged-in EV below target: start now), unless
+/// it is a surplus-charging asset (an EV, by its declared lever kind) whose own switch is off
+/// (`ev_surplus_switch_on`: its opportunistic-charging setting, `PUT /ev-settings`): it then
+/// takes no part.
 pub fn request_regime(
     sim: &crate::controller::SimSnapshot,
     mut base: HashMap<String, f64>,
     requests: &HashMap<String, NonPlanningDispatch>,
     ev_surplus_switch_on: impl Fn(&str) -> bool,
-) -> (HashMap<String, f64>, BTreeSet<String>) {
+    now: chrono::DateTime<chrono::Utc>,
+) -> RequestRegime {
     let mut excluded = BTreeSet::new();
-    for (id, snap) in &sim.assets {
-        match requests.get(id) {
-            Some(NonPlanningDispatch::StartNow) => {
-                base.insert(id.clone(), snap.cap_max_import_kw);
-                excluded.insert(id.clone());
-            }
-            Some(NonPlanningDispatch::SurplusOnly) => {}
+    let mut waiting = Vec::new();
+    for (id, snap) in sim.assets_in_roster_order() {
+        let dispatch = match requests.get(id) {
+            Some(dispatch) => Some(*dispatch),
             None if snap
                 .arbiter_lever
                 .is_some_and(|l| l.kind == ArbiterLeverKind::SurplusCharge)
                 && !ev_surplus_switch_on(id) =>
             {
-                excluded.insert(id.clone());
+                excluded.insert(id.to_string());
+                continue;
             }
-            None => {}
+            None => snap.dispatch_without_request,
+        };
+        let starts_now = match dispatch {
+            Some(NonPlanningDispatch::StartNow) => true,
+            Some(NonPlanningDispatch::StartBy(deadline)) => match snap.full_effort_time_to_target_s
+            {
+                Some(time_to_target_s) => {
+                    let lead_s = (time_to_target_s + DEADLINE_MARGIN_S).ceil();
+                    let start_by = deadline - chrono::Duration::seconds(lead_s as i64);
+                    let start = now >= start_by;
+                    if !start {
+                        waiting.push(WaitingAsset {
+                            asset_id: id.to_string(),
+                            start_by,
+                        });
+                    }
+                    start
+                }
+                None => true,
+            },
+            Some(NonPlanningDispatch::SurplusOnly) | None => false,
+        };
+        if starts_now {
+            base.insert(id.to_string(), snap.cap_max_import_kw);
+            excluded.insert(id.to_string());
         }
     }
-    (base, excluded)
+    RequestRegime {
+        base,
+        excluded,
+        waiting,
+    }
 }
 
 /// One tick of dispatch without look-ahead. `base` is each asset's own command before the
@@ -149,13 +210,17 @@ pub fn opportunistic_step(
     now: chrono::DateTime<chrono::Utc>,
     stages: &super::DispatchStages,
 ) -> ArbiterOutcome {
-    let (base, excluded) = request_regime(
+    let regime = request_regime(
         tick.sim,
         defaults,
         &requests.dispatch_by_asset,
         ev_surplus_switch_on,
+        now,
     );
-    let outcome = opportunistic_pass(tick, &base, &excluded);
+    let mut outcome = opportunistic_pass(tick, &regime.base, &regime.excluded);
+    if let Some(pass) = outcome.opportunistic.as_mut() {
+        pass.waiting = regime.waiting;
+    }
     super::dispatch_stages(outcome, tick, now, stages)
 }
 

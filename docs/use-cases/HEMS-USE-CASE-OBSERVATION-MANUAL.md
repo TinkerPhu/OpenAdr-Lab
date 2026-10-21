@@ -1099,9 +1099,12 @@ point is the comparison: the same site, the same day, with and without the plann
 **What the controller should do:** under the `Opportunistic` objective no plan allocation is
 followed. Each tick the site balance is shared out in the order each asset declares (EV, heater,
 shiftable loads, battery): a surplus is absorbed, an import is covered by storage, and the
-battery never discharges into export. A start-now request (`ASAP`, `BY_DEADLINE`) runs its asset
-at full power at once; a surplus-only request (`OPPORTUNISTIC`, `*_FREE`) waits for a surplus.
-An import limit still bounds everything. The plan the VEN adopts is a forecast of exactly that
+battery never discharges into export. An `ASAP` request runs its asset at full power at once; a
+`BY_DEADLINE` request takes surplus while it can and starts at full power as late as the
+deadline allows (the asset's own time to target plus 15 minutes), so it is served by the
+deadline without looking at prices; a surplus-only request (`OPPORTUNISTIC`, `*_FREE`) waits for
+a surplus. A plugged-in EV below its target with no request is charged at once (the EV card's
+"Automatic surplus charging" switch turns that off). An import limit still bounds everything. The plan the VEN adopts is a forecast of exactly that
 dispatch, not an optimisation.
 
 **Suggested VEN:** VEN1 (battery, EV, heater, PV)
@@ -1124,10 +1127,13 @@ evening until its floor), not a schedule.
 chip says who set it.
 
 **Devices → Arbiter card → Opportunistic dispatch (no plan followed):** `Site balance before the
-ranked assets`, `Leading` (the asset taking surplus or covering import) and `Unresolved`.
+ranked assets`, `Leading` (the asset taking surplus or covering import), `Unresolved`, and a
+`Waiting` line per asset that holds a `BY_DEADLINE` request and starts by the time shown.
 
-**Requests:** an EV request in `BY_DEADLINE` mode starts charging within seconds even with no PV;
-one in `OPPORTUNISTIC` mode stays at 0 kW until there is a surplus.
+**Requests:** an EV request in `ASAP` mode starts charging within seconds even with no PV; one in
+`BY_DEADLINE` mode stays at 0 kW (listed under `Waiting`) until its latest start, or starts at
+once when the deadline leaves no slack; one in `OPPORTUNISTIC` mode stays at 0 kW until there is
+a surplus. An EV with no request charges as soon as it is plugged in.
 
 **Switching back:** choose **Cost** again; within a minute or two the plan header shows a solved
 plan and the assets follow its allocations again.

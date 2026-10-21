@@ -36,6 +36,8 @@ pub use live::{
     projected_landed_net_kw, projected_net_kw, projected_net_kw_except, tighten_generation,
     LiveKwByAsset,
 };
+#[cfg(test)]
+pub use opportunistic::DEADLINE_MARGIN_S;
 pub use opportunistic::{
     opportunistic_requests, opportunistic_step, OpportunisticOutcome, OpportunisticRequests,
     RequestTargets,

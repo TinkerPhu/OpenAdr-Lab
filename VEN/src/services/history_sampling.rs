@@ -259,6 +259,8 @@ mod tests {
                 ac_ceiling_kw: None,
                 arbiter_lever: None,
                 surplus_claim_rank: None,
+                full_effort_time_to_target_s: None,
+                dispatch_without_request: None,
                 roster_index: 0,
             },
         );
@@ -534,6 +536,8 @@ mod tests {
                 ac_ceiling_kw: None,
                 arbiter_lever: None,
                 surplus_claim_rank: None,
+                full_effort_time_to_target_s: None,
+                dispatch_without_request: None,
                 roster_index: 0,
             },
         );

@@ -34,10 +34,32 @@ Feature: Running without planning (opportunistic objective, UC-19)
     When a sustained base-load step of 2.0 kW starts
     Then the VEN net site power stays between -0.2 and 0.3 kW for 10 seconds within 45 seconds
 
-  Scenario: A BY_DEADLINE EV request charges at once, without look-ahead
+  Scenario: An ASAP EV request charges at once
+    Given the site has no PV, the EV plugged at 0.3 SoC, the heater in its band and the battery at 0.1 SoC
+    And the VEN runs under the "opportunistic" objective
+    When I POST a mode EV session with mode "ASAP" and no budget
+    Then within 30 seconds the "ev" draws at least 2 kW
+
+  # The session helper asks 0.9 from 0.3 within 8 hours: about 4.9 hours at full power, so the
+  # latest start is some 3 hours away and, with no surplus, the EV draws nothing until then
+  # (the rule and its margin are pinned by `controller/arbiter/tests/opportunistic_tests.rs`).
+  Scenario: A BY_DEADLINE EV request waits for its latest start
     Given the site has no PV, the EV plugged at 0.3 SoC, the heater in its band and the battery at 0.1 SoC
     And the VEN runs under the "opportunistic" objective
     When I POST a mode EV session with mode "BY_DEADLINE" and no budget
+    Then the "ev" stays at or below 0.1 kW for 20 seconds within 40 seconds
+
+  # Five hours is shorter than the 4.9 hours at full power plus the margin: the latest start has
+  # passed, so the EV charges at once.
+  Scenario: A BY_DEADLINE EV request starts when its deadline leaves no slack
+    Given the site has no PV, the EV plugged at 0.3 SoC, the heater in its band and the battery at 0.1 SoC
+    And the VEN runs under the "opportunistic" objective
+    When I POST a mode EV session with mode "BY_DEADLINE" ending in 5 hours and no budget
+    Then within 30 seconds the "ev" draws at least 2 kW
+
+  Scenario: A plugged-in EV with no request charges
+    Given the site has no PV, the EV plugged at 0.3 SoC, the heater in its band and the battery at 0.1 SoC
+    And the VEN runs under the "opportunistic" objective
     Then within 30 seconds the "ev" draws at least 2 kW
 
   Scenario: An OPPORTUNISTIC EV request waits for a surplus
@@ -51,7 +73,7 @@ Feature: Running without planning (opportunistic objective, UC-19)
     And the site has no PV, the EV plugged at 0.3 SoC, the heater in its band and the battery at 0.1 SoC
     And the simulator imposes an import limit of 3.0 kW
     And the VEN runs under the "opportunistic" objective
-    When I POST a mode EV session with mode "BY_DEADLINE" and no budget
+    When I POST a mode EV session with mode "ASAP" and no budget
     Then the VEN net site power stays at or below 3.05 kW for 15 seconds within 60 seconds
 
   Scenario: Switching back to a planning objective lets the plan drive again

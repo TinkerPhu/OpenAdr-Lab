@@ -162,6 +162,14 @@ impl Asset for ShiftableLoadAsset {
         Some(super::shiftable_declared::SURPLUS_CLAIM_RANK)
     }
 
+    /// What is left of its run: it draws its fixed power for `duration_min`, so the full run
+    /// before it starts and the remainder once it has.
+    fn full_effort_time_to_target_s(&self, state: &AssetState) -> Option<f64> {
+        let s: &ShiftableLoadState = own(state);
+        let remaining_min = (self.duration_min as f64 - s.elapsed_min).max(0.0);
+        Some(crate::entities::units::s_from_min(remaining_min))
+    }
+
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
         let s: &ShiftableLoadState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);

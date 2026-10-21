@@ -212,8 +212,13 @@ fn the_same_balance_commands_the_same_setpoints_every_tick() {
 
 mod request_regime {
     use super::*;
-    use crate::controller::arbiter::opportunistic::request_regime;
-    use crate::entities::design_vocabulary::NonPlanningDispatch::{StartNow, SurplusOnly};
+    use crate::controller::arbiter::opportunistic::{request_regime, DEADLINE_MARGIN_S};
+    use crate::entities::design_vocabulary::NonPlanningDispatch::{StartBy, StartNow, SurplusOnly};
+    use chrono::{DateTime, Duration, TimeZone, Utc};
+
+    fn now() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 7, 14, 20, 0, 0).unwrap()
+    }
 
     fn defaults(sim: &SimSnapshot) -> HashMap<String, f64> {
         sim.assets
@@ -222,44 +227,190 @@ mod request_regime {
             .collect()
     }
 
+    /// The EV's own time to its target at full effort, as it declares it.
+    fn time_to_target(sim: &SimSnapshot) -> Duration {
+        let s = sim.assets["ev"].full_effort_time_to_target_s.unwrap();
+        Duration::milliseconds((s * 1000.0) as i64)
+    }
+
+    fn margin() -> Duration {
+        Duration::seconds(DEADLINE_MARGIN_S as i64)
+    }
+
+    fn ev_at(soc_frac: f64) -> AssetParams {
+        AssetParams::Ev(EvParams {
+            initial_soc_frac: soc_frac,
+            soc_target_frac: 0.8,
+            ..EvParams::default()
+        })
+    }
+
     #[test]
     fn a_start_now_request_runs_at_full_effort_and_takes_no_surplus_on_top() {
         let sim = site(&[ev(), battery(0.5)]);
         let requests = [("ev".to_string(), StartNow)].into();
-        let (base, excluded) = request_regime(&sim, defaults(&sim), &requests, |_| true);
-        assert_eq!(base["ev"], sim.assets["ev"].cap_max_import_kw);
-        assert!(base["ev"] > 0.0);
-        assert!(excluded.contains("ev"));
-        assert!(!excluded.contains("battery"));
+        let r = request_regime(&sim, defaults(&sim), &requests, |_| true, now());
+        assert_eq!(r.base["ev"], sim.assets["ev"].cap_max_import_kw);
+        assert!(r.base["ev"] > 0.0);
+        assert!(r.excluded.contains("ev"));
+        assert!(!r.excluded.contains("battery"));
+        assert!(r.waiting.is_empty());
     }
 
     #[test]
     fn a_surplus_only_request_takes_surplus_even_with_the_switch_off() {
         let sim = site(&[ev()]);
         let requests = [("ev".to_string(), SurplusOnly)].into();
-        let (base, excluded) = request_regime(&sim, defaults(&sim), &requests, |_| false);
-        assert_eq!(base["ev"], 0.0);
-        assert!(!excluded.contains("ev"));
+        let r = request_regime(&sim, defaults(&sim), &requests, |_| false, now());
+        assert_eq!(r.base["ev"], 0.0);
+        assert!(!r.excluded.contains("ev"));
+    }
+
+    /// With no request the switch decides: on, a plugged-in EV below target charges at once
+    /// (an implicit ASAP request); off, it takes no part.
+    #[test]
+    fn a_plugged_in_ev_below_target_charges_without_a_request_when_its_switch_is_on() {
+        let sim = site(&[ev(), battery(0.5)]);
+        let r = request_regime(&sim, defaults(&sim), &HashMap::new(), |_| true, now());
+        assert_eq!(r.base["ev"], sim.assets["ev"].cap_max_import_kw);
+        assert!(r.base["ev"] > 0.0);
+        assert!(r.excluded.contains("ev"));
+        assert!(!r.excluded.contains("battery"));
     }
 
     #[test]
-    fn without_a_request_the_assets_own_switch_decides() {
+    fn without_a_request_a_switched_off_ev_draws_nothing_and_takes_no_part() {
         let sim = site(&[ev(), battery(0.5)]);
         let off_for_ev = |id: &str| id != "ev";
-        let (_, excluded) = request_regime(&sim, defaults(&sim), &HashMap::new(), off_for_ev);
-        assert!(excluded.contains("ev"));
-        assert!(!excluded.contains("battery"));
+        let r = request_regime(&sim, defaults(&sim), &HashMap::new(), off_for_ev, now());
+        assert_eq!(r.base["ev"], 0.0);
+        assert!(r.excluded.contains("ev"));
+        assert!(!r.excluded.contains("battery"));
     }
 
     /// The switch is an EV's setting: a battery or heater takes surplus whatever it says.
     #[test]
     fn the_surplus_switch_governs_only_surplus_charging_assets() {
         let sim = site(&[ev(), battery(0.5), heater_at(50.0)]);
-        let (_, excluded) = request_regime(&sim, defaults(&sim), &HashMap::new(), |_| false);
+        let r = request_regime(&sim, defaults(&sim), &HashMap::new(), |_| false, now());
         assert_eq!(
-            excluded.into_iter().collect::<Vec<_>>(),
+            r.excluded.into_iter().collect::<Vec<_>>(),
             vec!["ev".to_string()]
         );
+    }
+
+    #[test]
+    fn an_ev_at_its_target_makes_no_request() {
+        let sim = site(&[ev_at(0.8)]);
+        assert_eq!(sim.assets["ev"].dispatch_without_request, None);
+        let r = request_regime(&sim, defaults(&sim), &HashMap::new(), |_| true, now());
+        assert_eq!(r.base["ev"], 0.0);
+        assert!(!r.excluded.contains("ev"));
+    }
+
+    #[test]
+    fn an_ev_that_is_away_makes_no_request() {
+        let mut state = crate::simulator::SimState::from_params(
+            &[ev(), AssetParams::Pv(PvParams::default())],
+            Utc::now(),
+        );
+        if let crate::assets::AssetState::Ev(s) =
+            &mut state.asset_mut(crate::ids::ASSET_EV).unwrap().state
+        {
+            s.plugged = false;
+        }
+        let sim = state.to_sim_snapshot();
+        assert_eq!(sim.assets["ev"].dispatch_without_request, None);
+        assert_eq!(sim.assets["ev"].full_effort_time_to_target_s, None);
+        let r = request_regime(&sim, defaults(&sim), &HashMap::new(), |_| true, now());
+        assert_eq!(r.base["ev"], 0.0);
+    }
+
+    /// A BY_DEADLINE EV with hours to spare draws nothing from the grid yet: it waits and
+    /// takes part in the pass (surplus), and the latest start is reported.
+    #[test]
+    fn a_by_deadline_request_waits_until_its_latest_start() {
+        let sim = site(&[ev()]);
+        let deadline = now() + time_to_target(&sim) + margin() + Duration::hours(3);
+        let requests = [("ev".to_string(), StartBy(deadline))].into();
+        let r = request_regime(&sim, defaults(&sim), &requests, |_| true, now());
+        assert_eq!(r.base["ev"], 0.0);
+        assert!(!r.excluded.contains("ev"));
+        assert_eq!(r.waiting.len(), 1);
+        assert_eq!(r.waiting[0].asset_id, "ev");
+        let lead = r.waiting[0].start_by - (deadline - time_to_target(&sim) - margin());
+        assert!(lead.num_milliseconds().abs() <= 1000, "{lead}");
+    }
+
+    #[test]
+    fn a_by_deadline_request_starts_at_full_effort_from_its_latest_start() {
+        let sim = site(&[ev()]);
+        let deadline = now() + time_to_target(&sim) + margin();
+        let requests = [("ev".to_string(), StartBy(deadline))].into();
+        let r = request_regime(&sim, defaults(&sim), &requests, |_| true, now());
+        assert_eq!(r.base["ev"], sim.assets["ev"].cap_max_import_kw);
+        assert!(r.excluded.contains("ev"));
+        assert!(r.waiting.is_empty());
+    }
+
+    /// Once running, the time to target falls with the clock, so the slack holds and the
+    /// request stays started with nothing stored.
+    #[test]
+    fn a_started_by_deadline_request_stays_started_as_the_clock_advances() {
+        let sim = site(&[ev()]);
+        let deadline = now() + time_to_target(&sim) + margin();
+        let requests = [("ev".to_string(), StartBy(deadline))].into();
+        let mut soc_frac = 0.4;
+        let params = EvParams::default();
+        for minute in 1..=30 {
+            soc_frac += params.max_charge_kw / 60.0 / params.battery_kwh;
+            let sim = site(&[ev_at(soc_frac)]);
+            let later = now() + Duration::minutes(minute);
+            let r = request_regime(&sim, defaults(&sim), &requests, |_| true, later);
+            assert!(r.excluded.contains("ev"), "minute {minute}");
+        }
+    }
+
+    /// Surplus taken while waiting shortens the time to target, so the latest start moves later.
+    #[test]
+    fn surplus_taken_while_waiting_moves_the_latest_start_later() {
+        let deadline = now() + Duration::hours(12);
+        let requests = [("ev".to_string(), StartBy(deadline))].into();
+        let start_by = |soc_frac: f64| {
+            let sim = site(&[ev_at(soc_frac)]);
+            let r = request_regime(&sim, defaults(&sim), &requests, |_| true, now());
+            r.waiting[0].start_by
+        };
+        let params = EvParams::default();
+        let gained_h = 2.0 / params.max_charge_kw;
+        let shift = start_by(0.4 + 2.0 / params.battery_kwh) - start_by(0.4);
+        assert!(
+            (shift.num_seconds() as f64 - gained_h * 3600.0).abs() <= 2.0,
+            "{shift}"
+        );
+    }
+
+    #[test]
+    fn a_deadline_that_cannot_be_met_starts_at_once() {
+        let sim = site(&[ev()]);
+        let deadline = now() + time_to_target(&sim) - Duration::minutes(10);
+        let requests = [("ev".to_string(), StartBy(deadline))].into();
+        let r = request_regime(&sim, defaults(&sim), &requests, |_| true, now());
+        assert_eq!(r.base["ev"], sim.assets["ev"].cap_max_import_kw);
+        assert!(r.excluded.contains("ev"));
+    }
+
+    /// The heater declares no time to target: its BY_DEADLINE request is served as ASAP.
+    #[test]
+    fn a_by_deadline_request_without_a_declared_time_to_target_starts_at_once() {
+        let sim = site(&[heater_at(40.0)]);
+        assert_eq!(sim.assets["heater"].full_effort_time_to_target_s, None);
+        let deadline = now() + Duration::hours(12);
+        let requests = [("heater".to_string(), StartBy(deadline))].into();
+        let r = request_regime(&sim, defaults(&sim), &requests, |_| true, now());
+        assert_eq!(r.base["heater"], sim.assets["heater"].cap_max_import_kw);
+        assert!(r.excluded.contains("heater"));
+        assert!(r.waiting.is_empty());
     }
 
     /// A start-now EV under the opportunistic pass: full rate now, whatever the PV output.
@@ -267,7 +418,8 @@ mod request_regime {
     fn a_start_now_ev_charges_at_full_rate_without_pv() {
         let sim = site(&[ev(), battery(0.5)]);
         let requests = [("ev".to_string(), StartNow)].into();
-        let (base, excluded) = request_regime(&sim, defaults(&sim), &requests, |_| true);
+        let regime = request_regime(&sim, defaults(&sim), &requests, |_| true, now());
+        let (base, excluded) = (regime.base, regime.excluded);
         let live: HashMap<String, f64> = [
             (crate::ids::ASSET_PV.to_string(), 0.0),
             (crate::ids::ASSET_BASE_LOAD.to_string(), 0.5),
@@ -299,7 +451,7 @@ mod request_regime {
 
 mod requests {
     use crate::controller::arbiter::opportunistic_requests;
-    use crate::entities::design_vocabulary::NonPlanningDispatch::{StartNow, SurplusOnly};
+    use crate::entities::design_vocabulary::NonPlanningDispatch::{StartBy, StartNow, SurplusOnly};
     use crate::entities::design_vocabulary::UserRequestMode;
     use crate::entities::device_session::{EvSession, HeaterTarget, ShiftableLoad};
     use chrono::{Duration, TimeZone, Utc};
@@ -337,7 +489,7 @@ mod requests {
     }
 
     #[test]
-    fn each_request_is_served_as_its_mode_declares_with_its_target() {
+    fn each_request_is_served_as_its_mode_declares_with_its_target_and_deadline() {
         let mut session = EvSession::simulated("ev", 0.8, now(), now() + Duration::hours(5), now());
         session.mode = UserRequestMode::Opportunistic;
         let sessions = HashMap::from([("ev".to_string(), session)]);
@@ -348,7 +500,10 @@ mod requests {
         let loads = [shiftable(UserRequestMode::Asap, 0)];
         let r = opportunistic_requests(now(), &sessions, &heaters, &loads);
         assert_eq!(r.dispatch_by_asset["ev"], SurplusOnly);
-        assert_eq!(r.dispatch_by_asset["heater"], StartNow);
+        assert_eq!(
+            r.dispatch_by_asset["heater"],
+            StartBy(now() + Duration::hours(3))
+        );
         assert_eq!(r.dispatch_by_asset["washer"], StartNow);
         assert_eq!(r.targets.ev_soc_target_frac_by_asset["ev"], 0.8);
         assert_eq!(r.targets.heater_ceiling_c_by_asset["heater"], 55.0);

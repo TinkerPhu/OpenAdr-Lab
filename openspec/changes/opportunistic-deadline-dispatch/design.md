@@ -66,7 +66,8 @@ Option<NonPlanningDispatch>`, carried on the snapshot: the EV declares `StartNow
 away because the declaration already depends on the switch. The switch keeps its meaning in planning
 objectives (the surplus overlay); under this objective "on" now means "charge automatically", which the
 EV card says. Alternative: a second setting for "charge greedily" - rejected for now: one more switch for a
-behaviour no user would turn off while leaving surplus charging on; reopen on evidence. A predicted
+behaviour no user would turn off while leaving surplus charging on; reopen on evidence. As built, the EV's switch lives in its settings, not on the asset, so
+`request_regime` still gates a switched-off EV and the declaration says only what the EV would do if allowed. A predicted
 departure (`usage_forecast`) is not a deadline: it is too uncertain to wait on (probability, jitter), which is
 why the implicit request is ASAP, not BY_DEADLINE.
 

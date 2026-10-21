@@ -371,6 +371,11 @@ a view of what the fleet expects to draw either way, and a way back.
   other, one after the other. Every
   VEN also reports a `USAGE_FORECAST` to the VTN, ad hoc: at once when its plan's objective
   changes, else every 15 minutes (`WIRE_PROFILE.md` v3).
+- **Reading the comparison:** the opportunistic baseline serves the same demand: an EV left
+  plugged in is charged at once (no request) or by its deadline (`BY_DEADLINE`), never left idle.
+  Its saving against the planners is the tariff's shape, not knowledge: the latest start is
+  price-blind. Planned import energy alone does not say whether the owners got the charge they
+  needed; a service-level reading (state of charge at departure) is an open issue.
 - **Drill-down:** a row opens to that VEN's adopted plan (net and per-asset power, from the same
   plan store, `GET /api/fleet/vens/:ven/plan`); under the opportunistic objective it is a
   simulated forecast.

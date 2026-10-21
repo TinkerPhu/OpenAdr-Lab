@@ -16574,3 +16574,28 @@ for this one item; clippy raises no dead-code warning for the trait method.
 and BFF lockfiles took the fixed releases with `cargo update -p`. The BFF still held `webpki-roots` 0.26.11
 through sqlx 0.8.6's `runtime-tokio-rustls` feature, which has no fixed 0.26; its sqlx features are now
 `runtime-tokio` + `tls-rustls-ring-native-roots` (the system's CA store instead of the bundled roots).
+
+### 054: the opportunistic objective serves what the request says
+
+**What.** Under the opportunistic objective an ASAP request starts now, a BY_DEADLINE request takes surplus and starts at
+full power at its latest start (deadline - the asset's own time to target - 15 minutes), and a plugged-in EV below
+target with no request is an implicit ASAP request (its switch turns that off). `NonPlanningDispatch::StartBy`,
+`Asset::full_effort_time_to_target_s` and `Asset::dispatch_without_request` on `AssetSnapshot`,
+`opportunistic::request_regime(.., now)` returning a `RequestRegime`, `OpportunisticOutcome.waiting` shown on the Arbiter
+card. Tests: `controller/arbiter/tests/opportunistic_tests.rs`, `a_waiting_by_deadline_ev_is_planned_idle_*` in
+`simulator/tests/opportunistic_forecast_tests.rs`, `tests/features/ven_opportunistic_objective.feature`.
+
+**Why.** The first day-long fleet switch (2026-10-21): all 10 EVs (`usage_forecast`, so no stated request) charged
+0 kWh in the 16 hours after the switch against 66-93 kWh over the three days before, because they sit plugged in at
+night when there is no PV. The Fleet card read it as 36 % less planned import, mostly unserved demand, and the energy
+still imported cost more per kWh (0.111 to 0.172 EUR). A baseline must serve the same demand as what it is compared with.
+
+**Decisions.** The margin is additive: once the asset runs its time to target falls with the clock, so the slack stays
+put and the request stays started with nothing stored; a proportional margin would stop it again. The EV's switch is not
+an asset property (it lives in the settings), so the arbiter still gates a switched-off EV and the asset declares only
+what it would do if allowed (a small departure from the design's D4). A BY_DEADLINE heater still starts at once: it has
+no time to target (GB-59). The BDD scenario "A BY_DEADLINE EV request charges at once" was replaced by ASAP-at-once,
+BY_DEADLINE-waits, BY_DEADLINE-with-no-slack and plugged-in-EV-with-no-request scenarios, because its premise (BY_DEADLINE
+is start-now) is exactly what changed. GB-58: the Fleet card shows no service level.
+
+**Open.** The day-long run was under the old rules; it is repeated after deploy (openspec task 4.4).

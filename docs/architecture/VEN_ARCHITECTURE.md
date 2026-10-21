@@ -385,16 +385,39 @@ instead of solving (§2.3.3), and nothing a planning objective does changes.
 
 - **One step, live and forecast.** `controller::arbiter::opportunistic_step` is the whole
   decision: `request_regime` (a start-now request runs its asset at full power and takes it out
-  of the pass; an EV without a request and with its opportunistic switch off stays out),
+  of the pass, a start-by request does so from its latest start; a plugged-in EV below target
+  with no request is served as an implicit ASAP request; an EV without a request and with its
+  opportunistic switch off stays out),
   `opportunistic_pass` (the site balance shared out open-loop in the rank each asset declares,
   `Asset::surplus_claim_rank` carried on `AssetSnapshot`: a surplus is absorbed, storage covers
   import and never exports), then `dispatch_stages`, the stages every pass goes through
   (dispatch window, comms-loss clamp, limit pass; `controller/arbiter/stages.rs`). The arm
   follows no plan allocation anywhere: no plan slot, EV overlays built without a plan.
 - **Requests without look-ahead.** Each request mode declares how it is served
-  (`UserRequestMode::non_planning_dispatch`); an EV session's target and a heater's start-now
-  target reach the asset as per-asset tick inputs, so the asset says when it is done (the heater
-  holds the target through its own ceiling latch).
+  (`UserRequestMode::non_planning_dispatch`, given the request's deadline): ASAP is `StartNow`,
+  BY_DEADLINE is `StartBy(deadline)`, the free modes and `MAX_COST` are `SurplusOnly`. An EV
+  session's target and a heater's target reach the asset as per-asset tick inputs, so the asset
+  says when it is done (the heater holds the target through its own ceiling latch).
+- **BY_DEADLINE: surplus first, then the latest start.** While it waits, a `StartBy` request
+  takes part in the pass like a surplus-only one. It starts at full power once
+  `now >= deadline - time_to_target - DEADLINE_MARGIN_S`, the time to target being the asset's
+  own declaration (`Asset::full_effort_time_to_target_s` on `AssetSnapshot`: the EV from its
+  state of charge, the shiftable load from its remaining run; the heater declares none and so
+  starts at once). The margin (15 minutes) is additive on purpose: once the asset runs, its time
+  to target falls with the clock, the slack stays put and the request stays started with nothing
+  stored; a proportional margin would grow the slack while running and stop it again. Surplus
+  taken while waiting shortens the time to target and so moves the start later. A deadline that
+  cannot be met starts at once. The rule reads no tariff and no forecast: it is price-blind, and
+  saves money only where the evening is dear and the early morning cheap, so it is not cost
+  optimisation. A fleet with similar deadlines starts within the same hour: a tariff-blind peak
+  that ASAP does not have. Required-rate charging (`remaining / time left`) was rejected: it
+  charges slowly through the evening peak.
+- **An unrequested EV.** `Asset::dispatch_without_request` (EV: `StartNow` while plugged and
+  below its target) makes a plugged-in EV an implicit ASAP request; its opportunistic switch
+  (`PUT /ev-settings`, default on) turns this off. A predicted departure (`usage_forecast`) is
+  not a deadline, which is why the implicit request is ASAP, not BY_DEADLINE. The fleet's first
+  opportunistic day (EVs left to surplus only: 0 kWh charged, import planned 36 % lower but
+  unserved) is why.
 - **Where commands land.** After the limit pass the shared stages also cut a lagging lever
   (the EV charger applies a command a tick late) so its command lands under the limit
   (`limit::hold_where_commands_land`, in `stages::dispatch_stages`, so for every objective);
@@ -407,7 +430,8 @@ instead of solving (§2.3.3), and nothing a planning objective does changes.
 Pinned by `controller/arbiter/tests/opportunistic_tests.rs`, the planning-mode tick golden
 (`tasks/sim_tick/tests/setpoints_golden.rs`, which must not change), and
 `tests/features/ven_opportunistic_objective.feature`. `GET /arbiter-diagnostics` carries the pass's
-outcome (`opportunistic`: site balance, leading asset, unresolved excess).
+outcome (`opportunistic`: site balance, leading asset, unresolved excess, and the assets
+`waiting` for their latest start with that start); the VEN UI's Arbiter card shows it.
 
 ### 2.2 Two-Speed Loop
 
