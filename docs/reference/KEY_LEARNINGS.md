@@ -3769,3 +3769,14 @@ A Python edit passed through a shell heredoc turned `\b` in a regex into a backs
 matched nothing, silently), and `open(path, "w")` with the default Windows encoding raised after truncating the file
 to zero bytes. Write both ways with explicit `encoding="utf-8"` and `newline=""`, build special characters from
 `chr`/`bytes` values, and prove a new audit rule by planting a violation and watching it fail.
+
+## A Mermaid parse error points at the node after the broken one; check with the real parser (module graph, 2026-10-21)
+
+The preview reported "Parse error on line 65 ... got 'STR'" at a harmless `RPTWIN` / `BLOG` node. The cause was the
+node before it: a label cut off mid-line with no closing `"]` (twice, `C_MILP` and `APPCTX`, committed that way for
+months), so the parser only noticed at the next node after the `end`. Separate traps in the same file: `&lt;` and `&gt;`
+in a label are read as a statement-ending `;` by Mermaid and, once replaced by `#lt;`, parsed but made the preview
+render both diagrams and then blank them; write such a label in plain words ("BoundedLog of T"). A link label that
+holds parentheses needs the `-.->|"text"|` form. Do not guess from the reported line: install `mermaid` plus `jsdom` in a scratch
+directory and call `mermaid.parse(text)` on the diagram block; it reproduced the preview's error exactly and showed each
+fix in seconds. To confirm a preview picks up edits at all, add a deliberate error line first.

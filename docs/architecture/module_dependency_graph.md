@@ -62,7 +62,7 @@ graph TB
               E_PARAMS["PlannerParams\nPlannerObjective\nSimulatorParams"]
           end
           subgraph CTRL["controller/"]
-              C_PORT_SIM["sim_snapshot.rs\nSimSnapshot\n(SimState::to_sim_snapshot)"]
+              C_PORT_SIM["sim_snapshot.rs\nSimSnapshot\nbuilt by SimState.to_sim_snapshot"]
               C_PORT_VTN["≪trait≫\nVtnPort\nfetch_events()\nfetch_reports()\nupsert_report()\nupdate_report()"]
               C_PORT_MILP["≪trait≫\nAssetMilpContext\ndeclare() → DeclaredAsset\nread() → AssetSolution"]
               C_DISPATCH["dispatcher.rs\nbuild_setpoints()"]
@@ -72,10 +72,10 @@ graph TB
               C_ACCUM["report_accumulator.rs\nappend + bounded trim"]
               C_REPORTER["reporter.rs\nbuild_telemetry_usage_report()\nbuild_status_report()"]
               C_TIMELINE["timeline.rs\nbuild_asset_timeline()"]
-              C_MILP["milp_planner/\nrun_planner()\nmodel_skeleton\nsolver_phase1\nsolver_phase2\nBatteryMilpContext\nEvMilpContext\nHeat
+              C_MILP["milp_planner/\nrun_planner()\nmodel_skeleton\nsolver_phase1\nsolver_phase2\nBatteryMilpContext\nEvMilpContext\nHeaterMilpContext\nShiftableLoadMilpContext"]
           end
-          RPTWIN["state/report_windows.rs\nper-(event,payload) interval windows"]
-          BLOG["state/bounded_log.rs\nBoundedLog&lt;T&gt; — notifications,\nevent log, report submissions,\nflexibility history"]
+          RPTWIN["state/report_windows.rs\nper event+payload interval windows"]
+          BLOG["state/bounded_log.rs\nBoundedLog of T — notifications,\nevent log, report submissions,\nflexibility history"]
           STATE["AppState\nactive_plan\nactive_requests\nev_session\ncapacity_state\ncontroller_trace\ntariff_ledger"]
       end
 
@@ -93,7 +93,7 @@ graph TB
               SIM_HEADROOM["site_headroom.rs\ncapacity_headroom.rs\ntake &SimState, so infra not domain"]
               SIM_INJECT["inject.rs\napply_state_injections()"]
               SIM_TICKIN["tick_inputs.rs\nTickInputs — one named\nobject for tick's 25 inputs"]
-              OWNSTATE["assets/own_state.rs\nown::&lt;S&gt;(state)\nthe config/state pairing,\ndeclared once, checked once"]
+              OWNSTATE["assets/own_state.rs\nown::S(state)\nthe config/state pairing,\ndeclared once, checked once"]
           end
           VTN_CLIENT["vtn.rs\nVtnClient\nOAuth2 HTTP client"]
           PROFILE["profile/\nProfile · AssetProfile (YAML)\nbuilds entities::asset_params"]
@@ -106,11 +106,11 @@ graph TB
       subgraph ENTRY["🚀 Entry / Context"]
           MAIN["main.rs\nconfigure · assemble · spawn · serve"]
           BOOT["boot/\nports.rs — every outbound adapter\nbackground.rs — every supervised loop\nserve.rs — router + shutdown persist\nWorld — the assembled state\nbuild_domain_params()"]
-          APPCTX["AppCtx\nstate: AppState\nvtn: VtnClient ⚠️ \nsim: Arc<Mutex<SimState>> ⚠️ \ntrigger_tx\nplanner_event_tx\
+          APPCTX["AppCtx\nstate: AppState\nvtn: Vtn (VtnPort)\nroster · headroom · sim_read (sim ports)\ntrigger_tx · planner_event_tx\nhistory · notifier · settings\ntelemetry · weather · comms_loss"]
       end
 
       %% Port implementations
-      SIM_STATE -. "to_sim_snapshot()" .-> C_PORT_SIM
+      SIM_STATE -.->|"to_sim_snapshot()"| C_PORT_SIM
       VTN_CLIENT -. "impl VtnPort" .-> C_PORT_VTN
       A_BAT -. "impl AssetMilpContext" .-> C_PORT_MILP
       A_EV -. "impl AssetMilpContext" .-> C_PORT_MILP
