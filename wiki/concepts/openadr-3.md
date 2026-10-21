@@ -39,10 +39,9 @@ one or several — has its own page: [[openadr-programs]].
 - **ISO 8601 durations**: `M` before `T` is months, after `T` is minutes — `P2M` ≠ `PT2M`
   (REQUIREMENTS.md §2.7).
 
-> **CONTRADICTION** (version skew, intentional): the spec markdown in
-> `docs/openadr_3_1_specs/` is **OpenADR 3.1**, which contains breaking changes relative
-> to the 3.0-era implementation this lab targets (`openleadr-rs`). Treat spec citations as
-> 3.1; treat the running system as 3.0-generation. Migration to 3.1 is a distant goal —
-> see [[vision-and-roadmap]].
+> The spec markdown in `docs/openadr_3_1_specs/` is **OpenADR 3.1**, and the running system
+> is 3.1 too (VTN, BFF, seed and VEN wire types migrated, 2026-09). What remains is VEN-side
+> conformance (TLS, subscriptions, `/auth/server`, `DELETE /reports/{id}`) — see
+> [[vision-and-roadmap]] and `docs/BACKLOG_OpenADR_Cert.md`.
 
 The DR business context (roles, baselines, M&V) is in [[demand-response]].

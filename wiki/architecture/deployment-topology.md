@@ -2,7 +2,7 @@
 title: Deployment Topology
 type: architecture
 created: 2026-07-04
-updated: 2026-08-09
+updated: 2026-10-21
 synced_commit: 4c4f149
 sources: [docs/architecture/VTN_ARCHITECTURE.md, .claude/CLAUDE.md, docs/guidelines/TESTING.md, fleet.sh, VEN/scale_out/node2/]
 tags: [deployment, docker, node1]
@@ -22,6 +22,7 @@ Everything runs in Docker on **Node1** (reached via ssh), directory
 | VTN database | `vtn-db-1` | 8201 |
 | VTN BFF | — | 8220 |
 | VTN UI | — | 8221 |
+| Lab MQTT broker (`lab-mqtt`) | — | 1884 |
 | VEN 1–3 | `ven-ven-{1,2,3}-1` | 8211–8213 |
 | VEN UI | `ven-ui-1` | 8214 |
 | Fleet VENs (Phase 2, optional) | `ven-fleet-ven-{i:03d}-1` | 8300+i |
@@ -37,7 +38,7 @@ the Pi already runs ~20 of those unrelated containers with limited headroom.
 ## Node2: build/test offload, not a second production stack
 
 **Node2** is a second docker host (`.claude/CLAUDE.md` §node2-lock) that runs `ven-4`
-through `ven-13` (`VEN/scale_out/node2/docker-compose.yml`) plus build/test load taken off
+through `ven-20` (`VEN/scale_out/node2/docker-compose.yml`; the fleet is N=20 with ven-1..3 on Node1) plus build/test load taken off
 Node1 — it shares the same [[docker-host-lease-lock]] mechanism as Node1, its own
 independent lock keyed by host, so the two can be used concurrently by different sessions.
 Node2 has no local VEN UI container: it proxies `/api/vens-registry` to Node1's real BFF
@@ -48,13 +49,25 @@ out and the `openleadr-rs` submodule initialized, so all four [[testing-strategy
 there, not just Rust unit tests — see `test-host-preference` in `.claude/CLAUDE.md` for when
 to prefer Node2 over Node1 for a build/test run.
 
+## Node3: the CI host
+
+**Node3** runs the CI runner and web board, tests every handed-over branch and is the only thing that
+merges to `main`; it builds release images of `origin/main` and switches Node1/Node2 over on deploy
+tickets, and lends Node2/Node1 as extra test lanes through the same lease lock. See [[ci-pipeline]].
+
+## Lab broker
+
+`lab-mqtt` (port 1884, per-client ACL) carries VTN notifiers and the per-VEN fleet channel; the house
+broker on :1883 carries site measurements. Details: [[fleet-monitoring]].
+
 ## Development environments
 
 - **Local Rust**: native Windows cargo lacks cmake/HiGHS, so all Rust compilation goes
   through WSL (`wsl cargo check` / `wsl cargo test`) (`.claude/CLAUDE.md` §local-rust).
   The HiGHS dependency comes from the [[milp-planner]].
 - **Local UI**: `cd VEN/ui && npm test` / `npm run build` (same for `VTN/ui`).
-- **Full-stack runs**: only on Node1 (`docker compose build/up`), including the E2E and
-  resilience suites described in [[testing-strategy]].
+- **Full-stack runs**: on a docker host (Node2 preferred, Node1 for production-stack checks), normally
+  driven by the Node3 runner ([[ci-pipeline]]); the E2E and resilience suites are described in
+  [[testing-strategy]].
 - Deployments follow git pull on the Pi; builds are ARM64 (first VTN source build took
   ~25 min, cached afterwards — docs/history/project_journal.md §1).

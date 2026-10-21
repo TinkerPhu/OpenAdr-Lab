@@ -2,7 +2,7 @@
 title: Testing Strategy
 type: architecture
 created: 2026-07-04
-updated: 2026-08-03
+updated: 2026-10-21
 synced_commit: fab41e9
 sources: [docs/guidelines/TESTING.md, tests/features/, .claude/CLAUDE.md, run_all_tests.sh]
 tags: [testing, bdd, pyramid]
@@ -20,13 +20,19 @@ sessions cannot corrupt each other's stacks on the shared Node1.
 |---|---|---|---|
 | 1 | UI unit | local (`VEN/ui`, `VTN/ui`) | Vitest + React Testing Library |
 | 2 | Rust unit+integration | local WSL (`wsl cargo test -p ven-app`; `VTN/bff` has its own `cargo test`) | most tests need no HiGHS |
-| 3 | E2E BDD | Node1/Node2 docker | behave, 57 feature files / ~275 scenarios, incl. Playwright browser tests |
+| 3 | E2E BDD | Node1/Node2 docker | behave, 68 feature files, incl. Playwright browser tests |
 | 4 | Resilience | Node1 docker | failure-recovery scenarios (`--tags=@resilience`) |
 
 Suite 3 is the only gate that exercises the **built UI bundles** in a real
 browser — bundler-level breakage (e.g. an import-interop bug introduced by a
 vite major upgrade) passes vitest and tsc and is caught only here
 ([[ven-ui]]).
+
+The suites are run by the Node3 runner rather than by hand, with suite selection per changed path and
+lanes across hosts — see [[ci-pipeline]]. A failed E2E scenario is retried once and flaky ones are listed
+in the ticket's `result.md`. Merge also requires the Python audits (file sizes, duplication ratchet,
+debt gate, step definitions, VEN architecture). Wire-level behaviour has its own scenarios
+(`ven_wire_units.feature`, [[wire-contract]]).
 
 ## VEN Rust test pyramid
 

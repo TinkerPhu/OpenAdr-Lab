@@ -8,9 +8,11 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 
 ## Architecture
 - [[ven-hexagonal-architecture]] — ring map, ports, enforced invariants
-- [[vtn-stack]] — openleadr-rs, PostgreSQL, dual-credential BFF, operator UI
+- [[vtn-stack]] — openleadr-rs 3.1, PostgreSQL, single-credential BFF, signal workbench, operator UI
 - [[deployment-topology]] — Node1 docker stacks, port map, WSL dev environment, Node2 build/test-offload host (no local UI)
 - [[testing-strategy]] — four suites, VEN test pyramid, test-first and determinism rules
+- [[ci-pipeline]] — Node3 runner: handoff tickets, suite selection by path, multi-host lanes, deploy tickets, web board, merge gates
+- [[fleet-monitoring]] — lab-mqtt fleet channel (telemetry/trace/plan/objective), per-VEN ACL, BFF fleet modules, Fleet page, lab-core crate
 
 ## Components
 - [[milp-planner]] — two-phase HiGHS MILP, adoption gate, heater anchor, cross-asset interactions, session comfort curve (BL-34), peak-demand penalty threshold (BL-09), file map
@@ -25,6 +27,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[experiment-harness]] — scenario YAMLs, real-time runner, KPI extraction, comparison reports
 - [[notifications]] — user notification feed: ring + SSE + persistence, edge-triggered producers, dedup_key rolling-window collapse + history viewer
 - [[heuristics-pipeline]] — learned base-load baselines: trapezoid appliance noise, weekday/weekend EWMA profiles, planner/forecast consumers
+- [[opportunistic-objective]] — non-planning dispatch on the same site: one `opportunistic_step` live and as forecast, for planner-vs-baseline comparison
 - [[deviation-arbiter]] — single real-time reconciler: marginal-cost lever ranking, residual escalation to replan, replaces the twice-removed absorber + opportunistic overlay; battery/EV runaway-correction bug found and fixed, `/arbiter-diagnostics` readout added
 - [[weather-forecast]] — MQTT-ingested external forecast → physics-based PV generation, wired into both the planner and the live simulator's PV ground truth; source-liveness E2E coverage (R-56)
 - [[real-measurement-mqtt]] — real PV/baseline-load meter readings over MQTT (ven-1 only), 3-tier PV precedence (measured > weather > sin), two-gate (env var + profile) enablement, live-tick-only (never feeds the planner)
@@ -38,6 +41,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[sign-convention]] — grid-boundary signs, units, unit-suffix naming
 - [[tariffs-and-capacity]] — TariffSnapshot, capacity limits vs capacity state, stale-rate fallback
 - [[openadr-security]] — OAuth2 scopes, object privacy/targeting, TLS/webhook requirements
+- [[wire-contract]] — declared units/descriptors on every payload, `PayloadReader`, profile stricter than the spec
 - [[wiki-maintenance]] — how this wiki stays current (sync/ingest/query/lint workflow)
 
 ## Use Cases
@@ -64,4 +68,4 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[dso-retailer-unbundled-tariff-coordination]] — legally-unbundled DSO/retailer tariff coordination: multi-program protocol support, why an unbounded virtual DSO price is dishonest (shadows the real tariff), DLMP shadow-price duality with the envelope, regulator revenue-cap as the actual answer to "who sets the relation"
 
 ---
-Pages: 44 · Last sync: 2026-08-11 (75e199d: scoped to this change's own impact — history-envelope-persistence's capacity-limit-schedule persistence work — rather than the full 49389c1..HEAD range, which holds a large unrelated backlog already tracked in review.md's staged batches. New source page power-envelope-forecast-basis filed from docs/external_research/ (new ingest-input directory, first page of this type), explicitly marked open/unfinished. Updated: tariffs-and-capacity (new section distinguishing parse_capacity_state's collapsed scalar from parse_capacity_schedule's full schedule + its history persistence, linking to the new source page). Preceded same day by 2026-08-09's 49389c1..4c4f149 sync (83 commits: BL-41 Device Sessions API removal, R-62/63/64/65 dead-code cleanup, chart-primitives refactor, forecast-accuracy-tracking schema v8, ven-1 PV-injection root cause fixed — 16 pages updated in place, no new pages; full detail in log.md).
+Pages: 48 · Last sync: 2026-10-21 (4c4f149..f8f6775, partial: see log.md and review.md for the pages not yet re-verified).

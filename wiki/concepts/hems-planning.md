@@ -2,7 +2,7 @@
 title: HEMS Planning Concepts
 type: concept
 created: 2026-07-04
-updated: 2026-08-09
+updated: 2026-10-21
 synced_commit: 4c4f149
 sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems/, VEN/src/entities/device_session.rs, VEN/src/services/user_request.rs]
 tags: [hems, planning, sessions, domain]
@@ -77,6 +77,25 @@ no `/user-requests` equivalent at all (`CreateUserRequestBody`/`SessionType` don
 per-slot forecast adjustment); it's a genuinely separate capability, split off as its own
 backlog item (BL-42) to give it a Devices-tab UI surface, since the backend route was already
 live and tested with none.
+
+## EV session queue and trips
+
+An EV holds a **queue** of charging sessions (`EvSessionQueue`, `entities/device_session.rs`), ordered by
+window start and never overlapping; windows are half-open `[window_start, departure_time)`, so a
+departure may equal the next window start. The only way in is a checked `insert` that returns the ids it
+clashes with, so an overlapping queue is unrepresentable. A user's clashing request is refused with the
+clashing sessions named; the user may resolve it with `replace(replace_ids, session)`, which must name
+exactly the current conflict set (an `If-Match`-style precondition, not a boolean "force") and marks the
+displaced requests `Cancelled` in the same write guard. The VTN may no longer create EV sessions (R-100).
+Producers: user request, the EV's simulated usage schedule (skips around stated sessions), expected trips.
+With `engage_charge_planning` the planner charges ahead of a *predicted* departure; every trip in the
+horizon is planned for, and every kWh is valued by the comfort curve (no all-or-nothing core). Sessions,
+heater targets and EV settings are keyed by asset id, so a VEN may hold several assets of one kind
+(VEN_ARCHITECTURE §2.3.1). Tests: `tests/features/ev_usage_simulation.feature`, `ev_usage_forecast.feature`.
+
+## Non-planning comparison
+
+The same site can run without a plan: [[opportunistic-objective]].
 
 ## Accounting
 
