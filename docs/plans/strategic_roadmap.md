@@ -13,7 +13,7 @@
 
 | ID | Goal | Status |
 |----|------|--------|
-| **SG-1 Fleet** | Run a fleet of independent, *diverse* VEN agents against one VTN | **Built.** `fleet.sh up N` (bulk registration, personas, health checks); resource budget on Node1 caps practical size at N=3 base + fleet VENs |
+| **SG-1 Fleet** | Run a fleet of independent, *diverse* VEN agents against one VTN | **Built.** `fleet.sh up N` (bulk registration, personas, health checks); the fleet runs at N=20 (ven-1..3 on Node1, ven-4..20 on Node2) |
 | **SG-2 Control-method lab** | Observe and compare VTN control methods (tariffs, limits, alerts, SIMPLE, dispatch) | **Built and exercised.** Two full S-1…S-6 comparison runs done 2026-08-09/10 (non-persona baseline + persona re-run) — see `docs/history/project_journal.md`. Capacity limits/alerts measurably shift load; a price signal alone did not, in this run |
 | **SG-3 Report evaluation** | Judge the *usefulness* of VEN reports from the VTN side | **M&V-grade.** VTN recorder archives reports incl. `report_lag_s` (crash-fixed 2026-08-10); `BASELINE` reports ship (WP5.4, 2026-08-11) — `experiments/kpi.py`'s `event_impact_kwh` quantifies an event's actual impact from archived BASELINE vs. USAGE pairs |
 | **SG-4 Forecast from history** | VEN learns heuristics from its own past data | **Mostly done.** History store + learned weekday/weekend heuristics ship and feed the planner; a live weather feed (MQTT, `docs/architecture/weather_forecast.md`) now drives a physics-based PV forecast too. Remaining: the held-out-week validation demo and an external grid-CO₂ feed (BL-17) |
@@ -83,6 +83,23 @@ was fixed 2026-08-11. Two lower-priority, unblocked-independent items remain:
 | BL-13 | Early firm-up heuristic under flat rates |
 | Cluster H | Transport modernisation: TLS 1.2+ (cert MUST), webhooks/subscriptions, optional MQTT, `/auth/server` discovery, mDNS, gzip — tracked in `docs/BACKLOG_OpenADR_Cert.md` |
 
+### 3.4a OpenADR 3.1 conformance — what is left of the migration
+
+The stack runs 3.1 (VTN, BFF, seed, VEN wire types, `payloadDescriptors`). What is open is the
+VEN's conformance, audited row by row in `docs/BACKLOG_OpenADR_Cert.md`. Three MUSTs block
+certification (`DELETE /reports/{id}`, the fourth, is done: a client call only tests use):
+
+| Gap | Content |
+|-----|---------|
+| TLS 1.2+ (WP6.5) | Plain HTTP today; an unverified-TLS setting and a deployment that uses `https://` |
+| Subscriptions / webhooks (WP6.6) | `POST /subscriptions`, callback route, echo challenge; polling stays as fallback. The VTN's own MQTT notifier is also non-conformant (`docs/plans/mqtt_notifier_conformance.md`) |
+| `/auth/server` discovery (WP6.5) | Hardcoded `/auth/token`; discover, fall back, cache |
+
+Further, by lower impact: payload families not handled (CONTROL_*, DISPATCH_INSTRUCTION,
+CURVE/OLS, five alert types), status/rolling reports and the ignored `reportDescriptor` fields,
+then the SHOULD/OPTIONAL remainder (mDNS, gzip, `GET` by id, non-authenticating mode).
+Opt-in/opt-out stays de-prioritised below; VEN self-registration (GB-51) is closed by decision.
+
 The standing decision holds: **lab-learning first** — transport work doesn't change
 fleet dynamics at 30 s poll resolution; revisit when latency experiments or
 certification become goals. Dependency audits are clean as of 2026-07-16
@@ -134,8 +151,6 @@ not `experiments/run_experiment.py`'s scenario YAMLs).
 
 ## 5. Explicitly de-prioritised
 
-- **OpenADR 3.0→3.1 migration** — distant goal; the spec copies in
-  `docs/openadr_3_1_specs/` are 3.1, the implementation targets 3.0-era openleadr-rs.
 - **Opt-in/opt-out signalling** — becomes interesting only when fleet *participation
   choice* is an experiment variable.
 - **Capacity negotiation (`OadrCapacityRequest`)** — no driving experiment yet (S-7
@@ -155,5 +170,3 @@ not `experiments/run_experiment.py`'s scenario YAMLs).
   authenticates every client. Comments that cite "R-54" refer to this entry.
 - **MQTT notifier conformance** — planned in `docs/plans/mqtt_notifier_conformance.md`; the lab's
   VENs poll over HTTP, so it changes nothing they do today (decision 2026-10-10).
-- **Fleet scale N=10** — the Node1 resource budget caps practical fleet size; larger
-  fleets need a second host or lighter VEN builds.
