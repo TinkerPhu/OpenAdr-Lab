@@ -75,3 +75,6 @@ openspec/changes/pv-self-consumption-reward/*
 
 # TypeScript incremental build state (generated)
 *.tsbuildinfo
+
+# scratch screenshots
+/shot_*.png
