@@ -37,6 +37,8 @@ pub fn snapshot_from_asset(
         ac_ceiling_kw: asset.ac_ceiling_kw(),
         arbiter_lever: asset.arbiter_lever(),
         surplus_claim_rank: asset.surplus_claim_rank(),
+        full_effort_time_to_target_s: asset.full_effort_time_to_target_s(&state),
+        dispatch_without_request: asset.dispatch_without_request(&state),
         roster_index: 0,
     }
 }

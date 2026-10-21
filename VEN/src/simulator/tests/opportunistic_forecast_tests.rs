@@ -164,3 +164,39 @@ fn the_forecast_pv_equals_the_input_series() {
     let pv: Vec<f64> = trace.net_kw_by_asset["pv"].iter().map(|kw| -kw).collect();
     assert_eq!(pv, series.to_vec());
 }
+
+/// A BY_DEADLINE EV is planned idle until its latest start and at full power from there: the
+/// forecast runs the live tick's decision, so the wait is in the plan too.
+#[test]
+fn a_waiting_by_deadline_ev_is_planned_idle_and_then_at_full_power() {
+    use crate::controller::arbiter::DEADLINE_MARGIN_S;
+    let sim = sim_with(|p| matches!(p, AssetParams::Ev(_) | AssetParams::BaseLoad(_)));
+    let time_to_target_s = sim.to_sim_snapshot().assets["ev"]
+        .full_effort_time_to_target_s
+        .expect("the plugged-in EV declares its time to target");
+    // The latest start falls on the start of slot 6, three hours in.
+    let start_by = t0() + chrono::Duration::hours(3);
+    let deadline =
+        start_by + chrono::Duration::seconds((time_to_target_s + DEADLINE_MARGIN_S).ceil() as i64);
+    let by_deadline = move |_: DateTime<Utc>| SlotRequests {
+        requests: OpportunisticRequests {
+            dispatch_by_asset: HashMap::from([(
+                "ev".to_string(),
+                NonPlanningDispatch::StartBy(deadline),
+            )]),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let grid = grid(16, |_| 0.0, 0.5);
+    let trace = opportunistic_forecast(sim, &grid, &site(&[], &by_deadline));
+    let ev = &trace.net_kw_by_asset["ev"];
+    assert!(
+        ev[1..6].iter().all(|&kw| kw < 0.1),
+        "idle until the start: {ev:?}"
+    );
+    assert!(
+        ev[8..10].iter().all(|&kw| kw > 2.0),
+        "full power after it: {ev:?}"
+    );
+}

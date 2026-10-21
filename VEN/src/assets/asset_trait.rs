@@ -268,6 +268,23 @@ pub trait Asset: Send + Sync {
     /// the kind's MILP context returns, so live dispatch and plan attribution share one order.
     fn surplus_claim_rank(&self) -> Option<u8>;
 
+    /// Seconds this asset needs at full effort to reach the target it currently holds, or
+    /// `None` if it cannot say (heater: needs its thermal model) or has nothing to reach (EV
+    /// not plugged in). The one place energy becomes time, so the arbiter's latest start
+    /// (`opportunistic::request_regime`) converts nothing itself.
+    fn full_effort_time_to_target_s(&self, _state: &AssetState) -> Option<f64> {
+        None
+    }
+
+    /// How this asset is served when it holds no request, or `None` to leave it to the surplus
+    /// pass. Only the EV answers: a plugged-in EV below its target is an implicit ASAP request.
+    fn dispatch_without_request(
+        &self,
+        _state: &AssetState,
+    ) -> Option<crate::entities::design_vocabulary::NonPlanningDispatch> {
+        None
+    }
+
     /// The lever this asset offers the deviation arbiter, or `None` if it offers none.
     fn arbiter_lever(&self) -> Option<crate::entities::asset::ArbiterLever> {
         None

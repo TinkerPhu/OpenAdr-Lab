@@ -89,7 +89,7 @@ function LimitReadout({ limit }: { limit: LimitPassOutcome | null }) {
 }
 
 /** The opportunistic objective's pass (no plan followed): the site balance it shared out,
- * the asset that led, and what no asset could take. */
+ * the asset that led, what no asset could take, and the assets waiting for their latest start. */
 function OpportunisticReadout({ result }: { result: OpportunisticOutcome }) {
   return (
     <Stack spacing={0.5} data-testid="arbiter-opportunistic-diagnostics">
@@ -104,6 +104,11 @@ function OpportunisticReadout({ result }: { result: OpportunisticOutcome }) {
       <Typography variant="body2" color={Math.abs(result.unresolved_kw) > 0 ? "warning.main" : undefined}>
         Unresolved: <strong>{formatKwOrDash(result.unresolved_kw)}</strong>
       </Typography>
+      {result.waiting.map((w) => (
+        <Typography variant="body2" key={w.asset_id} data-testid={`arbiter-opportunistic-waiting-${w.asset_id}`}>
+          Waiting: <strong>{w.asset_id}</strong> starts by {new Date(w.start_by).toLocaleTimeString()}
+        </Typography>
+      ))}
     </Stack>
   );
 }

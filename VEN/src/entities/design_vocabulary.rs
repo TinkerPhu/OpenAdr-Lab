@@ -45,13 +45,15 @@ impl UserRequestMode {
     }
 
     /// How a request in this mode is served when nothing plans ahead (the opportunistic
-    /// objective, openspec `opportunistic-objective` D4). The cost-aware modes cannot wait for
-    /// a cheaper hour nobody forecast, so they start now; the free-energy modes take surplus
-    /// only. `MAX_COST` takes surplus only too: without a price forecast, surplus is the only
+    /// objective, openspec `opportunistic-objective` D4). ASAP cannot wait, so it starts now.
+    /// BY_DEADLINE takes surplus while it can and starts by its `deadline` (openspec
+    /// `opportunistic-deadline-dispatch` D1); the free-energy modes take surplus only.
+    /// `MAX_COST` takes surplus only too: without a price forecast, surplus is the only
     /// energy known to fit any budget.
-    pub fn non_planning_dispatch(&self) -> NonPlanningDispatch {
+    pub fn non_planning_dispatch(&self, deadline: DateTime<Utc>) -> NonPlanningDispatch {
         match self {
-            Self::Asap | Self::ByDeadline => NonPlanningDispatch::StartNow,
+            Self::Asap => NonPlanningDispatch::StartNow,
+            Self::ByDeadline => NonPlanningDispatch::StartBy(deadline),
             Self::AsapFree | Self::ByDeadlineFree | Self::MaxCost | Self::Opportunistic => {
                 NonPlanningDispatch::SurplusOnly
             }
@@ -64,6 +66,9 @@ impl UserRequestMode {
 pub enum NonPlanningDispatch {
     /// The asset runs at full effort toward the request's target from now on.
     StartNow,
+    /// The asset takes PV surplus until its latest start (the deadline less its own time to
+    /// target and a margin), then runs at full effort: `request_regime` decides which.
+    StartBy(DateTime<Utc>),
     /// The asset takes PV surplus toward the request's target, nothing from the grid.
     SurplusOnly,
 }
@@ -183,20 +188,21 @@ pub struct TimeRange {
 mod tests {
     use super::*;
 
-    /// Every mode answers how it is served without look-ahead: the cost-aware ones start now,
-    /// everything gated by free energy or a budget takes surplus only.
+    /// Every mode answers how it is served without look-ahead: ASAP starts now, BY_DEADLINE
+    /// starts by its deadline, everything gated by free energy or a budget takes surplus only.
     #[test]
-    fn non_planning_dispatch_starts_the_cost_aware_modes_and_gives_the_rest_surplus() {
-        use NonPlanningDispatch::{StartNow, SurplusOnly};
+    fn non_planning_dispatch_starts_asap_now_and_by_deadline_by_its_deadline() {
+        use NonPlanningDispatch::{StartBy, StartNow, SurplusOnly};
+        let deadline = Utc.with_ymd_and_hms(2026, 7, 14, 17, 0, 0).unwrap();
         for (mode, want) in [
             (UserRequestMode::Asap, StartNow),
-            (UserRequestMode::ByDeadline, StartNow),
+            (UserRequestMode::ByDeadline, StartBy(deadline)),
             (UserRequestMode::AsapFree, SurplusOnly),
             (UserRequestMode::ByDeadlineFree, SurplusOnly),
             (UserRequestMode::MaxCost, SurplusOnly),
             (UserRequestMode::Opportunistic, SurplusOnly),
         ] {
-            assert_eq!(mode.non_planning_dispatch(), want, "{mode:?}");
+            assert_eq!(mode.non_planning_dispatch(deadline), want, "{mode:?}");
         }
     }
     use chrono::TimeZone;

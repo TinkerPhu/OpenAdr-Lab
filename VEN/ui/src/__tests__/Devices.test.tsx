@@ -767,13 +767,35 @@ describe("DevicesPage", () => {
     });
     mockArbiterDiagnosticsData.mockReturnValue({
       ...emptyArbiterDiagnostics,
-      opportunistic: { site_kw: -2.5, leading_asset_id: "ev", absorbing: true, unresolved_kw: 0 },
+      opportunistic: { site_kw: -2.5, leading_asset_id: "ev", absorbing: true, unresolved_kw: 0, waiting: [] },
       updated_at: "2026-10-16T08:00:00Z",
     });
     renderPage();
     const readout = screen.getByTestId("arbiter-opportunistic-diagnostics");
     expect(readout.textContent).toMatch(/-2\.50 kW/);
     expect(readout.textContent).toMatch(/ev \(taking surplus\)/);
+  });
+
+  // 16f''. An asset waiting for its latest start is named with that start
+  it("shows each asset waiting for its latest start", () => {
+    mockArbiterSettingsData.mockReturnValue({
+      deviation_arbiter_enabled: true,
+      limit_enforcement_enabled: true,
+    });
+    mockArbiterDiagnosticsData.mockReturnValue({
+      ...emptyArbiterDiagnostics,
+      opportunistic: {
+        site_kw: 0,
+        leading_asset_id: null,
+        absorbing: false,
+        unresolved_kw: 0,
+        waiting: [{ asset_id: "ev", start_by: "2026-10-16T04:30:00Z" }],
+      },
+      updated_at: "2026-10-16T08:00:00Z",
+    });
+    renderPage();
+    const waiting = screen.getByTestId("arbiter-opportunistic-waiting-ev");
+    expect(waiting.textContent).toMatch(/Waiting: ev starts by/);
   });
 
   // 16g. Why a correction is still held (R-88) is visible: the deviation it would leave

@@ -3729,3 +3729,12 @@ To see what a change did to the fleet, read the plans as accumulated energy, not
 its effect the moment that VEN has replanned, and the running totals separate long before the hours they
 cover have happened. Compare the same fleet under two conditions in turn, over the window both plans cover;
 two groups of VENs confound the condition with each VEN's assets.
+
+## A baseline must serve the same demand as what it is compared with (opportunistic fleet run, 2026-10-21)
+
+The opportunistic fleet showed 36 % less planned import than the planners, and it was true: its EVs were never
+charged, because the rule gave them surplus only and they are plugged in at night. Energy compared without the service it
+bought rewards the controller that serves less. Put a service level (state of charge at departure, unserved energy)
+beside any energy or cost figure, and check that a baseline's requests are honoured as stated (ASAP now, BY_DEADLINE by
+its deadline) before reading its saving. A latest-start rule keeps itself started when its margin is additive, because
+the time to target falls with the clock while the asset runs; a proportional margin grows the slack and stops it.

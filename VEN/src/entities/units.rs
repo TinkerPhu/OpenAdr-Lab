@@ -18,6 +18,16 @@ pub fn energy_kwh_from_min(power_kw: f64, minutes: f64) -> f64 {
     power_kw * minutes / 60.0
 }
 
+/// Seconds in `h` hours: the inverse of `dt_h_from_s`.
+pub fn s_from_h(h: f64) -> f64 {
+    h * 3600.0
+}
+
+/// Seconds in `minutes` minutes.
+pub fn s_from_min(minutes: f64) -> f64 {
+    minutes * 60.0
+}
+
 /// A fraction (0..1, e.g. a state of charge) as a percentage.
 pub fn pct_from_frac(frac: f64) -> f64 {
     frac * 100.0
@@ -42,6 +52,13 @@ mod tests {
     #[test]
     fn the_zone_a_step_is_a_twelfth_of_an_hour() {
         assert_eq!(dt_h_from_s(ZONE_A_STEP_S), 1.0 / 12.0);
+    }
+
+    #[test]
+    fn hours_and_minutes_become_seconds() {
+        assert_eq!(s_from_h(1.5), 5400.0);
+        assert_eq!(s_from_min(15.0), 900.0);
+        assert_eq!(dt_h_from_s(s_from_h(2.25)), 2.25);
     }
 
     #[test]

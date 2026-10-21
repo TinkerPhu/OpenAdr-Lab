@@ -137,6 +137,13 @@ pub struct AssetSnapshot {
     /// Where it stands in claiming PV surplus without look-ahead (`Asset::surplus_claim_rank`).
     #[serde(skip)]
     pub surplus_claim_rank: Option<u8>,
+    /// Seconds the asset needs at full effort to reach the target it holds
+    /// (`Asset::full_effort_time_to_target_s`); the latest start of a BY_DEADLINE request.
+    #[serde(skip)]
+    pub full_effort_time_to_target_s: Option<f64>,
+    /// How the asset is served with no request (`Asset::dispatch_without_request`).
+    #[serde(skip)]
+    pub dispatch_without_request: Option<crate::entities::design_vocabulary::NonPlanningDispatch>,
     /// The asset's place in the profile's roster: the arbiter's tie-break between levers of
     /// equal cost, the order EVs are offered a surplus in, and the order the VEN UI lists assets
     /// in (W6).
@@ -216,6 +223,8 @@ mod tests {
             ac_ceiling_kw: None,
             arbiter_lever: None,
             surplus_claim_rank: None,
+            full_effort_time_to_target_s: None,
+            dispatch_without_request: None,
             roster_index: 0,
         };
         assert_eq!(snap.val("soc"), Some(0.5));

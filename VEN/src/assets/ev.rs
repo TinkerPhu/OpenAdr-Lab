@@ -163,6 +163,13 @@ impl EvCharger {
         )
     }
 
+    /// Seconds at the full charge rate to lift the state of charge to the active target
+    /// (`soc_target_frac`, which a session's target overrides each tick); zero at or above it.
+    pub fn full_effort_time_to_target_s_inner(&self, state: &EvState) -> f64 {
+        let energy_kwh = (self.soc_target_frac - state.soc_frac).max(0.0) * self.battery_kwh;
+        crate::entities::units::s_from_h(energy_kwh / self.max_charge_kw)
+    }
+
     /// Point-in-time feasible power range.
     pub fn capability_inner(&self, state: &EvState) -> AssetCapability {
         if !state.plugged {
@@ -241,6 +248,23 @@ impl EvCharger {
 impl Asset for EvCharger {
     fn surplus_claim_rank(&self) -> Option<u8> {
         Some(super::ev_declared::SURPLUS_CLAIM_RANK)
+    }
+
+    fn full_effort_time_to_target_s(&self, state: &AssetState) -> Option<f64> {
+        let s: &EvState = own(state);
+        s.plugged
+            .then(|| self.full_effort_time_to_target_s_inner(s))
+    }
+
+    /// A plugged-in EV below its target is an implicit ASAP request (openspec
+    /// `opportunistic-deadline-dispatch` D4); at its target or away it has nothing to ask for.
+    fn dispatch_without_request(
+        &self,
+        state: &AssetState,
+    ) -> Option<crate::entities::design_vocabulary::NonPlanningDispatch> {
+        let s: &EvState = own(state);
+        (s.plugged && s.soc_frac < self.soc_target_frac)
+            .then_some(crate::entities::design_vocabulary::NonPlanningDispatch::StartNow)
     }
 
     fn key_features(&self, _state: &AssetState) -> Vec<KeyFeature> {

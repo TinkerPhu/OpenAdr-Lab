@@ -261,6 +261,7 @@ export function EvCard(props: EvCardProps) {
       <CardActions data-testid="ev-settings-section" sx={{ px: 2, flexDirection: "column", alignItems: "flex-start" }}>
         <FormControlLabel
           label="Automatic surplus charging"
+          title="Under the opportunistic objective, on also charges a plugged-in EV below its target at once; off, it draws nothing."
           control={
             <Switch
               checked={oppEnabled}

@@ -38,6 +38,17 @@ impl<'a> Asset for AssetHandle<'a> {
         self.config.surplus_claim_rank()
     }
 
+    fn full_effort_time_to_target_s(&self, state: &AssetState) -> Option<f64> {
+        self.config.full_effort_time_to_target_s(state)
+    }
+
+    fn dispatch_without_request(
+        &self,
+        state: &AssetState,
+    ) -> Option<crate::entities::design_vocabulary::NonPlanningDispatch> {
+        self.config.dispatch_without_request(state)
+    }
+
     fn id(&self) -> &str {
         self.id
     }

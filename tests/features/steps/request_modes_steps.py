@@ -6,8 +6,8 @@ from features.helpers.api_client import ven_get, ven_post, ven_delete
 from features.helpers.wait import poll_until
 
 
-def _post_mode_session(context, mode, budget_eur):
-    departure = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime(
+def _post_mode_session(context, mode, budget_eur, hours=8):
+    departure = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
     body = {
@@ -33,6 +33,11 @@ def step_post_mode_session_budget(context, mode, budget):
 @when('I POST a mode EV session with mode "{mode}" and no budget')
 def step_post_mode_session_no_budget(context, mode):
     _post_mode_session(context, mode, None)
+
+
+@when('I POST a mode EV session with mode "{mode}" ending in {hours:g} hours and no budget')
+def step_post_mode_session_ending_in(context, mode, hours):
+    _post_mode_session(context, mode, None, hours)
 
 
 @given("the PV plan forecast is pinned to 0 kW")

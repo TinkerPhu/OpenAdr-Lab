@@ -74,6 +74,8 @@ impl SimState {
                     ac_ceiling_kw: cfg.ac_ceiling_kw(),
                     arbiter_lever: cfg.arbiter_lever(),
                     surplus_claim_rank: cfg.surplus_claim_rank(),
+                    full_effort_time_to_target_s: cfg.full_effort_time_to_target_s(&entry.state),
+                    dispatch_without_request: cfg.dispatch_without_request(&entry.state),
                     roster_index,
                 },
             );
