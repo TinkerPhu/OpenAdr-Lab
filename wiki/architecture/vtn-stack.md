@@ -2,68 +2,59 @@
 title: VTN Stack — openleadr-rs, BFF, UI
 type: architecture
 created: 2026-07-04
-updated: 2026-07-31
-synced_commit: aff3f57
-sources: [docs/architecture/VTN_ARCHITECTURE.md, VTN/, openleadr-rs/, VTN/bff/src/]
+updated: 2026-10-21
+synced_commit: f8f6775
+sources: [docs/architecture/VTN_ARCHITECTURE.md, VTN/, openleadr-rs/, VTN/bff/src/, lab-core/src/]
 tags: [vtn, bff, openleadr-rs, architecture]
 ---
 
 # VTN Stack — openleadr-rs, BFF, UI
 
-The server side of [[openadr-lab]] (docs/architecture/VTN_ARCHITECTURE.md).
+The server side of [[openadr-lab]] (docs/architecture/VTN_ARCHITECTURE.md). The stack speaks
+OpenADR 3.1 ([[openadr-3]]).
 
 ## Components
 
 | Component | Tech | Port | Role |
 |---|---|---|---|
-| VTN server | `openleadr-rs` (git submodule, fork `TinkerPhu/openleadr-rs`) | 8200 | OAuth2 server + OpenADR 3 REST: programs, events, reports, VENs, resources |
-| Database | PostgreSQL 16 (`vtn-db-1`) | 8201 | 15 tables, SQLx auto-migration on first boot |
-| BFF | Rust/Axum proxy | 8220 | Dual-credential pattern (below) |
-| VTN UI | React + nginx | 8221 | Operator console |
+| VTN server | `openleadr-rs` (git submodule, fork `TinkerPhu/openleadr-rs`, built with `internal-oauth`) | 8200 | OAuth2 server + OpenADR REST: programs, events, reports, VENs, users |
+| Database | PostgreSQL 16 (`vtn-db-1`) | 8201 | SQLx auto-migration on first boot |
+| Lab broker | Mosquitto `lab-mqtt` | 1884 | VTN subscription notifiers + the fleet channel ([[fleet-monitoring]]) |
+| BFF | Rust/Axum proxy | 8220 | One business credential (below), signal workbench, fleet routes |
+| VTN UI | React + nginx | 8221 | Operator console: Events, Programs, VENs, Reports, Tariff, Signals, Fleet, Metrics |
 
-## The dual-credential BFF pattern
+## One credential: `bl-client`
 
-VTN RBAC separates roles: `any-business` can manage `/programs`, `/events`, `/reports`
-but **not** `/vens` (403); `ven-manager` is the reverse. No single credential can do both,
-so the BFF holds two `VtnClient` instances with independent OAuth tokens (refreshed on 401)
-and presents one unified API to the UI. The browser never holds OAuth secrets — it uses
-session-scoped API keys (docs/architecture/VTN_ARCHITECTURE.md §3). Rationale recorded in
-[[dto-pass-through]]'s sibling rule set; field names pass through unnormalised
-(`programName`, `createdDateTime`, …).
-
-One constraint worth remembering: `POST /reports` requires the **VEN role** — reports can
-only be created by VENs themselves, never by the BFF's business credential (§3).
+3.1 carries scopes on the user object, so one client holds everything the BFF needs
+(`read_all write_programs write_events write_vens_bl write_reports_bl write_users`). The 3.0
+two-credential split no longer exists. Scopes are written in full: the bare `write_vens` /
+`write_reports` are aliases for the *VEN* variant, whose code path overwrites `clientID` with the
+caller's token subject — a BFF granted the alias would create every VEN owned by itself and collide on
+`ven_client_id_unique`. `bl-client` is the only fixture user; every VEN user is created through the API
+with its scopes in the creation call, so no password hash is committed. Token handling is
+`lab_core::vtn_auth::ClientCredentials`, the same code the VEN uses: caches the token, re-authenticates
+once on 401/403, and is the only place a request is authenticated (an architecture-audit rule). The
+browser never holds OAuth secrets. Scope semantics: [[openadr-security]]. Field names pass through
+unnormalised ([[dto-pass-through]]).
 
 ## Protocol behaviour
 
-Event distribution is poll-based: operator creates/updates/deletes an event via the UI →
-BFF proxies to VTN → each VEN discovers the change on its next 30 s poll and re-plans
-(§4.2–4.4). OpenADR 3 has no cancel status — deletion *is* cancellation ([[openadr-3]]).
-The VEN-side counterpart is [[openadr-interface]].
+Event distribution is poll-based (per-profile interval with startup jitter): operator creates/updates/
+deletes an event → BFF proxies → each VEN sees the change on its next poll and replans. OpenADR 3 has no
+cancel status — deletion *is* cancellation. Reports carry `eventID` as their only object link (3.1
+removed `programID`). VEN side: [[openadr-interface]]; what a value means on the wire: [[wire-contract]].
 
-Auth facts that cost debugging time (journal-confirmed): token endpoint is
-`POST /auth/token` (not `/oauth/token`); token TTL 30 days; fixture users
-`any-business`, `ven-manager`, `user-manager`, `business-1`, `ven-1`.
+## BFF modules (`VTN/bff/src/`)
 
-How this maps onto the spec's Authentication/Authorization model (scopes, object privacy,
-transport requirements): [[openadr-security]].
+- `signal_workbench.rs` — `GET /api/signals/registry` (units per payload type, from
+  `lab_core::wire_contract`) and `POST /api/signals/preview` (a draft event expanded as receivers expand
+  it, via `lab_core::event_timing`). Backs the Tariff page's drag-on-chart editor, operators, templates
+  and forever-repeating tariffs (`P9999Y` duration); nothing here publishes.
+- `fleet*.rs` — live telemetry, trace, plan feed, reactions, objective command: [[fleet-monitoring]].
+- `recorder.rs` — optional (`DATABASE_URL`) write-once log of programs/events/reports/VEN snapshots in
+  the `lab_recorder.*` schema ([[history-store]]).
+- `cache.rs`, `error.rs`, `vtn_client.rs` — TTL cache, error mapping, the VTN client (tested against a
+  throwaway axum server, real HTTP).
 
-## Recorder (Phase 1, optional)
-
-`VTN/bff/src/recorder.rs` polls programs/events/reports/VEN snapshots through both
-`VtnClient`s and writes a write-once, deduplicated log into a `lab_recorder.*` Postgres
-schema — gated on `DATABASE_URL` being set (`main.rs`); the BFF behaves exactly as before
-if it isn't. `record_ven_snapshots` must use the `ven-manager` credential, not
-`any-business` — the same `/vens` role restriction as above bit this during Node1
-verification (403, not caught by unit tests since those mock the client). Full detail:
-[[history-store]].
-
-## BFF unit tests
-
-All four BFF support modules carry inline unit tests (`cargo test` in
-`VTN/bff`): `recorder.rs` (dedup keys, report-lag), `cache.rs` (TtlCache
-expiry/overwrite/invalidate), `error.rs` (every `AppError` maps to 502 with a
-JSON `error` body — the 4xx-flattening limitation is tracked as R-31), and
-`vtn_client.rs` (200/500/401-retry-once/health paths, exercised against a
-throwaway axum server on an ephemeral port — real HTTP, no new dev-dependency,
-so the OAuth retry loop is tested without mocking `reqwest`).
+The BFF depends on `lab-core` for every rule the VEN also needs (interval timing, time series, units,
+token handling).

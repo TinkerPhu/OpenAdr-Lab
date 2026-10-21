@@ -23,9 +23,8 @@ Where [[openadr-lab]] is headed, beyond the current branch.
   discovery (§3), no mDNS discovery (§1). Registration/identity and OAuth basics are
   largely covered. Full spec security model (scopes, object privacy, webhook hardening,
   the TLS MUST): [[openadr-security]].
-- **OpenADR 3.0 → 3.1 migration** — the spec copies in `docs/openadr_3_1_specs/` are
-  version **3.1**, which has breaking changes relative to the 3.0-era implementation this
-  lab builds on. Migration is a distant goal; see the version note in [[openadr-3]].
+- **OpenADR 3.1 conformance** — the stack itself runs 3.1 (migrated 2026-09). Three VEN-side
+  MUSTs are open: TLS, subscriptions/webhooks and `/auth/server` discovery; see `docs/plans/strategic_roadmap.md` §3.4a and [[openadr-3]].
 - **Upstream contributions** — the VTN runs a fork (`TinkerPhu/openleadr-rs`) of the
   upstream `OpenLEADR/openleadr-rs`; improvements worth generalising get PR'd upstream
   after full local test passes (`.claude/CLAUDE.md` upstream rules).

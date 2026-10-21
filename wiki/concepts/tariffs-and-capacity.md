@@ -65,6 +65,16 @@ schedule — it has no opinion on how a VTN should compute it. What a real DNSP'
 a plausible one rather than only relaying one, is an open external-research thread — see
 [[power-envelope-forecast-basis]].
 
+## One time-aware capacity schedule (GB-48)
+
+Every capacity quantity — import/export limit, subscription, reservation — is a segment of one
+priority-resolved `CapacitySnapshot` (`parse_capacity_schedule`); nothing "in force now" is stored.
+`tightest_over(span)` answers which value applies over a span (an instant is a zero-width span), so the
+planner caps each slot at the tightest overlapping limit (never above the contracted allowance), the tick
+and arbiter ask at the tick's `now` (a limit takes effect at its interval boundary, not at the next poll),
+and the API view is built when asked. The scalar above is a derived view of this schedule; interval timing itself is the shared `lab_core::event_timing` rule ([[wire-contract]]).
+Source: VEN_ARCHITECTURE §2.1 "Capacity schedule".
+
 ## Stale data
 
 When the VTN is unreachable, Step/LOCF extrapolation carries the **last known rate**
