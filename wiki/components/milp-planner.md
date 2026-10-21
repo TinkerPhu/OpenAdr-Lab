@@ -2,9 +2,9 @@
 title: MILP Planner
 type: component
 created: 2026-07-04
-updated: 2026-10-14
-synced_commit: 6a5a678
-sources: [docs/architecture/ven_milp_planner.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/controller/asset_milp_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning.rs, VEN/src/simulator/plan_context.rs, VEN/src/controller/milp_planner/solver_duals.rs, VEN/src/entities/asset.rs, VEN/src/entities/planner_params.rs, VEN/src/profile/validate.rs, VEN/src/assets/ev_milp.rs, VEN/src/assets/heater_milp.rs]
+updated: 2026-10-21
+synced_commit: a3a306b
+sources: [docs/architecture/ven_milp_planner.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/controller/asset_milp_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning/, VEN/src/simulator/plan_context.rs, VEN/src/entities/time_grid.rs, VEN/src/entities/plan_cost.rs, VEN/src/entities/comfort_spend.rs, VEN/src/controller/milp_planner/solver_duals.rs, VEN/src/entities/asset.rs, VEN/src/entities/planner_params.rs, VEN/src/profile/validate.rs, VEN/src/assets/ev_milp.rs, VEN/src/assets/heater_milp.rs]
 tags: [planner, milp, highs, optimization]
 ---
 
@@ -23,37 +23,69 @@ see [[milp-over-greedy]].
    within `phase2_epsilon_eur` of Phase 1's optimum; warm-starts from Phase 1
    (`solver_phase2.rs`).
 
-## How assets take part (2026-10-14)
+## One skeleton, three solves
 
-The planner core names no asset kind (`refactor/asset-declared-planner-model`). Each context
-declares its own variables for a solve (`AssetMilpContext::declare` → `DeclaredAsset`,
-`VEN/src/controller/asset_milp_port.rs`), states its net power for the one balance sum, contributes
-an `ObjectivePart::Cost` and an `ObjectivePart::Friction` priced by its own `FrictionCosts`, seeds
-phase 2 from its own phase-1 solution, and reads its part back as an `AssetSolution`; the plan's
-allocations, planned state, warnings and session flexibility come from what each asset declares.
-This replaced one pool slot per kind, `Phase2Weights`, the `c_startup_eur == 0.0` phase signal and
-the planner-side parameter copy `AssetScalars`, and it is what lets two batteries or two EVs be
-planned together (`VEN/src/controller/milp_planner/tests/multi_instance.rs`); since W7 a profile
-may hold several assets of one kind, each with its own id ([[asset-layer]]). Proof of identical plans: `tests/plans_golden.rs` plus
-the model fingerprint's sorted digests. Details: `docs/architecture/ven_milp_planner.md` "How
-assets take part"; the ring rule it enforces is in [[ven-hexagonal-architecture]] (audit rules 16
-and 17).
+Phase 1, phase 2 and the marginal-cost pass (below) solve the same economic model.
+`ModelSkeleton::declare` (`model_skeleton.rs`) builds it once — grid variables, penalty slacks, each
+asset's variables, the cross-asset interactions that apply; `cost_expr` is the one economic cost and
+`add_constraints` the one set of constraints. `Declaration::{Phase1, Phase2, Pinned}` is the only
+statement of how the solves differ, so phase 2's cost cap equals phase 1's optimum term for term and the
+priced model cannot drift from the planned one. A new grid variable or objective term is added there,
+once. The order variables and constraints are created in is part of the contract (HiGHS receives a
+function of it), pinned by `tests/model_fingerprint.rs` and `tests/plans_golden.rs`.
 
-The plan's wire format followed (`refactor/asset-declared-plan-output`, W2): the battery-named
-`bat_charge_kw`, `bat_discharge_kw` and `soc_trajectory_kwh` are gone (nothing read them; each
-storage asset's net power and SoC already travel under its own id), and `Plan.planned_asset_ids`
-names the assets a plan scheduled, idle ones included (`VEN/src/entities/plan.rs`). Readers ask
-`Plan::planned_assets()`, which also covers plans stored before the list existed; the forecast
-service and the [[ven-ui]] Decision Matrix do. Audit rule 16 now covers `entities/plan.rs`.
+## How assets take part
 
-PV and base load take part too (`refactor/pv-base-load-participants`, W3): each builds a
-`ForecastMilpContext` from its own forecast (`VEN/src/assets/forecast_declared.rs`), declared as a
-forecast participant (`Participation::Forecast`), never dispatched. PV owns its curtailment
-variable; base load is fixed net power. The plan keeps `pv_forecast_kw`, `pv_used_kw`,
-`baseline_kw` as site totals, and the forecast surplus has one computation
-(`MilpInputs::forecast_surplus_kw`). The planner reads weather only through the PV's own forecast
-([[weather-forecast]]); per-array forecasts and per-asset measurement topics are not built, as a
-profile holds one PV ([[asset-layer]]).
+The planner core names no asset kind; the audit (rules 16 and 17, [[ven-hexagonal-architecture]]) fails
+if `controller/milp_planner/`, `milp_interactions.rs` or `entities/plan.rs` does. It plans whatever
+contexts it is handed, each by its own roster id (`VEN/src/controller/asset_milp_port.rs`; each kind
+implements it in `VEN/src/assets/<kind>_declared.rs`, its model maths in `<kind>_milp.rs`):
+
+- **Declaration**: `AssetMilpContext::declare(n, DeclareMode, vars)` returns a `DeclaredAsset`.
+  `DeclareMode::Plan { friction }` declares every decision free (friction auxiliaries only for phase 2);
+  `DeclareMode::Pinned(&own AssetSolution)` fixes the asset's own winning mode decisions for the
+  marginal-cost pass. One function declares all three.
+- **Participation**: `Participation::{Dispatched, Forecast { role, forecast_kw }}`. PV and base load are
+  forecast participants (`assets/forecast_declared.rs`): never dispatched, no allocation, no share of the
+  malus. PV is curtailable (a used-generation variable bounded by its forecast, with a full-use
+  tie-break); base load contributes its forecast as fixed net power. Several PV arrays plan as one site
+  forecast; weather reaches the planner only through each PV's own forecast ([[weather-forecast]]). The
+  forecast surplus over base load has one computation (`MilpInputs::forecast_surplus_kw`).
+- **Balance**: each asset states its net power per slot (positive = import); the power balance is
+  `p_imp − Σ forecast net − Σ dispatched net − p_exp = load_adjust` (the user's baseline override).
+- **Objective**: `ObjectivePart::Cost` (wear, rewards, penalties for a missed promise) into `cost_expr`,
+  `ObjectivePart::Friction` (startups, ramps, relay switching, tier preference) into phase 2 only, priced
+  by the `FrictionCosts` built from `PlannerParams`.
+- **Interactions** couple roles, not kinds: the coexistence penalty pairs every asset offering a
+  discharge leg with every one offering an on/off indicator.
+- **Readback and plan**: each asset reads its part into an `AssetSolution` and seeds phase 2 from its own
+  phase-1 solution. Every per-asset fact on the plan is keyed by asset id (`allocations`,
+  `planned_kw_by_asset`, `planned_state_by_asset`, `session_flexibility`, `forecast_by_asset`), and
+  `Plan.planned_asset_ids` names the assets scheduled, idle ones included; readers ask
+  `Plan::planned_assets()`. Allocations claim PV surplus in each asset's `surplus_claim_rank`. The
+  plan keeps `pv_forecast_kw`, `pv_used_kw`, `baseline_kw` as site totals.
+
+A profile may hold several assets of one kind (`validate_asset_roster`); two batteries or two EVs plan
+like any others (`tests/multi_instance.rs`). The [[ven-ui]] Decision Matrix and the forecast service read
+the plan through `planned_assets()`.
+
+## Without a solve
+
+Under the [[opportunistic-objective]] the cycle does not solve: `plan_from_forecast` steps a clone of the
+site slot by slot and translates the trace into a `SIMULATED` plan that is always adopted.
+
+## Replan scheduling
+
+The periodic trigger is anchored to absolute time: `next_replan_at(now, replan_interval_s,
+replan_phase_offset_s)` (`entities/planner_params.rs`) returns the first instant strictly after `now` with
+`t ≡ offset (mod interval)`. The period is `replan_interval_s` whatever the solve costs (a post-cycle sleep
+would stretch it by the solve time and let fleet members drift into each other), and each VEN has a stable
+phase (`replan_phase_offset_s` hashes the VEN name with FNV-1a), so a fleet does not solve in one burst on
+a shared host. A cycle that overruns skips to the next grid point. Hard triggers bypass the grid, except
+that `RateChange` is held for a jittered interval (`planner.rate_change_trigger_delay_s` 30,
+`..._jitter_pct` 100, so uniform over 0–60 s) because a VTN rate update reaches every VEN at once;
+`Alert`, `CapacityChange` and `UserRequest` are never delayed. Pinned by `replan_schedule_tests` and
+`rate_change_delay_tests`.
 
 ## Key mechanics
 
@@ -72,7 +104,9 @@ profile holds one PV ([[asset-layer]]).
   as energy targets, deadline steps, and `MilpLoadMode` (MustRun/MayRun/MustNotRun) —
   the solver iterates over asset variables, never session objects
   (docs/architecture/VEN_ARCHITECTURE.md §2.3.1); see [[hems-planning]].
-- **Adoption gate** (`VEN/src/services/planning.rs`): a periodic plan is adopted only if
+- **Adoption gate** (`VEN/src/services/planning/`): a failed solve never competes on cost (it reports 0 €
+  and would otherwise replace a working plan): a failed plan never displaces one that solved, and a failed
+  plan in force yields to the first that solves. Then a periodic plan is adopted only if
   it beats the current plan's cost+friction by the effective threshold plus an optional
   per-extra-heater-switch surcharge (`gate_switch_penalty_eur`); hard triggers, a fully
   decayed threshold, or a current plan whose slots have all expired always adopt. Gate
@@ -120,8 +154,8 @@ profile holds one PV ([[asset-layer]]).
   (slack penalty when controllable load exceeds free PV surplus). Active only when their
   coefficient is non-zero.
 - **Heater anchor**: after adoption, the current heater block's tier binaries are pinned
-  for the next solves until the block ends (`services/planning.rs::build_heater_anchor`,
-  `anchor_until` in state) — prevents near-future chattering; hard triggers clear the
+  for the next solves until the block ends (`services::planning::build_heater_anchor`,
+  `heater_block_ends` keyed by heater id) — prevents near-future chattering; hard triggers clear the
   anchor. Off-blocks are never anchored (would drive the tank below its domain bound
   and make the MILP infeasible).
 - **Terminal energy rewards**: battery and heater get an end-of-horizon stored-energy
@@ -135,6 +169,10 @@ profile holds one PV ([[asset-layer]]).
   Phase 1 only). If Phase 2 comes back infeasible, the planner logs
   `"phase2 infeasible, falling back to phase1"` and adopts the Phase 1 schedule directly
   rather than crashing.
+- **Equal-cost EV slots are decided earliest-first**: battery-to-EV charging costs the same in every night
+  slot, and HiGHS breaks such ties arbitrarily (single-slot runs phase 2 could not merge). Every EV plan pays
+  the ASAP lateness term at a tie-breaking weight (`TIE_BREAK_LATENESS_EUR_KWH_H`, 1e-4, `assets/ev_milp.rs`);
+  earliest-first is contiguous. Pinned by `tests/phase2_spikes.rs`.
 - **Initial-slot pinning**: slot 0's heater mode variables (`z_heat_mid[0]`,
   `z_heat_full[0]`) are fixed to the live heater's actual power state at planning time, so
   `sw[0]` — and its Phase 2 switching penalty — reflects a real transition, not a solver
@@ -142,8 +180,9 @@ profile holds one PV ([[asset-layer]]).
 - **Adoption threshold decay**: `plan_adoption_decay_s` (default 0, no decay) linearly
   decays `plan_adoption_threshold_eur` to zero as the current plan ages, so a plan that
   once looked "good enough" doesn't block replans indefinitely as conditions drift.
-- **`solver_timeout_s`** (profile field, default 60 s) bounds the HiGHS time limit for
-  both phases — see [[reliability-and-config]] for this and the other profile-driven
+- **`solver_timeout_s`** (profile field, default 60 s) bounds the HiGHS time limit per phase;
+  `phase2_solver_timeout_s` (15 s) is phase 2's own budget; `mip_gap_target` is a measured, per-profile
+  knob (heater VENs; benchmarks in `docs/reference/R97_PLANNER_BENCHMARKS.md`) — see [[reliability-and-config]] for this and the other profile-driven
   config knobs.
 - **Marginal-cost extension** (`solver_duals.rs::solve_marginal_costs`,
   `docs/architecture/ven_milp_planner.md` §9): a second, cheap LP solve per planning cycle,
@@ -177,12 +216,7 @@ profile holds one PV ([[asset-layer]]).
   Phase 1's coarse allocation for free). No curve / empty `comfort_rates` (VTN-commanded
   sessions, e.g. a `CHARGE_STATE_SETPOINT`-created `EvSession` — BL-41 removed the direct-CRUD
   `/ev-session`/`/heater-target` create routes, see [[hems-planning]]) falls back to the
-  passed-in global defaults exactly. Rediscovered while wiring this: EV's `v_extra_eur_kwh` reward is
-  structurally inert for driving allocation (R-18, `TECHNICAL_DEBTS.md`) — `e_ev_extra` is
-  bounded only *above* by `e_extra_max_kwh × z_ev_core`, so the solver can bank the reward
-  without changing real charging; `v_core_eur`/`z_ev_core` is the half genuinely coupled to
-  allocation. The heater's tier reward has no equivalent gap (`z_heat_mid`/`z_heat_full` are
-  coupled to real tank-energy dynamics via constraint C2). BDD coverage proving the curve
+  passed-in global defaults exactly. Both halves of the EV reward — `v_core_eur`/`z_ev_core` and `v_extra_eur_kwh`/`e_ev_extra` — drive allocation (`ev_energy` equals core plus extra by equality, so a reward is banked only by charging); the heater's tier reward is coupled to real tank-energy dynamics. A curve can be entered as total spend from the current charge (`entities/comfort_spend.rs`, converted at the boundary into ordinary bids), and the maximum a curve can cost is the area under it over the asset's own bands (`entities::comfort::max_cost_eur`), shown beside the plan's spend (`entities::plan_cost::asset_planned_cost`, also behind a session's estimated cost). BDD coverage proving the curve
   actually reshapes a plan (not just unit-level reward wiring):
   `tests/features/ven_comfort_curve.feature`. See [[hems-planning]] for where
   `comfort_rates` is resolved and attached to a session.
@@ -216,7 +250,7 @@ profile holds one PV ([[asset-layer]]).
 | `SolverPort` trait + `SolveRequest` | `VEN/src/controller/solver_port.rs` |
 | Input tensors | `inputs.rs` (stage order, the full `MilpInputs` literal), `input_stages.rs` (one function per field group) |
 | Weights, `MilpInputs`, `SolveOutput` | `types.rs` |
-| Asset port (trait + var/context structs) | `asset_port.rs` |
+| Asset port (trait + declared/solution structs) | `VEN/src/controller/asset_milp_port.rs`; per kind `assets/<kind>_declared.rs` |
 | Phase 1 / Phase 2 | `solver_phase1.rs` / `solver_phase2.rs` |
 | Shared model skeleton (variables, cost, constraints) | `model_skeleton.rs` |
 | Stale-rate policy dispatch (WP4.4) | `stale_rates.rs` |
@@ -226,18 +260,18 @@ profile holds one PV ([[asset-layer]]).
 | Plan translation + fallback plan | `results.rs` |
 | Per-session flexibility envelopes | `session_flexibility.rs` |
 | Planning loop | `VEN/src/tasks/planning/mod.rs` (entry) + `cycle.rs` (terminal rewards, cycle inputs) |
-| Acceptance gate + heater anchor + cycle inputs | `VEN/src/services/planning.rs` |
+| Acceptance gate + heater anchor | `VEN/src/services/planning/` (`service.rs`) |
+| Slot layout, "which slot holds this instant" | `VEN/src/entities/time_grid.rs` |
+| Forecast plan (no solve) | `milp_planner/forecast_plan.rs`, `forecast_readback.rs` |
 | SimState-coupled cycle helpers (sim clone, PV-inject patch, `build_asset_contexts`) | `VEN/src/simulator/plan_context.rs` |
 
-The split between the last two rows is the port rule: `services/planning.rs`
+The split between the gate and the `SimState` rows is the port rule: `services/planning/`
 holds only pure/port-based logic, while everything needing the concrete
 `SimState` lives in the infra ring next to the simulator
 ([[ven-hexagonal-architecture]]).
 
-Per-slot baselines for `base_load` come from learned heuristics when available
-([[heuristics-pipeline]]) — `inputs.rs` samples
-`daytime_profile_kw[weekday_bucket][hour] × seasonal_factor` per slot, falling
-back to the profile's flat `baseline_kw` on cold-start. Shiftable-load starts use a deterministic earliest-start tie-break,
+Per-slot baselines for `base_load` come from its own heuristic-aware forecast ([[heuristics-pipeline]]),
+falling back to the profile's flat `baseline_kw` on cold-start. Shiftable-load starts use a deterministic earliest-start tie-break,
 so equal-cost windows always resolve to the same schedule across replans.
 
 The terminal-energy reward (`c_terminal`) model — why heater/battery terminal

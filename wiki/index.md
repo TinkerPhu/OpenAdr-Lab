@@ -15,7 +15,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[fleet-monitoring]] — lab-mqtt fleet channel (telemetry/trace/plan/objective), per-VEN ACL, BFF fleet modules, Fleet page, lab-core crate
 
 ## Components
-- [[milp-planner]] — two-phase HiGHS MILP, adoption gate, heater anchor, cross-asset interactions, session comfort curve (BL-34), peak-demand penalty threshold (BL-09), file map
+- [[milp-planner]] — two-phase HiGHS MILP on one shared model skeleton, assets declare their own part (no kind in the core), adoption gate, absolute replan grid with per-VEN phase, comfort curve, peak-demand penalty, file map
 - [[dispatcher]] — build_setpoints on the 1 s sim tick, surplus-EV overlay, shiftable-load runtimes
 - [[openadr-interface]] — event→signal translation tables, report obligations, poll_events/detect.rs split, events received now recorded to history (R-64)
 - [[simulator]] — physics models behind SimulatorPort, /sim endpoints (UI only), injectable clock/seedable RNG (R-24), sim-inject double-option null-clear fix, sim_inject_enabled gate + call-source logging + SIGTERM persist fix (R-65)
@@ -68,4 +68,4 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[dso-retailer-unbundled-tariff-coordination]] — legally-unbundled DSO/retailer tariff coordination: multi-program protocol support, why an unbounded virtual DSO price is dishonest (shadows the real tariff), DLMP shadow-price duality with the envelope, regulator revenue-cap as the actual answer to "who sets the relation"
 
 ---
-Pages: 48 · Last sync: 2026-10-21 (4c4f149..f8f6775, partial: see log.md and review.md for the pages not yet re-verified).
+Pages: 48 · Last sync: 2026-10-21 (scoped: ven-ui and milp-planner re-verified at a3a306b; other pages see review.md).
