@@ -2,156 +2,167 @@
 title: Asset Layer
 type: component
 created: 2026-07-04
-updated: 2026-10-14
-synced_commit: 6a5a678
-sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md, VEN/src/entities/asset_params.rs, VEN/src/entities/sim_inject.rs]
+updated: 2026-10-21
+synced_commit: 650b626
+sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, VEN/src/entities/asset.rs, VEN/src/entities/asset_params.rs, VEN/src/entities/sim_inject.rs, VEN/src/controller/asset_milp_port.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md]
 tags: [assets, abstraction, ven]
 ---
 
 # Asset Layer
 
 The device abstraction between the HEMS controller and the physics that produces the
-numbers (`VEN/src/assets/`). Three cooperating pieces:
+numbers (`VEN/src/assets/`). Four cooperating pieces:
 
-- **`Asset` trait** (`assets/asset_trait.rs`, split out of `assets/mod.rs` by the R-08
-  refactor below) — the physics contract: `step(state, setpoint_kw, dt) -> (new_state,
-  actual_kw)`, `capability(state)` (point-in-time feasible power range), plus
-  default-implemented `simulate_forward`, `simulate_free`, and `capability_trajectory`.
-  Identity/history methods (`id`, `current_state`, `history`) are provided by
-  `AssetHandle`, which wraps a config+entry pair.
-- **`AssetConfig` / `AssetState` enums** — config (physics parameters) and mutable
-  runtime state are separate enums with one variant per asset type (Battery, Ev,
-  Heater, Pv, BaseLoad); `AssetConfig` dispatch methods (`state_values`,
-  `control_schema`, `forecast`, `available_storage_kwh`, `build_milp_context`, …) are
-  the single switchboard. Adding an asset type = one new variant + one module.
-- **Per-asset history**: every `AssetEntry` in `SimState` carries a ring buffer of
-  3600 `HistoryPoint`s (≈ 1 h at 1 s tick) with LOCF lookups and time-weighted
-  averaging (`assets/history.rs`, split out of `assets/mod.rs` by the same R-08
-  refactor) — this feeds `/timeline`, `/history/:id`, and obligation reports
+- **`Asset` trait** (`assets/asset_trait.rs`) — one trait, implemented by `Battery`, `EvCharger`,
+  `Heater`, `PvInverter`, `BaseLoad` and `ShiftableLoadAsset`. The physics contract is
+  `step(state, setpoint_kw, dt) -> (new_state, actual_kw)` and `capability(state)` (the feasible
+  power range right now); `flexibility_floor` (the least the asset can still be forced to) has no
+  default, so every kind states it. The rest is what an asset *declares about itself* so that no
+  other module has to ask which kind it is: `kind() -> AssetKind`, `key_features`,
+  `state_values`, `control_schema`, `forced_power_kw`, `surplus_claim_rank`, `arbiter_lever`,
+  `request_kind`, `ac_ceiling_kw`, `storage_capacity_kwh`, `embodied_co2_g_kwh`,
+  `default_comfort_rates`, `is_cancellable`, `is_removable`. `simulate_forward` and the
+  max-effort pair (`max_effort_setpoint`, `max_effort_schedule`; `docs/architecture/VEN_ARCHITECTURE.md`
+  §3.0a) are default-implemented on top of `step`/`capability`.
+- **Optional capability traits** reached through `as_milp_participant()`, `as_request_resolvable()`,
+  `as_thermostat()`, `as_tick_overridable()` (`assets/capability_traits.rs`): a kind implements only
+  those it has real behaviour for. `MilpParticipant` builds the asset's planner context from one
+  `MilpBuildInputs`.
+- **`AssetState`** (state-only enum, one variant per kind plus `Grid`) paired with the physics struct;
+  `assets/own_state.rs` declares once where each kind's state sits in the enum, and `own` is the one
+  checked borrow (a mismatch is a bug in this binary and panics naming both kinds).
+- **Per-asset history**: every `AssetEntry` in `SimState` carries a ring buffer of 3600
+  `HistoryPoint`s (≈ 1 h at 1 s tick) with LOCF lookups and time-weighted averaging
+  (`assets/history.rs`) — this feeds `/timeline`, `/history/:id` and obligation reports
   ([[openadr-interface]]).
 
-## Dispatch macro refactor (R-08)
+`SimState` holds the roster as `asset_configs: Vec<Box<dyn Asset>>` beside `assets: Vec<AssetEntry>`
+(state, last setpoint, energy counter, history); `AssetHandle` wraps one such pair to answer the
+identity and history methods. There is no config enum: adding a kind is one module, one `AssetKind`
+variant and one `AssetState` variant, and every exhaustive `match` learns of it.
 
-`AssetConfig`'s 14 uniformly-shaped dispatch methods (`step`, `capability`, `forecast`,
-`state_values`, …) were hand-written 5-arm matches; two `macro_rules!` forwarders
-(`delegate_asset!`, `delegate_asset_state!` in `assets/mod.rs`) now declare the
-Battery|Ev|Heater|Pv|BaseLoad variant list once and generate them. The ~6
-asset-specific methods that only apply to a subset of variants (`plan_trajectory`,
-`build_milp_context`, …) are untouched — they aren't part of the `Asset` trait and have
-no uniform signature to generalize. The macro alone didn't clear `assets/mod.rs`'s
-500-line production cap, so the `Asset` trait/`AssetHandle` and the history ring buffer
-moved to `assets/asset_trait.rs` and `assets/history.rs` respectively; `assets/mod.rs` is
-no longer on `ci/audits/audit_file_sizes.py`'s allowlist.
+## Kind is declared, never read from the id
 
-A virtual **Grid asset** (`assets/grid.rs`, held as `SimState.grid_asset`) tracks net
-site power plus the VTN capacity limits each tick and keeps its own history; it is
-read-only — never dispatched.
+`AssetKind` (`entities/asset.rs`: `Pv`, `Battery`, `Ev`, `Heater`, `BaseLoad`, `ShiftableLoad`) is the
+one identifier of an asset's type, returned by `Asset::kind` and spelled `snake_case` on the wire and
+in a profile's `type:`. What an asset can *do* (a state of charge, an arbiter lever, a request kind)
+stays a question put to the asset, so a profile may hold several assets of one kind and none of the
+controller, planner or UI looks one up by a fixed id. A shiftable load is the one dynamic member: it
+is added when a request is accepted and removed when it finishes or is cancelled while pending
+(`SimState::add_asset`/`remove_asset`, `Asset::is_removable`). See [[milp-planner]] for the planner
+side and [[ven-ui]] for how the UI reads the kind.
 
-The Grid asset is the only virtual asset. A second one, `site-residual`
-(`residual_kw = grid meter − Σ modelled asset power`), existed from Phase 5
-WP5.1 until 2026-08-21; it was removed because `base_load` is itself derived
-externally as `grid_true − Σ(other asset measurements)`, which forces the
-residual to zero by construction — the site's unmetered load is `base_load`'s
-job in full ([[heuristics-pipeline]],
-`docs/architecture/forecasting_model.md`).
+## The site meter is not an asset
 
-**BaseLoad appliance noise** (Phase 5): a profile-configured `base_load.spikes`
-list adds trapezoidal daily appliance pulses (plateau at `amplitude_kw`, linear
-ramps, timing/magnitude jitter, optional weekday restriction, per-day firing
-probability; empty by default). Trapezoids, not Gaussians, because a
-trapezoid's energy is directly `≈ amplitude_kw × (duration_h − ramp_h)` —
-settable to match a real appliance session ([[heuristics-pipeline]]).
+`assets/grid.rs` (`Grid`, held as `SimState.grid_asset`) tracks net site power plus the VTN capacity
+limits each tick and keeps its own history. It implements no `Asset` and declares no `AssetKind`; the
+simulator reads its state and history directly, and nothing dispatches it. It is the only virtual
+quantity: the earlier `site-residual` pseudo-asset (`grid meter − Σ modelled asset power`) was removed
+because `base_load` is itself derived as `grid_true − Σ(other asset measurements)`, which forces the
+residual to zero by construction — the site's unmetered load is `base_load`'s job in full
+([[heuristics-pipeline]], `docs/architecture/forecasting_model.md`).
 
-> **DRIFT** `docs/architecture/VEN_ARCHITECTURE.md` §3.0 specifies a
-> `trait AssetInterface { current(); forecast(horizon); past(window) }` with
-> `SimulatedAsset`/`MeasuredAsset` implementations. None of these identifiers exist in
-> the code — the shape above (`Asset` + `AssetConfig` + `AssetHandle`) is what was
-> actually built. The *intent* survives (controller code consumes `SimSnapshot`s and
-> forecasts, never physics internals), but the doc section reads as an API reference for
-> an API that isn't there. See [[ven-code-vs-docs-audit]].
+**BaseLoad appliance noise**: a profile-configured `base_load.spikes` list adds trapezoidal daily
+appliance pulses (plateau at `amplitude_kw`, linear ramps, timing/magnitude jitter, optional weekday
+restriction, per-day firing probability; empty by default). Trapezoids, not Gaussians, because a
+trapezoid's energy is directly `≈ amplitude_kw × (duration_h − ramp_h)` — settable to match a real
+appliance session ([[heuristics-pipeline]]). `assets/load_window.rs` summarises the recorded power
+over the trailing 14 days (mean, peak) for the Controller's flexibility panel: the samples come from
+the history store, the interpretation is the asset's.
 
-## PV curtailment
+## PV
 
 `PvInverter` (`assets/pv.rs`) distinguishes `rated_kw` (DC nameplate, forecast ceiling) from
-`inverter_max_kw` (AC ceiling — DC potential clamps to it everywhere before any commanded
-limit). The live-simulator generation limit lives on per-tick `PvState.generation_limit_kw` /
-`curtailment_source` (`none`/`plan`/`capacity`/`manual`, persisted via `tick_samples` schema v6 —
-`RENAME COLUMN` from the pre-rename `export_limit_kw`) rather than on `PvInverter` itself, so a
-historical reconstruction reports the limit that was actually active at that tick, not the
-current one. `dispatcher::resolve_pv_generation_limit_kw` computes the live limit as the most
-restrictive of four candidates — VTN/sim-inject capacity cap, the [[milp-planner]]'s own
-curtailment target (the plan's `pv_used_kw`, the PV's own used-generation variable since W3), and
-a new **manual operator override**
-(`pv_generation_limit_kw` sim-inject field, `PvCurtailmentSource::Manual`, wins exact ties as
-the most deliberate/explicit source) — this is what makes VTN `EXPORT_CAPACITY_LIMIT` events
-physically take effect, not just appear in the plan.
+`inverter_max_kw` (AC ceiling, `Asset::ac_ceiling_kw` — DC potential clamps to it before any commanded
+limit; the manual-override slider caps at it too). Power resolves in one place
+(`PvInverter::resolve_power_kw`, `assets/pv_schedule.rs`), shared by `step_inner` and the previewing
+`SimState::peek_pv_kw`, with the precedence `measured > weather-derived > sine model`
+(`PvPowerInputs`); a manual irradiance offset blends on top. A profile may hold several arrays: each
+has its own weather forecast, measurement and feeds, and a site generation limit is shared among them
+in proportion to their AC ceilings (`simulator::generation_limit_share`). Each array also concludes for
+itself whether it is snow-covered, by comparing what it delivers against the snow-free weather forecast
+(`observe_snow`, `PvSnowState`, R-55); a curtailed array is not mistaken for a covered one.
 
-The field was renamed application-wide (`export_limit_kw` → `generation_limit_kw`) because
-"export" is reserved in this project's vocabulary for net site-to-grid flow — a system-level
-quantity the PV inverter has no visibility into; what the inverter actually enforces is a cap
-on its own output. `OadrCapacityState.export_limit_kw` and `SimInjectState.grid_export_limit_kw`
-are genuinely site-level and were left untouched. The manual override re-adds a capability from
-a deleted branch that predated MILP-level PV curtailment, now built on top of it instead of
-replacing it — surfaced automatically through the existing schema-driven `ControlDescriptor`
-mechanism, no new frontend component needed (see [[ven-ui]]'s nullable-slider note for the UI
-side).
+**Generation limit.** The live limit sits on per-tick `PvState.generation_limit_kw` /
+`curtailment_source` (persisted in `tick_samples`), not on `PvInverter`, so history reports the limit
+that was active at that tick. `dispatcher::resolve_pv_generation_limit_kw` takes the most restrictive of
+the candidate limits and tags the winner with a `PvCurtailmentSource`: `Plan` (the planner's own
+curtailment, the PV's used-generation variable), `Capacity` (a VTN/sim-injected cap — this is what makes
+a VTN `EXPORT_CAPACITY_LIMIT` physically take effect, not just appear in the plan), `Arbiter` (the
+[[deviation-arbiter]]'s last-resort lever), `Manual` (`pv_generation_limit_kw` sim-inject) and
+`CommsLoss` (the R-59 fail-safe, a debounced percentage of `inverter_max_kw`). An exact tie goes to the
+later-listed source, so a deliberate manual cap beats the automatic ones and `CommsLoss` beats all
+(a comms-loss safety fallback must not lose to a stale manual override). The field is named for what the
+inverter enforces — a cap on its own output; "export" is reserved for net site-to-grid flow
+(`OadrCapacityState.export_limit_kw`, `SimInjectState.grid_export_limit_kw` are site-level). The manual
+slider reaches the UI through the schema-driven `ControlDescriptor` (`nullable`, see [[ven-ui]]).
 
-`assets.pv.rated_kw` had drifted from the weather feed's calibrated `weather_pv.rated_kwp` since
-[[weather-forecast]] was wired up (a fix existed on an unmerged branch, so every worktree cut
-from `main` kept regenerating the stale values — a branch-divergence bug, not a runtime revert).
-Corrected per-VEN (ven-1 8.0→14.4 kW, ven-3 6.0→8.0 kW; ven-2 was already correct), and
-`inverter_max_kw` — previously left defaulted to `rated_kw` "so existing profiles are
-unaffected" — is now set explicitly per VEN (12.5/10.0/7.5 kW, each below its corrected
-`rated_kw`). This surfaced a latent bug in `PvInverter::control_schema()`: the manual
-`pv_generation_limit_kw` slider capped at `rated_kw` instead of `inverter_max_kw`, invisible
-until the two values diverged — fixed to match what `step_inner` clamps against everywhere.
+## Real-measurement ground truth
 
-## Real-measurement ground truth (ven-1 only)
+`PvInverter.measured_power_kw` / `BaseLoad.measured_load_kw` (both `Option<f64>`, set each tick, not from
+YAML) let a real MQTT reading outrank the simulated or forecast value — [[real-measurement-mqtt]].
+PV: `measured > weather-derived > sine model`. BaseLoad: simple replace —
+`measured_load_kw.unwrap_or_else(natural_profile_plus_noise)`. Both still let the manual-override
+offset blend additively on top.
 
-`PvInverter.measured_power_kw` / `BaseLoad.measured_load_kw` (both `Option<f64>`, set each
-tick, not from YAML) let a real MQTT reading outrank the simulated/forecast value —
-[[real-measurement-mqtt]]. PV: 3-tier `measured > weather-derived > sin-model`, folded into
-the same `base_kw.or(...)` selection `step_inner` already used for weather. BaseLoad: simple
-replace — `measured_load_kw.unwrap_or_else(natural_profile_plus_noise)`. Both still let the
-manual-override offset blend additively on top, unchanged.
+## Heater
 
-## Heater safety envelope
+Beyond `temp_min_c`/`temp_max_c` (the **comfort band** a user configures and the planner respects) sits a
+wider **physical safety envelope**: no floor on the low side (ambient is harmless), but a hard ceiling
+`temp_safety_max_c` above `temp_max_c` (e.g. `ven-2.yaml`'s 40–80 °C comfort / 90 °C ceiling).
+`HeaterEmergencyMode` (`assets/heater_emergency.rs`: `Normal`/`Curtail`/`Absorb`) reaches into it:
+`Curtail` suppresses the forced-on floor, `Absorb` suppresses the forced-off ceiling up to
+`temp_safety_max_c`; each leaves the other bound untouched. It is settable through `SimInjectState`
+(manual, test, demo) and by the deviation arbiter, which chooses it per heater
+(`controller/arbiter/emergency.rs`); no VTN directive drives it, and the MILP plans only within the
+comfort band.
 
-Beyond `temp_min_c`/`temp_max_c` (the **comfort band** a user configures and the planner respects
-under ordinary objectives) sits a wider **physical safety envelope**: no floor on the low side
-(ambient is harmless, the tank just drifts), but a real hard ceiling `temp_safety_max_c` above
-`temp_max_c` (e.g. `ven-2.yaml`'s 40–80 °C comfort / 90 °C true ceiling). `HeaterEmergencyMode`
-(`entities/sim_inject.rs`: `Normal`/`Curtail`/`Absorb`) reaches into that envelope — `Curtail`
-suppresses the forced-on floor, letting the tank drift toward ambient; `Absorb` suppresses the
-forced-off ceiling, allowing heating up to `temp_safety_max_c`. Each direction leaves the other
-bound untouched. Settable today only via `SimInjectState` (manual/test/demo) — no VTN emergency
-directive drives it yet, and the MILP itself still plans only within the comfort band. This is
-the lever [[deviation-arbiter]]'s heater-emergency lever drives.
+The thermostat rule lives once, in `assets/heater_thermostat.rs`: safety ceiling first (reachable only
+in `Absorb`), then the emergency heat at `temp_min_c` (comfort beats relay protection), then a ceiling
+deadband. `thermostat_delta_c` (default 3 °C) applies at both ends — the emergency runs until
+`temp_min_c + delta`, and after reaching `temp_max_c` the relay stays open until `temp_max_c − delta`,
+tracked by `HeaterState.ceiling_latched` beside `emergency_latched`. The planner never contradicts the
+latch: `Heater::forced_kw_ahead` replays the same rule slot by slot and
+`assets/heater_pins.rs` fixes those slots' stages before the solve ([[milp-planner]]). The same rule
+feeds `capability`, so the capacity projection sees a stable relay rather than a sawtooth.
+
+## EV
+
+`EvCharger` answers its own availability question once: `assets/ev_schedule.rs` makes the departure
+time and a profile-configured daily trip (`daily_trip`, generated deterministically per calendar day so
+the live tick and a multi-day forecast agree) one projection that `simulate_forward` honours, and
+`assets/ev_usage_forecast.rs` is where the EV's own prediction of "what will this car do next" reaches the
+planner. Static nameplate facts for display come from `key_features`; comfort bids from
+`default_comfort_rates` ([[hems-planning]]).
 
 ## Determinism: injectable clock and seedable RNG (R-24)
 
-`AssetConfig::forecast()` (all 5 variants), `Asset::history()`/`simulate_free()`/
-`capability_trajectory()`, `parse_capacity_state()`, and `SimState::from_params()` now take
-an explicit `now: DateTime<Utc>` instead of calling `Utc::now()` internally, and `SimState`
-carries a seedable `StdRng` so `power_model::random_voltage()` no longer draws from unseeded
-`thread_rng()` — closing the last live gaps against this project's determinism rule
-(`.claude/CLAUDE.md` §determinism: no code path depending on wall-clock/randomness without an
-injectable seam). One `Utc::now()` call site was found and classified as dead rather than
-fixed: `entities/site_meter.rs::SiteMeter` was never constructed anywhere. Rather than wire
-it up, R-62 deleted the file outright — its only genuinely-referenced type, `PowerSnapshot`
-(used by `OadrEventCache::dispatch_setpoints`, itself an unwired sketch — see
-[[openadr-interface]]), moved to `entities/capacity.rs`, the module of its one real consumer.
+Asset methods that depend on time take an explicit `now: DateTime<Utc>` instead of calling `Utc::now()`
+(`Asset::history`, `SimState::from_params`), and
+`SimState` carries a seedable `StdRng` so `power_model::random_voltage()` is reproducible — the
+`.claude/CLAUDE.md` §determinism rule. The architecture audit now refuses `Utc::now()` in `assets/` and
+`simulator/` outright ([[ven-hexagonal-architecture]]). The dead `site_meter.rs` was deleted (R-62);
+its one live type, `PowerSnapshot`, moved to `entities/capacity.rs`.
 
 ## Planning-side counterpart
 
-For the [[milp-planner]], each controllable asset provides an `AssetMilpContext` —
-its variables, constraints, cost and friction, and its own plan result, in solver terms. The
-trait is declared in the domain ring (`controller/asset_milp_port.rs`) and implemented per kind in
-`assets/<kind>_declared.rs` (battery, EV, heater, shiftable load), with the model maths in
-`assets/<kind>_milp.rs`; each context is built from one `MilpBuildInputs`
-(`assets/capability_traits.rs`) and carries its roster id, so the solver only ever sees trait
-objects ([[ven-hexagonal-architecture]]). PV and base load are not
-MILP-controllable; their forecasts enter as per-slot input arrays.
+For the [[milp-planner]], each controllable asset provides an `AssetMilpContext` — its variables,
+constraints, cost and friction, and its own plan result, in solver terms. The trait is declared in the
+domain ring (`controller/asset_milp_port.rs`) and implemented per kind in `assets/<kind>_declared.rs`
+(battery, EV, heater, shiftable load), with the model maths in `assets/<kind>_milp.rs`; each context is
+built from one `MilpBuildInputs` and carries its roster id, so the solver only ever sees trait objects.
+PV and base load take part as forecast participants (`assets/forecast_declared.rs`): never dispatched,
+their forecasts enter as fixed net power (curtailable for PV).
+
+**Asset competence.** Interpretation of an asset's current state or forecast has exactly one authority:
+the asset (`.claude/CLAUDE.md` §asset-competence-assurance; `docs/architecture/VEN_ARCHITECTURE.md`
+§3.0d). Controllers see only the flattened `AssetSnapshot` — capability, available energy, forced
+power, response, rank, lever kind — never raw values they would interpret themselves.
 
 Sign convention for all power values crossing this interface: positive = import,
 negative = export/generation — see [[sign-convention]].
+
+> **OPEN QUESTION** `docs/architecture/VEN_ARCHITECTURE.md` §3.0 still lists a future `MeasuredAsset`
+> (a real-hardware `impl Asset` behind the same `Box<dyn Asset>`); no such type exists. Real readings
+> today enter only as `measured_*_kw` fields on the simulated PV and base load. See
+> [[ven-code-vs-docs-audit]].
