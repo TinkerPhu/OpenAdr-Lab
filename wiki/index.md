@@ -26,7 +26,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[fleet-tooling]] — fleet.sh (up/down/status), bulk VEN registration, GB-06/GB-09
 - [[experiment-harness]] — scenario YAMLs, real-time runner, KPI extraction, comparison reports
 - [[notifications]] — user notification feed: ring + SSE + persistence, edge-triggered producers, dedup_key rolling-window collapse + history viewer
-- [[heuristics-pipeline]] — learned base-load baselines: trapezoid appliance noise, weekday/weekend EWMA profiles, planner/forecast consumers
+- [[heuristics-pipeline]] — base-load learner: seven weekday buckets shrunk toward the overall mean, EWMA window, profile knobs, daily job, asset-owned forecast, forecast accuracy, BASELINE reports
 - [[opportunistic-objective]] — non-planning dispatch on the same site: one `opportunistic_step` live and as forecast, for planner-vs-baseline comparison
 - [[deviation-arbiter]] — two passes on one lever machinery (deviation correction, limit enforcement), per-asset levers, tick order and dispatch stages, held-correction release, lag bridge, residual escalation to replan, `/arbiter-settings` and diagnostics
 - [[weather-forecast]] — MQTT-ingested external forecast → physics-based PV generation, wired into both the planner and the live simulator's PV ground truth; source-liveness E2E coverage (R-56)
@@ -68,4 +68,4 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[dso-retailer-unbundled-tariff-coordination]] — legally-unbundled DSO/retailer tariff coordination: multi-program protocol support, why an unbounded virtual DSO price is dishonest (shadows the real tariff), DLMP shadow-price duality with the envelope, regulator revenue-cap as the actual answer to "who sets the relation"
 
 ---
-Pages: 48 · Last sync: 2026-10-22 (scoped: ven-ui, milp-planner, asset-layer, deviation-arbiter, openadr-interface, history-store, simulator, reliability-and-config re-verified; other pages see review.md).
+Pages: 48 · Last sync: 2026-10-22 (scoped: ven-ui, milp-planner, asset-layer, deviation-arbiter, openadr-interface, history-store, simulator, reliability-and-config, heuristics-pipeline re-verified; other pages see review.md).
