@@ -177,7 +177,7 @@ impl EvMilpContext {
                 ..base
             };
         };
-        let core_kwh = ((session.target_soc_frac - current_soc) * cfg.battery_kwh).max(0.0);
+        let core_kwh = cfg.energy_to_soc_kwh(current_soc, session.target_soc_frac);
         // Chargeable inside any queued session's window, nowhere else. For a single
         // session this is the old "every slot up to the deadline"; for a queue it
         // also closes the gaps when the car is away, without a second rule saying so.
@@ -403,6 +403,7 @@ mod tests {
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: false,
+            unserved_at_departure_kwh: 0.0,
         })
     }
 

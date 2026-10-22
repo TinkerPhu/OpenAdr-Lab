@@ -420,6 +420,7 @@ mod tests {
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: false,
+            unserved_at_departure_kwh: 0.0,
         });
         let cum_s: Vec<i64> = (0..=4).map(|i| i * 3600).collect();
         let mut ctx = EvMilpContext::from_state(

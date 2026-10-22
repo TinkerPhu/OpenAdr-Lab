@@ -144,6 +144,17 @@ pub struct AssetSnapshot {
     /// How the asset is served with no request (`Asset::dispatch_without_request`).
     #[serde(skip)]
     pub dispatch_without_request: Option<crate::entities::design_vocabulary::NonPlanningDispatch>,
+    /// Electric-equivalent energy the asset's owner is missing right now
+    /// (`Asset::unserved_energy_kwh`); absent when the asset declares none. Lab telemetry: the
+    /// fleet report adds its increases (openspec `fleet-service-level`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub unserved_energy_kwh: Option<f64>,
+    /// Electric-equivalent energy held in the asset's store (`Asset::stored_energy_kwh`); absent
+    /// when it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stored_energy_kwh: Option<f64>,
     /// The asset's place in the profile's roster: the arbiter's tie-break between levers of
     /// equal cost, the order EVs are offered a surplus in, and the order the VEN UI lists assets
     /// in (W6).
@@ -225,6 +236,8 @@ mod tests {
             surplus_claim_rank: None,
             full_effort_time_to_target_s: None,
             dispatch_without_request: None,
+            unserved_energy_kwh: None,
+            stored_energy_kwh: None,
             roster_index: 0,
         };
         assert_eq!(snap.val("soc"), Some(0.5));

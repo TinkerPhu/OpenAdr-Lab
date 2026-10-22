@@ -255,6 +255,7 @@ mod tests {
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: false,
+            unserved_at_departure_kwh: 0.0,
         });
         ("ev".to_string(), snapshot_from_asset(&ev, state, 0.0, 0.0))
     }

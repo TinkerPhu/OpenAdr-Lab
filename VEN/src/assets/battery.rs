@@ -276,6 +276,13 @@ impl Asset for Battery {
         Some(self.capacity_kwh)
     }
 
+    /// The energy in the pack. No unserved energy is declared: the minimum state of charge is a
+    /// limit the battery holds itself, so it never misses a need of its owner's.
+    fn stored_energy_kwh(&self, state: &AssetState) -> Option<f64> {
+        let s: &BatteryState = own(state);
+        Some(s.soc_frac * self.capacity_kwh)
+    }
+
     fn kind(&self) -> crate::entities::asset::AssetKind {
         crate::entities::asset::AssetKind::Battery
     }
@@ -339,6 +346,15 @@ impl RequestResolvable for Battery {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_battery_stores_its_state_of_charge_times_its_capacity_and_owes_nothing() {
+        let (bat, state) = make_battery_cfg(0.6); // 10 kWh
+        let state = AssetState::Battery(state);
+        let stored_kwh = Asset::stored_energy_kwh(&bat, &state).expect("declared");
+        assert!((stored_kwh - 6.0).abs() < 1e-9, "{stored_kwh}");
+        assert_eq!(Asset::unserved_energy_kwh(&bat, &state), None);
+    }
 
     #[test]
     fn key_features_declare_capacity_from_the_profile() {

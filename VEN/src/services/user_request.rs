@@ -487,6 +487,7 @@ pub(crate) mod tests {
                 started: true,
                 elapsed_min: 5.0,
                 actual_power_kw: 2.0,
+                past_deadline: false,
             });
 
         let req = shiftable_request("wm");

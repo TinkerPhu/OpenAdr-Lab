@@ -42,6 +42,14 @@ impl<'a> Asset for AssetHandle<'a> {
         self.config.full_effort_time_to_target_s(state)
     }
 
+    fn unserved_energy_kwh(&self, state: &AssetState) -> Option<f64> {
+        self.config.unserved_energy_kwh(state)
+    }
+
+    fn stored_energy_kwh(&self, state: &AssetState) -> Option<f64> {
+        self.config.stored_energy_kwh(state)
+    }
+
     fn dispatch_without_request(
         &self,
         state: &AssetState,

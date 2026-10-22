@@ -276,6 +276,23 @@ pub trait Asset: Send + Sync {
         None
     }
 
+    /// Electric-equivalent energy \[kWh\] this asset owes and has not delivered right now: a level
+    /// (what is missing), not an event stream. `None` when it declares none (a battery's minimum
+    /// state of charge is a limit it holds itself, so it never misses it). The fleet report adds
+    /// the increases of this level between stored samples, so a departure, a comfort breach and a
+    /// missed deadline are counted the same way (openspec `fleet-service-level` D1-D3). Not the
+    /// planner's plan-time warnings, which predict.
+    fn unserved_energy_kwh(&self, _state: &AssetState) -> Option<f64> {
+        None
+    }
+
+    /// Electric-equivalent energy \[kWh\] held in this asset's store, against a reference of the
+    /// asset's own choosing (the fleet report takes a difference, so the reference cancels).
+    /// `None` when it has no store.
+    fn stored_energy_kwh(&self, _state: &AssetState) -> Option<f64> {
+        None
+    }
+
     /// How this asset is served when it holds no request, or `None` to leave it to the surplus
     /// pass. Only the EV answers: a plugged-in EV below its target is an implicit ASAP request.
     fn dispatch_without_request(

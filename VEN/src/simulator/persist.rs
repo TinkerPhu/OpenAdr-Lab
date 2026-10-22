@@ -394,6 +394,7 @@ mod tests {
             started: true,
             elapsed_min: 5.0,
             actual_power_kw: 2.0,
+            past_deadline: false,
         });
         wm.setpoint_kw = 2.0;
         wm.last_power_kw = 2.0;
@@ -440,6 +441,7 @@ mod tests {
             started: true,
             elapsed_min: 5.0,
             actual_power_kw: 2.0,
+            past_deadline: false,
         });
         save(&saved, data_dir).await.unwrap();
 

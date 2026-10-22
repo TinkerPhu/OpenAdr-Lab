@@ -261,6 +261,8 @@ mod tests {
                 surplus_claim_rank: None,
                 full_effort_time_to_target_s: None,
                 dispatch_without_request: None,
+                unserved_energy_kwh: None,
+                stored_energy_kwh: None,
                 roster_index: 0,
             },
         );
@@ -538,6 +540,8 @@ mod tests {
                 surplus_claim_rank: None,
                 full_effort_time_to_target_s: None,
                 dispatch_without_request: None,
+                unserved_energy_kwh: None,
+                stored_energy_kwh: None,
                 roster_index: 0,
             },
         );

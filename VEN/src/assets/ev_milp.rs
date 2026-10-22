@@ -581,6 +581,7 @@ mod milp_context_trait_tests {
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: false,
+            unserved_at_departure_kwh: 0.0,
         });
         let mut ctx = EvMilpContext::from_state(
             "ev",
@@ -690,6 +691,7 @@ mod milp_context_trait_tests {
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: true,
+            unserved_at_departure_kwh: 0.0,
         });
         let mut ctx = EvMilpContext::from_state(
             "ev",
@@ -749,6 +751,7 @@ mod milp_context_trait_tests {
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: true,
+            unserved_at_departure_kwh: 0.0,
         });
         let mut ctx = EvMilpContext::from_state(
             "ev",
@@ -934,6 +937,7 @@ mod milp_context_trait_tests {
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: false,
+            unserved_at_departure_kwh: 0.0,
         });
         let mut ctx = EvMilpContext::from_state(
             "ev",
@@ -1062,6 +1066,7 @@ mod milp_context_trait_tests {
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: false,
+            unserved_at_departure_kwh: 0.0,
         });
         let now = Utc::now();
         let session = EvSession {
@@ -1156,6 +1161,7 @@ mod milp_context_trait_tests {
                 actual_power_kw: 0.0,
                 pending_command_kw: 0.0,
                 was_away_by_usage_sim: false,
+                unserved_at_departure_kwh: 0.0,
             });
             let ctx = EvMilpContext::from_state(
                 "ev",
@@ -1207,6 +1213,7 @@ mod milp_context_trait_tests {
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: false,
+            unserved_at_departure_kwh: 0.0,
         });
         let now = Utc::now();
         let session = EvSession {

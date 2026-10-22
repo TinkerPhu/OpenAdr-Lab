@@ -17,7 +17,7 @@ use crate::controller::milp_planner::{
 use crate::entities::plan::{PlanWarning, WarningKind, WarningSeverity};
 
 /// Below this the shortfall is solver tolerance, not a missed target [kWh].
-const SHORTFALL_TOLERANCE_KWH: f64 = 1e-3;
+pub(super) const SHORTFALL_TOLERANCE_KWH: f64 = 1e-3;
 
 /// Where this kind stands in claiming PV surplus, lower first: in the plan's allocation
 /// order (`AssetMilpContext::surplus_claim_rank`) and in live opportunistic dispatch

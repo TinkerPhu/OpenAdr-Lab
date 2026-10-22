@@ -311,6 +311,7 @@ fn set_ev_state(snap: &mut SimSnapshot, plugged: Option<bool>, soc_frac: Option<
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: false,
+            unserved_at_departure_kwh: 0.0,
         });
         refresh_from_asset(ev, &charger, state);
     }
@@ -581,6 +582,7 @@ fn build_asset_contexts(
                     plugged,
                     pending_command_kw: 0.0,
                     was_away_by_usage_sim: false,
+                    unserved_at_departure_kwh: 0.0,
                 });
                 let ac = EvCharger::from_params(cfg);
                 ctxs.push(MilpParticipant::build_milp_context(
@@ -715,6 +717,7 @@ fn push_shiftable_load_contexts(
             started: false,
             elapsed_min: 0.0,
             actual_power_kw: 0.0,
+            past_deadline: false,
         });
         let cycle = TestCycle {
             n,

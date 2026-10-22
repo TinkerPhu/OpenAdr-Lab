@@ -39,6 +39,8 @@ pub fn snapshot_from_asset(
         surplus_claim_rank: asset.surplus_claim_rank(),
         full_effort_time_to_target_s: asset.full_effort_time_to_target_s(&state),
         dispatch_without_request: asset.dispatch_without_request(&state),
+        unserved_energy_kwh: asset.unserved_energy_kwh(&state),
+        stored_energy_kwh: asset.stored_energy_kwh(&state),
         roster_index: 0,
     }
 }

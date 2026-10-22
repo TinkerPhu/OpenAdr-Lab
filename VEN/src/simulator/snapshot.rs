@@ -76,6 +76,8 @@ impl SimState {
                     surplus_claim_rank: cfg.surplus_claim_rank(),
                     full_effort_time_to_target_s: cfg.full_effort_time_to_target_s(&entry.state),
                     dispatch_without_request: cfg.dispatch_without_request(&entry.state),
+                    unserved_energy_kwh: cfg.unserved_energy_kwh(&entry.state),
+                    stored_energy_kwh: cfg.stored_energy_kwh(&entry.state),
                     roster_index,
                 },
             );
@@ -182,6 +184,26 @@ mod tests {
     use crate::entities::asset_params::{AssetParams, HeaterParams};
     use crate::entities::sensor::SensorRaw;
     use crate::simulator::SimState;
+
+    /// Each kind declares what it serves and stores (openspec `fleet-service-level`): the
+    /// snapshot carries the assets' own answers, `None` where an asset has none.
+    #[test]
+    fn the_snapshot_carries_each_assets_own_unserved_and_stored_energy() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/profiles/test.yaml");
+        let profile: crate::profile::Profile =
+            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let sim = SimState::from_params(&profile.asset_params(), chrono::Utc::now());
+        let snap = sim.to_sim_snapshot();
+        let declared = |id: &str| {
+            let a = &snap.assets[id];
+            (a.unserved_energy_kwh.is_some(), a.stored_energy_kwh.is_some())
+        };
+        assert_eq!(declared("battery"), (false, true));
+        assert_eq!(declared("ev"), (true, true));
+        assert_eq!(declared("heater"), (true, true));
+        assert_eq!(declared("pv"), (false, false));
+        assert_eq!(declared("base_load"), (false, false));
+    }
 
     /// R-114: the typed `raw` keeps the JSON it replaced - the simulator's three keys, a
     /// client's own keys as they came, and `{}` for nothing.

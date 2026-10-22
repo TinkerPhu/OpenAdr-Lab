@@ -9,6 +9,7 @@ mod capability_traits;
 pub mod ev;
 mod ev_comfort;
 mod ev_declared;
+mod ev_energy;
 mod ev_milp;
 mod ev_milp_accessors;
 pub(crate) mod ev_schedule;
@@ -359,6 +360,7 @@ mod phase2a_ev_tests {
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: false,
+            unserved_at_departure_kwh: 0.0,
         });
         let result = boxed
             .as_request_resolvable()
