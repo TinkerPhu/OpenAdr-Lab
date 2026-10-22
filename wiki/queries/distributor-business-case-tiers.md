@@ -2,12 +2,13 @@
 title: Distributor Business Case — Tiered VTN/VEN Rollout
 type: query
 created: 2026-07-06
-updated: 2026-07-06
-synced_commit: 20ba622
+updated: 2026-10-22
+synced_commit: 650b626
 sources:
   - docs/openadr_3_1_specs/
   - docs/REQUIREMENTS.md
   - tests/features/
+  - docs/BACKLOG_OpenADR_Cert.md
 tags: [business-case, dso, rollout, programs, flexibility]
 ---
 
@@ -81,6 +82,10 @@ measured usage is compared against a baseline.
 
 - Verified, contractible peak reduction lets flexibility count as firm capacity in
   **grid planning** — deferring reinforcement and reducing peak procurement.
+- **Verified response has a measurable baseline.** A VEN answers a `BASELINE` report
+  request with its event-blind forecast beside the concurrent `USAGE` report, so one event's
+  impact in kWh is the difference between the two ([[heuristics-pipeline]],
+  [[experiment-harness]]); the baseline is tagged as heuristic, not a statistical confidence.
 - **Targeting** scopes events to the customers on a specific stressed feeder
   ([[openadr-security]] targeting; [[openadr-spec-use-cases]] §8.13 ✅) — shed is
   bought only where it helps.
@@ -133,10 +138,14 @@ plant for balancing/redispatch markets ([[openadr-programs]], example 5).
   **balancing-market revenue** — the first tier that *earns* money rather than avoiding
   costs. Also the most demanding: near-real-time control, tight telemetry, guaranteed
   customer SoC reserves.
-- Maturity note from the lab's gap analysis: subscriptions/reservations are parsed but
-  don't yet constrain the planner here, and `DISPATCH_SETPOINT` handling is unbuilt
-  ([[openadr-spec-use-cases]] §8.10 🟡, §8.5/§8.12 ❌) — consistent with this being the
-  last tier commercially, too.
+- Maturity note from the lab's gap analysis: the technical half of this tier exists.
+  Subscriptions and reservations bind the planner as a contracted allowance, the VEN reports
+  the capacity it requests, and `DISPATCH_SETPOINT` steers net site power with the storage
+  levers while the plan runs underneath ([[openadr-spec-use-cases]] §8.10 ✅, §8.5 🟡;
+  [[openadr-interface]]). What is not built is the commercial and control depth a VPP needs:
+  `CHARGE_STATE_SETPOINT` (a grid operator's SoC command) is received and deliberately not
+  applied, free-form dispatch instructions are unhandled, and nothing yet reserves a private
+  SoC band for the customer — consistent with this being the last tier commercially, too.
 
 ## Cross-cutting arguments
 

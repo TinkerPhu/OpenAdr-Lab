@@ -200,7 +200,9 @@ outlive any single event.
   use and lets the aggregator control the rest."
 - **Expectations:** tightest coupling of all: VTN expects near-real-time obedience and
   telemetry; VEN expects a guaranteed private SoC reserve and payment. In this lab
-  `DISPATCH_SETPOINT` is unhandled ([[openadr-spec-use-cases]] §8.5 ❌).
+  `DISPATCH_SETPOINT` steers net site power with the storage levers during its window, but
+  `CHARGE_STATE_SETPOINT` is received and not applied and there is no private-SoC reserve
+  ([[openadr-spec-use-cases]] §8.5 🟡).
 
 ## Why a VEN joins multiple programs
 
