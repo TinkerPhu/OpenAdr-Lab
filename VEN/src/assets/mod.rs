@@ -466,23 +466,13 @@ mod phase2a_heater_tests {
     }
 
     #[test]
-    fn thermostat_setpoint_kw_below_target_calls_for_max_kw() {
-        let (boxed, state) = boxed_and_state(); // temp_initial_c=20.0
+    fn thermostat_setpoint_kw_calls_for_max_kw_and_leaves_the_cut_out_to_the_ceiling() {
+        let (boxed, _state) = boxed_and_state();
         let result = boxed
             .as_thermostat()
             .expect("Heater must implement Thermostat")
-            .thermostat_setpoint_kw(&state, 22.0);
-        assert_eq!(result, 3.0, "below target must call for max_kw");
-    }
-
-    #[test]
-    fn thermostat_setpoint_kw_above_target_calls_for_nothing() {
-        let (boxed, state) = boxed_and_state(); // temp_initial_c=20.0
-        let result = boxed
-            .as_thermostat()
-            .expect("Heater must implement Thermostat")
-            .thermostat_setpoint_kw(&state, 18.0);
-        assert_eq!(result, 0.0, "above target must call for nothing");
+            .thermostat_setpoint_kw();
+        assert_eq!(result, 3.0);
     }
 
     #[test]

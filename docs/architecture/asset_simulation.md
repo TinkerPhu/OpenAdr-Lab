@@ -274,7 +274,7 @@ No Behaviour C fields. Battery scheduling is fully planner-driven.
 | Field | Behaviour | Effect |
 |---|---|---|
 | `heater_temp_c` | A — one-shot | Jump room temperature; cleared after next tick; thermal model continues from there |
-| `heater_setpoint_c` | C — frozen | Comfort target passed to dispatcher: ON if `temp_c < target`, OFF otherwise; no snap-back model |
+| `heater_setpoint_c` | C — frozen | Comfort target: the heater runs at full power and cuts out at the target through its ceiling latch (it waits `thermostat_delta_c` before reheating); no snap-back model |
 | `heater_temp_min_c` | C — frozen + snap | Override thermostat lower bound; snaps to `temp_min_c_profile` on release |
 | `heater_temp_max_c` | C — frozen + snap | Override thermostat upper bound; snaps to `temp_max_c_profile` on release |
 | `ambient_temp_c` | C — frozen | Override outdoor temperature (default 10.0 °C); no snap-back model |

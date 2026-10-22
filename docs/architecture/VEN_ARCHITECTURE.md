@@ -1194,7 +1194,8 @@ id), and `dispatcher::plan_allocates` names the asset it asks about. Looking up 
 one-asset-per-kind design, not an inference. Questions that depend on
 something the snapshot can't know are still answered by the asset, just asked where that input
 exists: a user comfort target via `SimState::thermostat_setpoints_kw` (each `Thermostat`
-asset's own `thermostat_setpoint_kw`), and the arbiter's emergency-mode what-ifs via the
+asset's own `thermostat_setpoint_kw`: full power; the target reaches the asset as its cut-out
+ceiling, `TickInputs::heater_target_c_override`), and the arbiter's emergency-mode what-ifs via the
 heater's own `emergency_heat_kw` / `absorb_headroom_kw` values (its thermostat rule evaluated
 under Normal / Absorb). The MILP planner no longer takes a `SimSnapshot` at all
 (`SolveRequest`/`run_planner`): everything it knows about an asset arrives through that asset's
