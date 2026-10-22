@@ -12,6 +12,7 @@ import {
 import type { FleetVenLive } from "../api/types";
 import { FleetPlanChart } from "../components/FleetPlanChart";
 import { PlanComparison } from "../components/PlanComparison";
+import { ServiceDelivered } from "../components/ServiceDelivered";
 import { FleetPowerChart } from "../components/FleetPowerChart";
 import { VenPlanChart } from "../components/VenPlanChart";
 import {
@@ -290,6 +291,13 @@ export function FleetPage() {
           </>
         )}
       </Paper>
+
+      {changedAt && (
+        <Paper sx={{ p: 2 }} data-testid="fleet-service-card">
+          <Typography variant="h6">Service delivered</Typography>
+          <ServiceDelivered changedAt={changedAt} nowMs={now.getTime()} />
+        </Paper>
+      )}
 
       <FleetReactions />
 

@@ -12,6 +12,13 @@ import { deriveAssetSummaries } from "../controller/dataBuilders";
 import { formatEnergyKwh, formatPowerValue } from "@lab/ui/unitFormat";
 import type { SimSnapshot } from "../../api/types";
 
+/** The two energies an asset declares on its snapshot (`Asset::unserved_energy_kwh`,
+ * `Asset::stored_energy_kwh`): one column each, "—" for an asset that declares none. */
+const DECLARED_ENERGY = [
+  { field: "unserved_energy_kwh", label: "Unserved", testId: "asset-unserved-energy" },
+  { field: "stored_energy_kwh", label: "Stored", testId: "asset-stored-energy" },
+] as const;
+
 interface AssetSpecsTableProps {
   sim: SimSnapshot | undefined;
 }
@@ -33,7 +40,11 @@ export function AssetSpecsTable({ sim }: AssetSpecsTableProps) {
   // here — so a fixed constant (not Date.now(), an impure call disallowed at
   // render time) keeps this derivation pure without changing which rows show.
   const rows = deriveAssetSummaries(sim, [], [], {}, 0).filter(
-    (s) => s.capacityKwh !== null || s.maxImportKw !== null || s.maxExportKw !== null
+    (s) =>
+      s.capacityKwh !== null ||
+      s.maxImportKw !== null ||
+      s.maxExportKw !== null ||
+      DECLARED_ENERGY.some(({ field }) => sim.assets[s.assetId]?.[field] !== undefined)
   );
 
   if (rows.length === 0) return null;
@@ -49,6 +60,9 @@ export function AssetSpecsTable({ sim }: AssetSpecsTableProps) {
               <TableCell>Capacity</TableCell>
               <TableCell>Max in</TableCell>
               <TableCell>Max out</TableCell>
+              {DECLARED_ENERGY.map(({ field, label }) => (
+                <TableCell key={field}>{label}</TableCell>
+              ))}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -58,6 +72,14 @@ export function AssetSpecsTable({ sim }: AssetSpecsTableProps) {
                 <TableCell>{s.capacityKwh !== null ? formatEnergyKwh(s.capacityKwh) : "—"}</TableCell>
                 <TableCell>{s.maxImportKw !== null ? formatPowerValue(s.maxImportKw) : "—"}</TableCell>
                 <TableCell>{s.maxExportKw !== null ? formatPowerValue(s.maxExportKw) : "—"}</TableCell>
+                {DECLARED_ENERGY.map(({ field, testId }) => {
+                  const kwh = sim.assets[s.assetId]?.[field];
+                  return (
+                    <TableCell key={field} data-testid={testId}>
+                      {kwh !== undefined ? formatEnergyKwh(kwh) : "—"}
+                    </TableCell>
+                  );
+                })}
               </TableRow>
             ))}
           </TableBody>

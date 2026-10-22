@@ -139,6 +139,22 @@ export function useFleetPlan(atIso?: string, enabled = true) {
   });
 }
 
+/**
+ * What the fleet delivered to its owners over a closed window. A window in the past does not
+ * change, so it is not polled; the caller cuts windows on a grid so the key moves only then.
+ */
+export function useFleetService(fromIso: string, toIso: string, enabled = true) {
+  const { api } = useBffContext();
+  return useQuery({
+    queryKey: ["fleet", "service", fromIso, toIso],
+    queryFn: () => api.fleetService(fromIso, toIso),
+    enabled,
+    refetchInterval: false,
+    // A 503 means the store is not connected; the card says so, so do not hammer it.
+    retry: false,
+  });
+}
+
 /** The signal types the workbench can edit, with the units the wire profile declares. */
 export function useSignalRegistry() {
   const { api } = useBffContext();

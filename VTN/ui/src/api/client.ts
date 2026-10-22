@@ -1,4 +1,4 @@
-import type { EventInput, FleetHistory, FleetLive, FleetPlan, FleetReactions, FleetSignals, HealthStatus, PatternInterval, Program, ProgramInput, Report, SignalPreview, Ven, VenPlan, VtnEvent, WireSignalFacts } from "./types";
+import type { EventInput, FleetHistory, FleetLive, FleetPlan, FleetService, FleetReactions, FleetSignals, HealthStatus, PatternInterval, Program, ProgramInput, Report, SignalPreview, Ven, VenPlan, VtnEvent, WireSignalFacts } from "./types";
 import { debugLog } from "@lab/ui/debugLog";
 
 let reqCounter = 0;
@@ -110,6 +110,15 @@ export class BffApi {
     const at = atIso ? `?at=${encodeURIComponent(atIso)}` : "";
     const r = await this.getReq(`/api/fleet/plan${at}`);
     if (!r.ok) throw new Error(`fleet plan ${r.status}`);
+    return r.json();
+  }
+
+  /** What the fleet delivered to its owners over a window (unserved energy, carry-over). */
+  async fleetService(fromIso: string, toIso: string): Promise<FleetService> {
+    const r = await this.getReq(
+      `/api/fleet/service?from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`,
+    );
+    if (!r.ok) throw new Error(`fleet service ${r.status}`);
     return r.json();
   }
 

@@ -254,6 +254,30 @@ export type FleetPlan = {
   vensWithoutPlan: string[];
 };
 
+/** A sum of declared energies [kWh] over the VENs that declared them (`null`: none did). */
+export type ServiceTotal = { kwh: number | null; contributingVens: number };
+
+/** `GET /api/fleet/service`: what each asset declared over a window, per asset, per VEN and for the fleet. */
+export type FleetServiceReport = {
+  unservedEnergyKwh: ServiceTotal;
+  carryOverKwh: ServiceTotal;
+  vens: {
+    venName: string;
+    unservedEnergyKwh: number | null;
+    carryOverKwh: number | null;
+    assets: { assetId: string; unservedEnergyKwh: number | null; carryOverKwh: number | null }[];
+  }[];
+};
+
+export type FleetService = {
+  from: string;
+  to: string;
+  /** False when the window starts before the raw telemetry horizon: no figure, never a zero. */
+  available: boolean;
+  reason?: string;
+  report?: FleetServiceReport;
+};
+
 /** One declared interval of an event, timed but not repeated (`POST /api/signals/preview`, `pattern`). */
 export type PatternInterval = {
   start: string;
