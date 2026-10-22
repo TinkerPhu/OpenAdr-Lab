@@ -22,5 +22,5 @@ Format: `- [ ] YYYY-MM-DD — <description> (found during <workflow>; pages: pag
   method as batch 1: diff `synced_commit..HEAD` against each page's sources, fix real drift,
   bump `synced_commit` where the diff is cosmetic/unrelated. (found during /wiki-sync;
   pages: see lint output)
-- [ ] 2026-10-21 — Coverage gap after the partial 4c4f149..f8f6775 sync: not re-verified against the 992-commit range —  (N=20, usage simulation), ven-code-vs-docs-audit. Also unmapped: CO2 comfort bid (BL-17), site-headroom/capacity envelope engine, comms-loss curtailment (R-59), BASELINE reports. (found during /wiki-sync; pages: see lint output)
+- [ ] 2026-10-21 — Coverage gap after the partial 4c4f149..f8f6775 sync: not re-verified against the 992-commit range — ven-code-vs-docs-audit (still cites the removed `AssetInterface` drift). Also unmapped: CO2 comfort bid (BL-17), site-headroom/capacity envelope engine, comms-loss curtailment (R-59). (found during /wiki-sync; pages: see lint output)
 - [ ] 2026-10-22 — `fleet.sh up` generator is behind the VEN: generated compose builds from `VEN/` (image now builds from repo root), sets the removed `POLL_STARTUP_JITTER_S` (jitter is profile `polling.*_pct` now) and no `FLEET_MQTT_*`. Needs a docker host to confirm, then fix or retire the generated-fleet path. (found during /wiki-sync; pages: fleet-tooling)
