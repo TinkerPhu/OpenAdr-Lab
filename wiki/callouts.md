@@ -6,6 +6,7 @@
 
 ## DRIFT
 
+- [[simulator]] (`wiki/components/simulator.md:122`) — `docs/architecture/asset_simulation.md` still describes the pre-trait shapes: `build_setpoints` taking …
 - [[openadr-security]] (`wiki/concepts/openadr-security.md:62`) — The spec's 3.1 `targets` shape is a flat string array (User Guide §8.13 …
 
 ## CONTRADICTION

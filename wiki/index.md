@@ -18,7 +18,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[milp-planner]] — two-phase HiGHS MILP on one shared model skeleton, assets declare their own part (no kind in the core), adoption gate, absolute replan grid with per-VEN phase, comfort curve, peak-demand penalty, file map
 - [[dispatcher]] — build_setpoints on the 1 s sim tick, surplus-EV overlay, shiftable-load runtimes
 - [[openadr-interface]] — wire-crate event types, PayloadReader units, wire rejection and granted-scope notice, one capacity schedule and interval-timing rule, change detection and replan triggers, obligation-only accumulated reports declaring their units
-- [[simulator]] — physics models behind SimulatorPort, /sim endpoints (UI only), injectable clock/seedable RNG (R-24), sim-inject double-option null-clear fix, sim_inject_enabled gate + call-source logging + SIGTERM persist fix (R-65)
+- [[simulator]] — roster + tick (`SimState`, `TickInputs`, per-asset feeds), site meter derivation, ports behind `SimHandle`, persistence, `/sim/inject` behaviour classes (double-option null-clear, loud logging), asset_simulation.md drift
 - [[asset-layer]] — one `Asset` trait with declared kind/lever/rank (no config enum), capability traits, site meter is not an asset, PV generation-limit sources and per-array weather/snow, heater thermostat deadband + planner pins, EV schedule, determinism
 - [[ven-ui]] — React SPA, multi-VEN context, timeline with now-point, History page (last-24h default, forecast-accuracy overlay), shared chart-kit (TimeSeriesChart/StackedTimeSeriesChart/CurveChart), nullable-slider convention
 - [[reliability-and-config]] — task supervision, typed DomainError, profile validation, config knobs, EvSessionService removed (BL-41)
@@ -68,4 +68,4 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[dso-retailer-unbundled-tariff-coordination]] — legally-unbundled DSO/retailer tariff coordination: multi-program protocol support, why an unbounded virtual DSO price is dishonest (shadows the real tariff), DLMP shadow-price duality with the envelope, regulator revenue-cap as the actual answer to "who sets the relation"
 
 ---
-Pages: 48 · Last sync: 2026-10-21 (scoped: ven-ui, milp-planner, asset-layer, deviation-arbiter, openadr-interface, history-store re-verified; other pages see review.md).
+Pages: 48 · Last sync: 2026-10-22 (scoped: ven-ui, milp-planner, asset-layer, deviation-arbiter, openadr-interface, history-store, simulator re-verified; other pages see review.md).
