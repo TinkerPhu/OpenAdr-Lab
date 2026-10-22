@@ -63,7 +63,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[ven-code-vs-docs-audit]] — full VEN/src read vs docs: what matches, 10 confirmed drifts, ranked refactoring candidates
 - [[openadr-programs-explained]] — what a Program is, 5 worked examples (VTN vs VEN view), multi-program enrollment, contractual out-of-band joining
 - [[distributor-business-case-tiers]] — arguments for a distributor to adopt VTN/VEN: 4 rollout tiers from open tariff publication to VPP dispatch
-- [[history-store-persistence-format]] — SQLite schema (now v8: plan_snapshots dropped R-63, forecast_accuracy_samples added), epoch-second time encoding, per-asset-per-minute rows, flat retention pruning, docker bind-mount path
+- [[history-store-persistence-format]] — SQLite schema (v12: plan_snapshots dropped R-63, forecast_accuracy_samples, plan_history, capacity/headroom and plugged columns), epoch-second time encoding, per-asset-per-minute rows, flat retention pruning, docker bind-mount path
 - [[planner-tab-purpose]] — what the Planner tab is for (user vs. debug view), keep-don't-dismantle verdict, improvements filed as BL-36..38
 - [[dso-retailer-unbundled-tariff-coordination]] — legally-unbundled DSO/retailer tariff coordination: multi-program protocol support, why an unbounded virtual DSO price is dishonest (shadows the real tariff), DLMP shadow-price duality with the envelope, regulator revenue-cap as the actual answer to "who sets the relation"
 

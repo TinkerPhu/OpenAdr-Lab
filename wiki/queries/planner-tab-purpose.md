@@ -2,9 +2,9 @@
 title: "Query: what is the Planner tab in the VEN UI for?"
 type: query
 created: 2026-07-17
-updated: 2026-07-31
-synced_commit: aff3f57
-sources: [VEN/ui/src/pages/Planner.tsx, VEN/ui/src/App.tsx, VEN/ui/src/pages/Controller.tsx, VEN/ui/src/pages/Dashboard.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx]
+updated: 2026-10-22
+synced_commit: 650b626
+sources: [VEN/ui/src/pages/Planner.tsx, VEN/ui/src/App.tsx, VEN/ui/src/pages/Controller.tsx, VEN/ui/src/pages/Dashboard.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/components/planner/]
 tags: [ui, planner, ux]
 ---
 
@@ -17,22 +17,24 @@ and spread across other tabs?
 **Answer (short):** It is the window into the [[milp-planner]]'s *decision process* — the
 "brain view". Every other tab shows the plan's effects; this one shows why the plan
 exists. Keep it as the diagnostic tab; don't dismantle it — but surface its two genuinely
-user-facing elements elsewhere. Improvement suggestions are filed as **BL-36, BL-37,
-BL-38** in `docs/BACKLOG.md`.
+user-facing elements elsewhere. The user-facing elements sit on top and the
+diagnostics are collapsed below.
 
 ## Composition (`VEN/ui/src/pages/Planner.tsx`)
 
+The page heading reads "Plan". A user zone sits on top; everything that explains *why* is collapsed
+into a "Diagnostics" accordion below it.
+
 | Element | Shows | Audience |
 |---|---|---|
-| Objective selector + weight legend | The one real **control**: min_cost / GHG / grid / autarky / revenue, with exact solver weights | user |
+| Objective selector + weight legend | The one real **control**: the objectives with their exact solver weights, and where the active one came from | user |
 | PlannerStatusBar (SSE) | Live solve progress, then "Plan updated (trigger) — solved in N s" | both |
-| PlanHeaderBar | Plan metadata: created when, triggered by what | debug |
 | PlanPowerStack | Stacked per-asset power over the plan horizon | both |
-| PlanTriggerTimeline | History of *why* replans fired | debug |
-| PlanDecisionMatrix | Per-slot decisions and rates, incl. hatched estimated-rate slots ([[ven-ui]] WP4.6) | debug |
 | SessionProgressBoard | Session/deadline progress ("EV charged by 7?") — [[hems-planning]] sessions | user |
-| TraceTable (collapsed accordion) | Raw decision-trace event log | debug |
-| CorrectionBanner (snackbar) | Live Layer-1 reactive battery correction ([[dispatcher]]) | both |
+| *Diagnostics accordion:* PlanHeaderBar | Plan metadata: created when, triggered by what | debug |
+| PlanTriggerTimeline | History of *why* replans fired | debug |
+| PlanDecisionMatrix | Per-slot decisions and rates, incl. hatched estimated-rate slots ([[ven-ui]]); clicking a slot filters the trace below to that slot's window | debug |
+| TraceTable (nested accordion, event count in its title) | Raw decision-trace event log | debug |
 
 ## Value by audience
 
@@ -41,8 +43,7 @@ BL-38** in `docs/BACKLOG.md`.
   rest is noise to this persona.
 - **Debugging/understanding:** the tab's real strength is *correlation* — diagnosing
   "why did the plan change?" needs trigger history + solve status + resulting matrix +
-  trace side by side. The SSE status bar and correction banner are the only live views of
-  the planner loop and the reactive-correction layer.
+  trace side by side. The SSE status bar is the only live view of the planner loop.
 
 ## Verdict: keep, don't dismantle
 
@@ -64,31 +65,14 @@ rendered its empty state. Same day, it was rebuilt UI-only as **`SessionProgress
 fill gauge, heater current→target temperature) + the active plan (`planned_kw_by_asset`
 summed to the session deadline vs `envelopes.energy_needed_kwh` → on-track/at-risk chip).
 The budget bar shows `estimated_cost_eur` labeled "est." — per-session *accumulated* cost
-does not exist anywhere (tracked as BL-39). The table above reflects the rebuilt board.
+did not exist anywhere then. The table above reflects the rebuilt board.
 
-## Improvements → backlog
+## What became of the improvement ideas
 
-Filed in `docs/BACKLOG.md` (User-Value View, "comfort, control & trust"):
-
-- **BL-36 — resolved (9ba32e7)** with the rebuild: condensed session chips + a read-only
-  objective chip on the Dashboard (`dash-session-strip`); the objective *control* stays on
-  the Planner tab beside its weight legend, where the legend and live solve feedback teach
-  the user what each objective does.
-- **BL-37** — route `correction_active`/`correction_cleared` through the backend
-  [[notifications]] feed: `usePlannerEvents` subscribes only while the Planner page is
-  mounted, so corrections firing on any other tab are currently invisible.
-- **BL-38** — layout split (user zone on top, diagnostics collapsed below) and
-  matrix-slot → trace filtering to close the "what happened in slot 14:35?" loop.
-- **BL-39** — per-session accumulated-cost accounting so the budget bar can show real
-  spend instead of the plan-time estimate (spun off from the BL-36 resolution).
-
-The [[ven-ui]] page now carries the Planner-tab composition and Dashboard session strip
-(coverage-gap item of 2026-07-17 resolved).
-
-## Minor drift since this page was written
-
-The page heading now reads "Plan" rather than "Planner" (`Planner.tsx`'s `<Typography
-variant="h5">`) — a wording tweak only, the route/tab identity and composition above are
-unchanged. `PlannerStatusBar`'s trigger-colored chip also dropped its
-`DeviceDeviation`-specific warning color (always `success` now); not a behavior change to
-anything documented above.
+- **Session strip on the Dashboard** (BL-36): condensed session chips and a read-only objective chip on
+  the Dashboard (`dash-session-strip`); the objective *control* stays on the Plan page beside its weight
+  legend, where the legend and live solve feedback teach the user what each objective does.
+- **Layout split and slot → trace filtering** (BL-38): done — the user zone is on top, diagnostics are
+  collapsed, and a decision-matrix slot filters the trace.
+- **Reactive-correction banner** (BL-37): gone with the banner; reactive corrections are read from the
+  arbiter's own diagnostics and decision events ([[deviation-arbiter]]).
