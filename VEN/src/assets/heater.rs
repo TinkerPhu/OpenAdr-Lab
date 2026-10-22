@@ -371,11 +371,13 @@ impl Asset for Heater {
     /// element; a heat pump (R-151) would divide by its COP here.
     fn unserved_energy_kwh(&self, state: &AssetState) -> Option<f64> {
         let short_kwh = -self.stored_energy_inner_kwh(own(state));
-        Some(if short_kwh > super::heater_declared::SHORTFALL_TOLERANCE_KWH {
-            short_kwh
-        } else {
-            0.0
-        })
+        Some(
+            if short_kwh > super::heater_declared::SHORTFALL_TOLERANCE_KWH {
+                short_kwh
+            } else {
+                0.0
+            },
+        )
     }
 
     /// The energy in the tank above its comfort floor (negative below it, so a difference of two
