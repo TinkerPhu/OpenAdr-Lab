@@ -51,6 +51,7 @@ fn ev_snap(setpoint_kw: f64, soc_frac: f64, soc_target_frac: f64, plugged: bool)
         actual_power_kw: setpoint_kw.max(0.0),
         pending_command_kw: setpoint_kw.max(0.0),
         was_away_by_usage_sim: false,
+        unserved_at_departure_kwh: 0.0,
     });
     crate::services::test_support::asset_snapshots::snapshot_from_asset(
         &ev,
@@ -595,6 +596,7 @@ fn projected_net_kw_asks_every_stepped_asset_not_just_the_heater() {
             started: false,
             elapsed_min: 0.0,
             actual_power_kw: 0.0,
+            past_deadline: false,
         }),
         0.0,
         0.0,
@@ -1190,6 +1192,7 @@ impl LaggedSite {
                 actual_power_kw: ev_kw,
                 pending_command_kw: ev_kw,
                 was_away_by_usage_sim: false,
+                unserved_at_departure_kwh: 0.0,
             },
             ev_cmd_kw: ev_kw,
             battery_kw: 0.0,

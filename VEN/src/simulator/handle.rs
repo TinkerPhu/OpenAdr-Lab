@@ -503,6 +503,7 @@ mod tests {
                 started: true,
                 elapsed_min: 5.0,
                 actual_power_kw: 2.0,
+                past_deadline: false,
             });
         assert_eq!(
             handle.cancel_if_cancellable("wm").await,

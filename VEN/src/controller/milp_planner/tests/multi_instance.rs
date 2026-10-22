@@ -47,6 +47,7 @@ fn ev(id: &str, sessions: &[EvSession], profile: &Profile, now: DateTime<Utc>) -
         plugged: true,
         pending_command_kw: 0.0,
         was_away_by_usage_sim: false,
+        unserved_at_departure_kwh: 0.0,
     });
     EvMilpContext::from_state(
         id,

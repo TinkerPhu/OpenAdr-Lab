@@ -85,6 +85,10 @@ pub struct EvState {
     /// applies exactly once (`ev-usage-simulation`).
     #[serde(default)]
     pub was_away_by_usage_sim: bool,
+    /// Energy \[kWh\] short of the target when the car left, held for the trip, cleared on the
+    /// next plug-in (openspec `fleet-service-level` D3).
+    #[serde(default)]
+    pub unserved_at_departure_kwh: f64,
 }
 
 impl EvCharger {
@@ -121,6 +125,7 @@ impl EvCharger {
             actual_power_kw: cfg.max_charge_kw,
             pending_command_kw: cfg.max_charge_kw,
             was_away_by_usage_sim: false,
+            unserved_at_departure_kwh: 0.0,
         }
     }
 
@@ -158,16 +163,10 @@ impl EvCharger {
                 actual_power_kw: applied_kw,
                 pending_command_kw: kw,
                 was_away_by_usage_sim: state.was_away_by_usage_sim,
+                unserved_at_departure_kwh: state.unserved_at_departure_kwh,
             },
             applied_kw,
         )
-    }
-
-    /// Seconds at the full charge rate to lift the state of charge to the active target
-    /// (`soc_target_frac`, which a session's target overrides each tick); zero at or above it.
-    pub fn full_effort_time_to_target_s_inner(&self, state: &EvState) -> f64 {
-        let energy_kwh = (self.soc_target_frac - state.soc_frac).max(0.0) * self.battery_kwh;
-        crate::entities::units::s_from_h(energy_kwh / self.max_charge_kw)
     }
 
     /// Point-in-time feasible power range.
@@ -254,6 +253,22 @@ impl Asset for EvCharger {
         let s: &EvState = own(state);
         s.plugged
             .then(|| self.full_effort_time_to_target_s_inner(s))
+    }
+
+    /// Owed only once the car has left: what it was short of at that instant, held while away.
+    fn unserved_energy_kwh(&self, state: &AssetState) -> Option<f64> {
+        let s: &EvState = own(state);
+        Some(if s.plugged {
+            0.0
+        } else {
+            s.unserved_at_departure_kwh
+        })
+    }
+
+    /// The energy in the pack, plugged in or away.
+    fn stored_energy_kwh(&self, state: &AssetState) -> Option<f64> {
+        let s: &EvState = own(state);
+        Some(s.soc_frac * self.battery_kwh)
     }
 
     /// A plugged-in EV below its target is an implicit ASAP request (openspec
@@ -585,8 +600,87 @@ mod tests {
             actual_power_kw,
             pending_command_kw: actual_power_kw,
             was_away_by_usage_sim: false,
+            unserved_at_departure_kwh: 0.0,
         };
         (cfg, state)
+    }
+
+    // ── unserved and stored energy (fleet-service-level) ─────────────────────
+
+    fn assert_close(actual: Option<f64>, expected: f64) {
+        let actual = actual.expect("declared");
+        assert!((actual - expected).abs() < 1e-9, "{actual} != {expected}");
+    }
+
+    fn unserved_kwh(ev: &EvCharger, state: &EvState) -> Option<f64> {
+        Asset::unserved_energy_kwh(ev, &AssetState::Ev(state.clone()))
+    }
+
+    fn at(hour: u32) -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 7, 20, hour, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn a_leaving_ev_below_its_target_holds_the_missing_energy_while_away() {
+        let (ev, mut state) = make_ev(true, 0.5, 0.0); // 40 kWh pack, target 0.8
+        ev.apply_usage_sim_tick(&mut state, at(7), Some(false));
+        assert!(!state.plugged);
+        assert_close(unserved_kwh(&ev, &state), 12.0);
+        ev.apply_usage_sim_tick(&mut state, at(8), Some(false));
+        assert_close(unserved_kwh(&ev, &state), 12.0); // held for the whole trip
+    }
+
+    #[test]
+    fn a_leaving_ev_at_its_target_owes_nothing() {
+        let (ev, mut state) = make_ev(true, 0.8, 0.0);
+        ev.apply_usage_sim_tick(&mut state, at(7), Some(false));
+        assert_eq!(unserved_kwh(&ev, &state), Some(0.0));
+    }
+
+    #[test]
+    fn a_plugged_ev_below_its_target_owes_nothing_yet() {
+        let (ev, state) = make_ev(true, 0.5, 0.0);
+        assert_eq!(unserved_kwh(&ev, &state), Some(0.0));
+    }
+
+    #[test]
+    fn plugging_in_again_clears_what_was_owed() {
+        let (ev, mut state) = make_ev(true, 0.5, 0.0);
+        ev.apply_usage_sim_tick(&mut state, at(7), Some(false));
+        ev.apply_usage_sim_tick(&mut state, at(18), Some(true));
+        assert!(state.plugged);
+        assert_eq!(unserved_kwh(&ev, &state), Some(0.0));
+    }
+
+    #[test]
+    fn a_stored_state_without_the_latch_loads_with_it_at_zero() {
+        let old = r#"{"soc":0.5,"plugged":false,"actual_power_kw":0.0}"#;
+        let state: EvState = serde_json::from_str(old).unwrap();
+        let (ev, _) = make_ev(false, 0.5, 0.0);
+        assert_eq!(unserved_kwh(&ev, &state), Some(0.0));
+    }
+
+    #[test]
+    fn stored_energy_is_the_state_of_charge_times_the_pack_plugged_or_away() {
+        let (ev, plugged) = make_ev(true, 0.5, 0.0);
+        let (_, away) = make_ev(false, 0.5, 0.0);
+        for state in [plugged, away] {
+            assert_eq!(
+                Asset::stored_energy_kwh(&ev, &AssetState::Ev(state)),
+                Some(20.0)
+            );
+        }
+    }
+
+    #[test]
+    fn energy_to_target_is_what_the_time_to_target_divides_by_the_charge_rate() {
+        let (ev, state) = make_ev(true, 0.5, 0.0);
+        let kwh = ev.energy_to_target_kwh_inner(&state);
+        assert_close(Some(kwh), 12.0);
+        assert_eq!(
+            ev.full_effort_time_to_target_s_inner(&state),
+            crate::entities::units::s_from_h(kwh / ev.max_charge_kw)
+        );
     }
 
     // ── simulate_forward (ev-departure-consolidation) ───────────────────────
@@ -778,6 +872,7 @@ mod tests {
             actual_power_kw: 0.0,
             pending_command_kw: 0.0,
             was_away_by_usage_sim: false,
+            unserved_at_departure_kwh: 0.0,
         };
         for _ in 0..1000 {
             let (ns, _) = ev.step_inner(&state, -10.0, Duration::seconds(1));

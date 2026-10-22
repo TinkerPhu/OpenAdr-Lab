@@ -158,6 +158,14 @@ impl Heater {
         );
     }
 
+    fn stored_energy_inner_kwh(&self, state: &HeaterState) -> f64 {
+        crate::entities::asset_params::heater_energy_above_min_kwh(
+            state.temperature_c,
+            self.temp_min_c,
+            self.thermal_mass_kwh_per_c,
+        )
+    }
+
     pub fn initial_state(cfg: &HeaterParams) -> HeaterState {
         HeaterState {
             temperature_c: cfg.temp_initial_c,
@@ -358,6 +366,24 @@ impl Asset for Heater {
         0.0
     }
 
+    /// Due continuously: the energy to lift the tank back to its comfort floor, zero at or above
+    /// it and inside the solver's tolerance. Electric-equivalent is thermal for a resistive
+    /// element; a heat pump (R-151) would divide by its COP here.
+    fn unserved_energy_kwh(&self, state: &AssetState) -> Option<f64> {
+        let short_kwh = -self.stored_energy_inner_kwh(own(state));
+        Some(if short_kwh > super::heater_declared::SHORTFALL_TOLERANCE_KWH {
+            short_kwh
+        } else {
+            0.0
+        })
+    }
+
+    /// The energy in the tank above its comfort floor (negative below it, so a difference of two
+    /// samples stays exact across the floor).
+    fn stored_energy_kwh(&self, state: &AssetState) -> Option<f64> {
+        Some(self.stored_energy_inner_kwh(own(state)))
+    }
+
     fn control_schema(&self) -> Vec<ControlDescriptor> {
         super::heater_control_schema::control_schema()
     }
@@ -489,6 +515,31 @@ mod tests {
             switching_penalty_eur: 0.0,
             ambient_temp_c: 10.0,
         }
+    }
+
+    fn declared_kwh(declare: fn(&Heater, &AssetState) -> Option<f64>, temperature_c: f64) -> f64 {
+        let heater = hot_water_heater(); // floor 40 C, 0.233 kWh per degree
+        declare(&heater, &AssetState::Heater(state_at(temperature_c, 0.0))).expect("declared")
+    }
+
+    #[test]
+    fn a_tank_below_its_comfort_floor_owes_the_energy_to_lift_it_back() {
+        let kwh = declared_kwh(Asset::unserved_energy_kwh, 36.0);
+        assert!((kwh - 4.0 * 200.0 * 4.186 / 3600.0).abs() < 1e-9, "{kwh}");
+        assert_eq!(declared_kwh(Asset::unserved_energy_kwh, 40.0), 0.0);
+        assert_eq!(declared_kwh(Asset::unserved_energy_kwh, 55.0), 0.0);
+    }
+
+    #[test]
+    fn a_reading_inside_the_tolerance_owes_nothing() {
+        assert_eq!(declared_kwh(Asset::unserved_energy_kwh, 39.999), 0.0);
+    }
+
+    #[test]
+    fn a_tank_stores_the_energy_above_its_comfort_floor() {
+        let kwh = declared_kwh(Asset::stored_energy_kwh, 46.0);
+        assert!((kwh - 6.0 * 200.0 * 4.186 / 3600.0).abs() < 1e-9, "{kwh}");
+        assert_eq!(declared_kwh(Asset::stored_energy_kwh, 40.0), 0.0);
     }
 
     /// Hot water tank fixture: 200 L, 40–80 °C comfort band, low heat loss, 0.5 kW draw.

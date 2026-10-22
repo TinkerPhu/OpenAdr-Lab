@@ -55,6 +55,17 @@ setpoint_kw: number,
  */
 embodied_co2_g_kwh: number | null, 
 /**
+ * Electric-equivalent energy the asset's owner is missing right now
+ * (`Asset::unserved_energy_kwh`); absent when the asset declares none. Lab telemetry: the
+ * fleet report adds its increases (openspec `fleet-service-level`).
+ */
+unserved_energy_kwh?: number, 
+/**
+ * Electric-equivalent energy held in the asset's store (`Asset::stored_energy_kwh`); absent
+ * when it has none.
+ */
+stored_energy_kwh?: number, 
+/**
  * The asset's place in the profile's roster: the arbiter's tie-break between levers of
  * equal cost, the order EVs are offered a surplus in, and the order the VEN UI lists assets
  * in (W6).

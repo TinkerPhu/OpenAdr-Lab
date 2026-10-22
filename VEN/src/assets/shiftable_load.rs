@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use super::own_state::{own, own_mut};
 use super::{
     Asset, AssetCapability, AssetFlexibilityFloor, AssetState, ControlDescriptor, MilpParticipant,
+    TickOverridable, TickOverrides,
 };
 use crate::controller::milp_planner::{AssetMilpContext, ShiftableLoadMilpContext};
 use crate::entities::asset::{ComfortRate, CompletionPolicy, PowerAdjustability, SetpointResponse};
@@ -31,6 +32,11 @@ pub struct ShiftableLoadState {
     /// Run time accumulated so far \[min\]. Only meaningful once `started`.
     pub elapsed_min: f64,
     pub actual_power_kw: f64,
+    /// Latched at the first tick at or after `latest_end`: the job's window is over, so what is
+    /// left of its run is owed (`unserved_energy_kwh`). Never cleared; the asset is removed when
+    /// the job is finished or cancelled.
+    #[serde(default)]
+    pub past_deadline: bool,
 }
 
 impl ShiftableLoadAsset {
@@ -39,7 +45,19 @@ impl ShiftableLoadAsset {
             started: false,
             elapsed_min: 0.0,
             actual_power_kw: 0.0,
+            past_deadline: false,
         }
+    }
+
+    /// Latches `past_deadline` once the clock reaches `latest_end`.
+    fn note_clock(&self, state: &mut ShiftableLoadState, now: DateTime<Utc>) {
+        state.past_deadline |= now >= self.latest_end;
+    }
+
+    /// Energy \[kWh\] of the run still owed, whatever the clock says.
+    fn remaining_energy_kwh(&self, state: &ShiftableLoadState) -> f64 {
+        let remaining_min = (self.duration_min as f64 - state.elapsed_min).max(0.0);
+        crate::entities::units::energy_kwh_from_min(self.power_kw, remaining_min)
     }
 
     pub fn is_finished(&self, state: &ShiftableLoadState) -> bool {
@@ -62,6 +80,7 @@ impl ShiftableLoadAsset {
                     started: state.started,
                     elapsed_min: state.elapsed_min,
                     actual_power_kw: 0.0,
+                    past_deadline: state.past_deadline,
                 },
                 0.0,
             );
@@ -73,6 +92,7 @@ impl ShiftableLoadAsset {
                     started: false,
                     elapsed_min: 0.0,
                     actual_power_kw: 0.0,
+                    past_deadline: state.past_deadline,
                 },
                 0.0,
             );
@@ -88,6 +108,7 @@ impl ShiftableLoadAsset {
                 started: true,
                 elapsed_min: elapsed,
                 actual_power_kw,
+                past_deadline: state.past_deadline,
             },
             actual_power_kw,
         )
@@ -170,6 +191,16 @@ impl Asset for ShiftableLoadAsset {
         Some(crate::entities::units::s_from_min(remaining_min))
     }
 
+    /// Due after its deadline: the energy of the run still owed, until it is finished or removed.
+    fn unserved_energy_kwh(&self, state: &AssetState) -> Option<f64> {
+        let s: &ShiftableLoadState = own(state);
+        Some(if s.past_deadline {
+            self.remaining_energy_kwh(s)
+        } else {
+            0.0
+        })
+    }
+
     fn step(&self, state: &AssetState, setpoint_kw: f64, dt: Duration) -> (AssetState, f64) {
         let s: &ShiftableLoadState = own(state);
         let (ns, p) = self.step_inner(s, setpoint_kw, dt);
@@ -218,6 +249,10 @@ impl Asset for ShiftableLoadAsset {
     fn reset(&self, state: &mut AssetState, values: HashMap<String, f64>) {
         let s: &mut ShiftableLoadState = own_mut(state);
         Self::reset(self, s, values)
+    }
+
+    fn as_tick_overridable(&mut self) -> Option<&mut dyn TickOverridable> {
+        Some(self)
     }
 
     fn kind(&self) -> crate::entities::asset::AssetKind {
@@ -307,6 +342,14 @@ impl Asset for ShiftableLoadAsset {
     }
 }
 
+impl TickOverridable for ShiftableLoadAsset {
+    fn apply_tick_overrides(&mut self, state: &mut AssetState, overrides: &TickOverrides) {
+        if let AssetState::ShiftableLoad(s) = state {
+            self.note_clock(s, overrides.now);
+        }
+    }
+}
+
 impl MilpParticipant for ShiftableLoadAsset {
     /// Only the id, the state and the cycle's grid apply here; a shiftable load reads no
     /// session, target or planner weight.
@@ -365,6 +408,46 @@ impl MilpParticipant for ShiftableLoadAsset {
 mod tests {
     use super::*;
 
+    fn owed_kwh(load: &ShiftableLoadAsset, state: ShiftableLoadState) -> f64 {
+        Asset::unserved_energy_kwh(load, &AssetState::ShiftableLoad(state)).expect("declared")
+    }
+
+    #[test]
+    fn a_load_owes_nothing_before_its_deadline_and_the_rest_of_its_run_after() {
+        let mut load = load(2.0, 60); // 2 kW for 60 min
+        load.latest_end = Utc::now() + Duration::hours(1);
+        let mut state = ShiftableLoadState {
+            started: true,
+            elapsed_min: 18.0,
+            actual_power_kw: 2.0,
+            past_deadline: false,
+        };
+        assert_eq!(owed_kwh(&load, state.clone()), 0.0);
+        load.note_clock(&mut state, load.latest_end - Duration::seconds(1));
+        assert_eq!(owed_kwh(&load, state.clone()), 0.0);
+        load.note_clock(&mut state, load.latest_end);
+        assert!((owed_kwh(&load, state.clone()) - 2.0 * 42.0 / 60.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_finished_load_past_its_deadline_owes_nothing() {
+        let load = load(2.0, 60);
+        let state = ShiftableLoadState {
+            started: true,
+            elapsed_min: 60.0,
+            actual_power_kw: 0.0,
+            past_deadline: true,
+        };
+        assert_eq!(owed_kwh(&load, state), 0.0);
+    }
+
+    #[test]
+    fn a_load_declares_no_stored_energy() {
+        let load = load(2.0, 60);
+        let state = AssetState::ShiftableLoad(ShiftableLoadAsset::initial_state());
+        assert_eq!(Asset::stored_energy_kwh(&load, &state), None);
+    }
+
     #[test]
     fn is_cancellable_only_until_it_has_started() {
         let load = load(2.0, 60);
@@ -374,6 +457,7 @@ mod tests {
             started: true,
             elapsed_min: 5.0,
             actual_power_kw: 2.0,
+            past_deadline: false,
         });
         assert!(!Asset::is_cancellable(&load, &running));
     }

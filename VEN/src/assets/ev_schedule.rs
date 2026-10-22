@@ -322,7 +322,13 @@ impl EvCharger {
             }
         }
         s.was_away_by_usage_sim = away_now;
+        let was_plugged = s.plugged;
         s.plugged = plugged_override.unwrap_or(!away_now);
+        s.unserved_at_departure_kwh = match (was_plugged, s.plugged) {
+            (true, false) => self.energy_to_target_kwh_inner(s),
+            (false, true) => 0.0,
+            _ => s.unserved_at_departure_kwh,
+        };
     }
 
     /// Forces `plugged=false` for any trajectory point the EV is away at
