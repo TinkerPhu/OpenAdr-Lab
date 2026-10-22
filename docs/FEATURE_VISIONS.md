@@ -43,3 +43,19 @@ replan, once such a fault can exist at all.
 **Complexity:** Small once the input exists; the input itself is Medium.
 
 ---
+
+### R-151: Heat pumps and air conditioners as a compressor-asset class
+
+**Req:** assets/ (a new kind beside `heater`), entities/asset.rs, simulator/, controller/milp_planner/ (via `AssetMilpContext`), controller/arbiter/opportunistic.rs
+**Problem:** The only thermal asset is the resistive `heater`: power is continuous from 0 to `max_kw`, switching costs nothing, and its thermal energy is electric energy one to one. A heat pump or an air conditioner (AC) is a different class, and fitting it into `heater` would put a second concept in one place:
+- **Minimum run and minimum off time.** A compressor must run for a minimum interval once started (typically minutes, to return oil and avoid short-cycling wear) and must stay off for a minimum interval after stopping (pressure equalisation). A planner that treats it like a heater would switch it every slot; the 5-minute slot grid is shorter than some of these intervals, so the constraint spans slots.
+- **Staged or modulated power.** Fixed-speed units are on/off at rated power; inverter units modulate between a minimum and a maximum, and below the minimum they must switch off, not run low. This is the `PowerAdjustability` shape of a minimum-power load, not a continuous one.
+- **Electric to thermal conversion is not one to one.** The coefficient of performance (COP, thermal kWh per electric kWh) depends on the outdoor temperature and the supply temperature, so the time to reach a target (`Asset::full_effort_time_to_target_s`) and the unserved energy of GB-58 (reported in electric-equivalent kWh) both come from a curve, not from a constant.
+- **Defrost and start-up transients** (heat pump) and **a latency before the room responds** (AC) make the opportunistic objective's latest-start rule (`opportunistic-deadline-dispatch`) need a lead time that is the asset's own.
+- **An AC is also a thermal load on the building**: its demand follows indoor and outdoor temperature and solar gain, not a stored tank, so its flexibility is a temperature band, not an energy target.
+**Missing input:** a heat-pump/AC model with real figures: a COP curve over outdoor and supply temperature, rated and minimum power, and the manufacturer's minimum run and off times, plus a simulator model that enforces them. Nothing in the codebase carries a compressor state (running time, time since stop) or a COP; the heater's latch (`thermostat_delta_c`) is a temperature deadband and not a time constraint.
+**What's needed before this is buildable:** (1) the compressor timers as asset state, so the asset alone says whether it may start or stop now (asset-competence); (2) the minimum-interval constraint expressed through the declared asset interface so the planner core stays kind-free; (3) the arbiter treats a held compressor as a forced power for the interval, the way it treats a forced heater; (4) UC-14 (thermal feedback loop) gets a real scenario.
+**Gain:** Medium to High — heat pumps are the main flexible thermal load of a modern household, and a naive resistive model would produce plans a real unit cannot follow.
+**Complexity:** Large; the compressor timers and a COP model are the first two steps.
+
+---
