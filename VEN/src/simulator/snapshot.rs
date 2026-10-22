@@ -196,7 +196,10 @@ mod tests {
         let snap = sim.to_sim_snapshot();
         let declared = |id: &str| {
             let a = &snap.assets[id];
-            (a.unserved_energy_kwh.is_some(), a.stored_energy_kwh.is_some())
+            (
+                a.unserved_energy_kwh.is_some(),
+                a.stored_energy_kwh.is_some(),
+            )
         };
         assert_eq!(declared("battery"), (false, true));
         assert_eq!(declared("ev"), (true, true));

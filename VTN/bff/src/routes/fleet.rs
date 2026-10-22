@@ -96,6 +96,60 @@ async fn live(ctx: AppCtx) -> Json<serde_json::Value> {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ServiceQuery {
+    pub from: DateTime<Utc>,
+    /// End of the window; defaults to now.
+    pub to: Option<DateTime<Utc>>,
+}
+
+/// `GET /api/fleet/service?from=&to=` — what the fleet delivered to its owners over a window:
+/// the unserved energy accrued and the change in stored energy, from what every VEN declared on
+/// its snapshots (`fleet_service`). A window that starts before the raw telemetry horizon answers
+/// `available: false` with the reason, never a zero.
+pub async fn fleet_service(
+    State(ctx): State<AppCtx>,
+    Query(q): Query<ServiceQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let now = Utc::now();
+    let to = q.to.unwrap_or(now);
+    if to <= q.from {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "`to` must be after `from`"})),
+        ));
+    }
+    let pool = ctx.fleet_store.read().await.clone();
+    let Some(pool) = pool else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "fleet telemetry store is not connected"})),
+        ));
+    };
+    let rows = fleet_store::asset_samples(&pool, q.from, to, now)
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, "fleet service query failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": "fleet service query failed"})),
+            )
+        })?;
+    let mut body = json!({"from": q.from, "to": to});
+    match rows {
+        Some(rows) => {
+            body["available"] = json!(true);
+            body["report"] =
+                crate::fleet_service::report(&crate::fleet_service::shape_samples(rows));
+        }
+        None => {
+            body["available"] = json!(false);
+            body["reason"] = json!("the window starts before the raw telemetry horizon");
+        }
+    }
+    Ok(Json(body))
+}
+
+#[derive(Debug, Deserialize)]
 pub struct PlanQuery {
     /// The instant the answer is "as of". Defaults to now; an earlier one reproduces the plan
     /// the fleet was working to then, which is what a before/after comparison reads.

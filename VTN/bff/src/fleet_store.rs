@@ -586,6 +586,32 @@ pub async fn power_series(
     Ok((source, group_and_resample(rows, step)))
 }
 
+/// One row per VEN and minute (the last sample in that minute) with the snapshot's per-asset
+/// object, for the service-level report. Only the raw table carries the payload, so a window
+/// that needs the rollup answers `None`: the report is "unavailable" there, never zero.
+pub async fn asset_samples(
+    pool: &PgPool,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> Result<Option<Vec<(String, DateTime<Utc>, Option<Value>)>>> {
+    if source_for(from, now) != "raw" {
+        return Ok(None);
+    }
+    let rows = sqlx::query_as(
+        "SELECT DISTINCT ON (ven_name, date_trunc('minute', ts))
+                ven_name, date_trunc('minute', ts), payload_json -> 'assets'
+         FROM lab_recorder.fleet_telemetry
+         WHERE ts >= $1 AND ts < $2
+         ORDER BY ven_name, date_trunc('minute', ts), ts DESC",
+    )
+    .bind(from)
+    .bind(to)
+    .fetch_all(pool)
+    .await?;
+    Ok(Some(rows))
+}
+
 /// Turn ordered `(ven, ts, value)` rows into one resampled series per VEN.
 ///
 /// Separate from the query so the shaping is testable without a database —

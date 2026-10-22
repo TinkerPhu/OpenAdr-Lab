@@ -7,9 +7,9 @@
 
 ## 2. Fleet report in the BFF
 
-- [ ] 2.1 `fleet_service.rs`: one `accrued_increase(samples)` (sum of positive steps) and a carry-over function (last minus first); verify with unit tests for the spec's scenarios: two departures = 21 kWh, a dropped sample keeps the step, a decrease adds nothing, carry-over -24 kWh, a missing value is skipped and never zero
-- [ ] 2.2 `fleet_store.rs`: a query beside `power_series` returning, per VEN and asset, one sample per minute (the last in the minute) of the two fields from the raw rows, using `source_for`; a window needing the rollup yields "unavailable"; verify by a test over synthetic rows through the shaping function (no database), including a VEN with no samples and a kind the code has never seen (declare-dont-branch: no kind named)
-- [ ] 2.3 `GET /api/fleet/service?from=&to=` in `routes/fleet.rs` and `main.rs`: per-asset, per-VEN and fleet totals, `contributingVens` per total, `available: false` with a reason; verify with a route test and by calling it against the Node2 BFF with a real window once deployed
+- [x] 2.1 `fleet_service.rs`: one `accrued_increase(samples)` (sum of positive steps) and a carry-over function (last minus first); verify with unit tests for the spec's scenarios: two departures = 21 kWh, a dropped sample keeps the step, a decrease adds nothing, carry-over -24 kWh, a missing value is skipped and never zero
+- [x] 2.2 `fleet_store.rs`: a query beside `power_series` returning, per VEN and asset, one sample per minute (the last in the minute) of the two fields from the raw rows, using `source_for`; a window needing the rollup yields "unavailable"; verify by a test over synthetic rows through the shaping function (no database), including a VEN with no samples and a kind the code has never seen (declare-dont-branch: no kind named)
+- [x] 2.3 `GET /api/fleet/service?from=&to=` in `routes/fleet.rs` and `main.rs`: per-asset, per-VEN and fleet totals, `contributingVens` per total, `available: false` with a reason; verify with a route test and by calling it against the Node2 BFF with a real window once deployed
 
 ## 3. Surfaces
 
