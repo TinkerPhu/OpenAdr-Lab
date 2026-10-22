@@ -2,9 +2,9 @@
 title: Real-Measurement MQTT Feeds
 type: component
 created: 2026-08-03
-updated: 2026-10-15
-synced_commit: 4c4f149
-sources: [docs/architecture/real_measurement_mqtt.md, VEN/src/measurement.rs, VEN/src/measurement_translation.rs, VEN/src/controller/measurement_port.rs, VEN/src/entities/measurement.rs, VEN/src/assets/pv.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/mod.rs, VEN/src/tasks/sim_tick/context.rs, VEN/src/routes/measurement.rs, VEN/ui/src/pages/Measurement.tsx, tests/features/real_measurement_mqtt.feature, VEN/docker-compose.yml, VEN/profiles/ven-1.yaml]
+updated: 2026-10-22
+synced_commit: 650b626
+sources: [docs/architecture/real_measurement_mqtt.md, VEN/src/measurement.rs, VEN/src/measurement_translation.rs, VEN/src/controller/measurement_port.rs, VEN/src/entities/measurement.rs, VEN/src/assets/pv.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/tick_inputs.rs, VEN/src/tasks/sim_tick/context.rs, VEN/src/boot/ports.rs, VEN/src/profile/validate.rs, VEN/src/routes/measurement.rs, VEN/ui/src/pages/Measurement.tsx, tests/features/real_measurement_mqtt.feature, VEN/docker-compose.yml, VEN/profiles/ven-1.yaml]
 tags: [measurement, pv, baseload, mqtt, ven, real-hardware]
 ---
 
@@ -46,35 +46,25 @@ Unlike weather, there's no separate status/heartbeat topic: a measurement's own 
 judged purely by how recently a reading arrived (5 min staleness, vs. weather's 2 h — a live
 meter is expected to publish roughly every ~60 s, not hourly).
 
-## Two-gate enablement, extending a gap weather had
+## Two-gate enablement
 
-Weather is gated by env var (`WEATHER_MQTT_HOST` presence) alone at the transport layer, plus
-a *separate*, uncoordinated `weather_pv` profile section that happens to also gate the
-planner-input math. This feature's `measurements:` profile section
-(`pv_enabled`/`base_load_enabled`) was designed explicitly as a second, deliberate gate
-alongside the env var — both must allow a signal for it to take effect — after the user
-pointed out mid-design that env-var-only gating doesn't match how `weather_pv:` already
-works. No `VEN_NAME` branching anywhere; presence is purely config-driven, same principle as
-weather.
+A signal takes effect only when both gates allow it: the transport gate, the `{PV,BASE_LOAD}_MEASUREMENT_MQTT_HOST`
+env var (without it `boot/ports.rs` wires a no-op port), and the profile gate, the measured asset's own
+`measurement: {enabled: true}` (off by default). Env-var-only gating would not match how the PV asset's `weather:`
+block works, so the profile gate is the deliberate second one. The profile gate lives on the asset it measures, so a
+reading reaches only that asset (`simulator::AssetTickFeeds.measured_kw`, keyed by asset id) and `GET /measurement`
+names it as `asset_id` ([[weather-forecast]], [[simulator]]). The old site-level `measurements:` and `weather_pv:`
+sections are refused at boot with the new place named, and at most one asset per kind may enable `measurement`,
+because there is one MQTT topic per signal (`profile/validate.rs`). No `VEN_NAME` branching anywhere; presence is
+purely config-driven, same principle as weather.
 
-Since W5b the profile gate is the measured asset's own `measurement: {enabled: true}` (and the
-weather geometry each PV asset's own `weather:` block); the old site-level sections are refused
-with the new place (`VEN/src/profile/validate.rs`). The reading reaches only that asset
-(`simulator::AssetTickFeeds`), and `GET /measurement` names it as `asset_id` — see
-[[weather-forecast]] and [[simulator]].
+## Precedence rides the existing override blend
 
-## Precedence reuses (and depended on) the weather-blend fix
-
-PV: `measured > weather-derived > sin-model` (3-tier); baseline load: `measured` replaces
-the synthetic profile+noise outright (no intermediate tier). Both feed into
-`PvInverter`/`BaseLoad`'s existing manual-override-offset blend mechanism
-(`assets/pv.rs::step_inner`, `simulator/mod.rs`'s `BaseLoad` tick arm) — the same additive
-blend, not a binary null/keep switch, that a same-day fix
-([[weather-forecast]]'s "found 2026-08-03" note doesn't cover this one; see that component's
-git history around commit `7e5bec2`) made correct for weather immediately before this
-feature was built on top of it. Building the 3-tier precedence directly on that already-fixed
-mechanism, rather than before it, avoided reintroducing the same class of bug (a lingering
-offset silently suppressing the new measured tier).
+PV: `measured > weather-derived > sin-model` (3-tier); baseline load: `measured` replaces the synthetic
+profile+noise outright, with the learned heuristic as an intermediate tier ([[heuristics-pipeline]]). Both
+go through the assets' own `apply_tick_overrides` (`assets/pv.rs::step_inner`, `BaseLoad::natural_base_kw`),
+using the same additive manual-override-offset blend rather than a binary null/keep switch, so a lingering offset
+cannot silently suppress the measured tier.
 
 Neither signal feeds the planner's forward horizon *directly* — a measurement is live ground
 truth for *now*, not a forecast series with future slots. Both are only ever resolved into
@@ -82,7 +72,7 @@ the live tick (`tasks::sim_tick::context::resolve_tick_context`, called once per
 the sync lock, mirroring how weather's own tick-time resolution works), never into
 `services::planning`.
 
-## Indirect path into the forecast: composes with [[heuristics-pipeline]] (found 2026-08-04)
+## Indirect path into the forecast: composes with [[heuristics-pipeline]]
 
 Two features built independently turned out to compose. A measured baseline-load reading
 substituted into `SimState::tick`'s `BaseLoad` arm becomes that tick's `entry.last_power_kw`
@@ -97,10 +87,10 @@ the live MQTT feed within the same minute of enabling it, and `GET /forecast`'s 
 entry was already `"source":"HEURISTIC"` (heuristics job fires on its first check after a
 restart, not just at UTC midnight — see [[heuristics-pipeline]]).
 
-Convergence timeline from `HeuristicsConfig::default()` (`ewma_halflife_days: 14.0`,
-`rolling_window_days: 42`), assuming continuous feed uptime: the most recent 14 days already
+Convergence timeline from `HeuristicsConfig::default()` (`ewma_halflife_days: 28.0`,
+`rolling_window_days: 56`), assuming continuous feed uptime: the most recent 14 days already
 outweighs all older (pre-measurement) history after one half-life; the pre-measurement history
-ages out of the window entirely after the full 42 days. No measured-vs-synthetic provenance
+ages out of the window entirely after the full 56 days. No measured-vs-synthetic provenance
 tag exists on `tick_samples` — a feed dropout during that window silently re-mixes synthetic
 fallback samples into the learned profile with no record of which rows they were. Full writeup:
 `docs/architecture/real_measurement_mqtt.md`'s "Indirect path into the forecast" section.

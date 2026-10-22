@@ -30,7 +30,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[opportunistic-objective]] — non-planning dispatch on the same site: one `opportunistic_step` live and as forecast, for planner-vs-baseline comparison
 - [[deviation-arbiter]] — two passes on one lever machinery (deviation correction, limit enforcement), per-asset levers, tick order and dispatch stages, held-correction release, lag bridge, residual escalation to replan, `/arbiter-settings` and diagnostics
 - [[weather-forecast]] — MQTT-ingested external forecast → physics-based PV generation, wired into both the planner and the live simulator's PV ground truth; source-liveness E2E coverage (R-56)
-- [[real-measurement-mqtt]] — real PV/baseline-load meter readings over MQTT (ven-1 only), 3-tier PV precedence (measured > weather > sin), two-gate (env var + profile) enablement, live-tick-only (never feeds the planner)
+- [[real-measurement-mqtt]] — PV / base-load MQTT feeds: env-var gate plus the measured asset's own `measurement.enabled`, per-asset reading feed, precedence over weather and the learned heuristic, `GET /measurement`, forecast convergence (28d half-life / 56d window)
 
 ## Concepts
 - [[openadr-3]] — protocol entities, event types, certification profiles, 3.0 vs 3.1 skew
@@ -68,4 +68,4 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[dso-retailer-unbundled-tariff-coordination]] — legally-unbundled DSO/retailer tariff coordination: multi-program protocol support, why an unbounded virtual DSO price is dishonest (shadows the real tariff), DLMP shadow-price duality with the envelope, regulator revenue-cap as the actual answer to "who sets the relation"
 
 ---
-Pages: 48 · Last sync: 2026-10-22 (scoped: ven-ui, milp-planner, asset-layer, deviation-arbiter, openadr-interface, history-store, simulator, reliability-and-config, heuristics-pipeline re-verified; other pages see review.md).
+Pages: 48 · Last sync: 2026-10-22 (scoped: ven-ui, milp-planner, asset-layer, deviation-arbiter, openadr-interface, history-store, simulator, reliability-and-config, heuristics-pipeline, real-measurement-mqtt re-verified; other pages see review.md).

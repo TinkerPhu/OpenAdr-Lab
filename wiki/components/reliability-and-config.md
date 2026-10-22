@@ -88,7 +88,7 @@ profile, one per VEN instance.
 | Planning loop startup delay | `planner.planning_initial_delay_s` (default 5) |
 | Replan interval | `planner.replan_interval_s` (default 300) |
 | Peak-demand penalty rules | `planner.penalty_rules` (default `[]` = off) — see [[milp-planner]] |
-| Real-measurement feed enablement | `measurements.pv_enabled` / `.base_load_enabled` (default `false`) — second gate alongside the `{PV,BASE_LOAD}_MEASUREMENT_MQTT_HOST` env vars, see [[real-measurement-mqtt]] |
+| Real-measurement feed enablement | the measured asset's own `measurement.enabled` (default `false`) — second gate alongside the `{PV,BASE_LOAD}_MEASUREMENT_MQTT_HOST` env vars, see [[real-measurement-mqtt]] |
 | Poll cadence | `polling.events_secs` / `programs_secs` / `reports_secs` (30/30/60); the `POLL_*_SECS` env vars exist only as test overrides (`tasks/poll_config.rs`) |
 | Poll-loop startup jitter | `polling.startup_jitter_fixed_pct` + `startup_jitter_random_max_pct`, as a share of `events_secs` (GB-09): a one-time pre-loop delay so a fleet brought up together does not poll in lockstep; see [[fleet-tooling]] |
 | History retention | `history.retention_days` (default 90), see [[history-store]] |
