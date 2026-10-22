@@ -109,8 +109,9 @@ contract demands**. Protocol context: [[openadr-3]]; business actors: [[demand-r
   capacity to the aggregator for a monthly fee; my HEMS reserves a SoC band for my own
   use and lets the aggregator control the rest."
 - **Expectations:** tightest coupling of all: VTN expects near-real-time obedience and
-  telemetry; VEN expects a guaranteed private SoC reserve and payment. In the lab this
-  is a gap — `DISPATCH_SETPOINT` is unhandled ([[openadr-spec-use-cases]] §8.5 ❌).
+  telemetry; VEN expects a guaranteed private SoC reserve and payment. In the lab
+  `DISPATCH_SETPOINT` is handled (net site power steered with the storage levers), while
+  `CHARGE_STATE_SETPOINT` is received and not applied ([[openadr-spec-use-cases]] §8.5 🟡).
 
 ## Why would a VEN join multiple programs?
 
