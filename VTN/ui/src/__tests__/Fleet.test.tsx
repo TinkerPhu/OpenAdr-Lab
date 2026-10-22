@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
@@ -108,6 +108,8 @@ vi.mock("../api/hooks", () => ({
   // it only has to be idle rather than absent.
   useFleetReactions: vi.fn(() => ({ data: undefined, isError: false })),
   useFleetSignals: vi.fn(() => ({ data: undefined, isError: false })),
+  // The service-level card has its own test file (ServiceDelivered.test.tsx); here it is idle.
+  useFleetService: vi.fn(() => ({ data: undefined, isError: false })),
   useVenPlan: vi.fn(() => ({ data: { objective: "opportunistic", solve_status: "SIMULATED", slots: [] }, isError: false })),
   useSetVenObjective: vi.fn(() => ({ mutate: setVen, isError: false })),
   useSetFleetObjective: vi.fn(() => ({ mutate: setFleet, isError: false })),
@@ -270,5 +272,11 @@ describe("FleetPage", () => {
     expect(screen.getByTestId("fleet-plan-chart-stub")).toHaveAttribute("data-reference", mockPlan.at);
     expect(screen.getByTestId("fleet-plan-objectives")).toHaveTextContent("Objectives: min_cost 1");
     expect(screen.getByTestId("fleet-plan-objectives")).toHaveTextContent("objective switched at");
+  });
+
+  // fleet-service-level: beside the plan comparison, what the switch did to what owners received.
+  it("shows the service delivered card once an objective switch is known", () => {
+    renderFleet();
+    expect(within(screen.getByTestId("fleet-service-card")).getByTestId("service-loading")).toBeInTheDocument();
   });
 });

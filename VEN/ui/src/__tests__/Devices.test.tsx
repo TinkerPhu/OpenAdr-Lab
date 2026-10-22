@@ -290,6 +290,32 @@ describe("DevicesPage", () => {
     expect(within(row).getByText(/60\.0 kWh/)).toBeInTheDocument();
   });
 
+  // fleet-service-level: each asset's own unserved and stored energy, where it declares them
+  it("shows the unserved and stored energy each asset declares, and a dash where it declares none", () => {
+    mockSimData.mockReturnValue({
+      ts: "2026-01-01T10:00:00Z",
+      grid: makeGrid({ net_power_kw: 0, voltage_v: 230, import_kwh: 0, export_kwh: 0 }),
+      assets: makeAssets({
+        ev: {
+          power_kw: 0,
+          soc: 0.5,
+          max_charge_kw: 7.4,
+          battery_kwh: 60,
+          unserved_energy_kwh: 15,
+          stored_energy_kwh: 30,
+        },
+        battery: { power_kw: 0, soc: 0.6, capacity_kwh: 10, stored_energy_kwh: 6 },
+      }),
+    });
+    renderPage();
+    const ev = screen.getByTestId("asset-specs-row-ev");
+    expect(within(ev).getByTestId("asset-unserved-energy")).toHaveTextContent("15.0 kWh");
+    expect(within(ev).getByTestId("asset-stored-energy")).toHaveTextContent("30.0 kWh");
+    const battery = screen.getByTestId("asset-specs-row-battery");
+    expect(within(battery).getByTestId("asset-unserved-energy")).toHaveTextContent("—");
+    expect(within(battery).getByTestId("asset-stored-energy")).toHaveTextContent("6.0 kWh");
+  });
+
   // W6: one card per EV, each with its own settings and requests, titled with its asset id.
   it("shows one card per EV, each with its own opportunistic-charging switch", () => {
     mockSimData.mockReturnValue(
