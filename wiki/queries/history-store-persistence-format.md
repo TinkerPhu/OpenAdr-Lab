@@ -2,9 +2,9 @@
 title: History store persistence format, time encoding, compaction, docker location
 type: query
 created: 2026-07-10
-updated: 2026-08-09
-synced_commit: 4c4f149
-sources: [VEN/src/history_store/schema.rs, VEN/src/history_store/mod.rs, VEN/src/tasks/history_sampler/accumulator.rs, VEN/src/main.rs, VEN/docker-compose.yml, VEN/src/profile/schema.rs, VEN/src/profile/defaults.rs]
+updated: 2026-10-22
+synced_commit: 650b626
+sources: [VEN/src/history_store/schema.rs, VEN/src/history_store/mod.rs, VEN/src/services/history_sampling.rs, VEN/src/tasks/history_sampler/mod.rs, VEN/src/boot/ports.rs, VEN/docker-compose.yml, VEN/src/profile/schema.rs, VEN/src/profile/defaults.rs]
 tags: [history, sqlite, time, retention, docker]
 ---
 
@@ -12,23 +12,22 @@ tags: [history, sqlite, time, retention, docker]
 
 User asked: how is past data stored in SQLite, is there a special time format, is every
 asset's time stored, is compaction foreseen, and where do the SQLite files live in docker.
-Answered by reading the actual Phase 1 source directly (not just [[history-store]]'s prose)
+Answered by reading the source directly (not just [[history-store]]'s prose)
 since this is a load-bearing operational question.
 
 ## Schema and time format
 
-`VEN/src/history_store/schema.rs` was at schema v8 when this page was last fully verified
-(`PRAGMA user_version`, applied stepwise via `SCHEMA_V1`..`SCHEMA_Vn`; it is at v12 as of
-2026-10-04 — v12 adds `tick_samples.plugged` and converts `curtailment_source` from names to the
-live numeric code, see [[history-store]]). The original v1 tables were `tick_samples`,
-`grid_samples`, `plan_snapshots`, `events_received`, `reports_sent`, `ledger_periods`; v2
-added `notifications`, v3 `user_settings`, v5/v6 extended `tick_samples` with PV curtailment
-columns. **v7 drops `plan_snapshots`** (R-63: its only writer was never called from any
-production path — `append_plan_snapshot`/`query_plans` and the route/UI panel reading it back
-were dead code, always empty). **v8 adds `forecast_accuracy_samples`**
-(`asset_id`, `lead_kind` [`near`/`far`], `target_ts`, `predicted_kw`, `predicted_at`,
-`actual_kw`, `actual_at`, indexed on `(asset_id, target_ts)`) — see [[history-store]]'s
-"Forecast accuracy tracking" section and `docs/architecture/VEN_ARCHITECTURE.md` §4.9a. All
+`VEN/src/history_store/schema.rs` holds the schema, versioned by `PRAGMA user_version` and applied
+stepwise (`SCHEMA_V1`..`SCHEMA_V12`; currently **v12**). The tables are `tick_samples`,
+`grid_samples`, `events_received`, `reports_sent`, `ledger_periods`, `notifications` (v2; dedup
+columns v4), `user_settings` (v3), `forecast_accuracy_samples` (v8: `asset_id`, `lead_kind`
+[`near`/`far`], `target_ts`, `predicted_kw`, `predicted_at`, `actual_kw`, `actual_at`, indexed on
+`(asset_id, target_ts)`) and `plan_history` (v10, one narrow row per plan cycle). The columns added
+since: PV curtailment on `tick_samples` (v5/v6), the capacity envelope on `grid_samples` (v9) and
+its flexibility headroom (v11), and `tick_samples.plugged` with `curtailment_source` stored as the
+numeric code (v12). The `plan_snapshots` blob table was dropped at v7 (R-63: nothing ever read it
+back); `plan_history` is its typed replacement. Each family is documented in
+[[history-store]]. All
 timestamp columns across every table are `INTEGER` — **Unix epoch seconds**, not
 milliseconds or ISO-8601 text.
 Conversion is centralized in `VEN/src/history_store/mod.rs`:
@@ -49,10 +48,10 @@ stored, which matches the 1-minute sampling cadence below.
 minute (not per-asset, since they aren't asset-scoped quantities).
 
 Critically, `power_kw`/`soc_pct`/`temperature_c` are **means over the minute**, not
-instantaneous readings: `HistorySampler`
-(`VEN/src/tasks/history_sampler/accumulator.rs`) accumulates every 1-second sim tick into
-a running per-asset sum, and flushes to the DB only on a wall-clock minute rollover
-(`now.timestamp() / 60 != previous_minute`). SOC/temperature means are computed only over
+instantaneous readings: the pure accumulator
+in `VEN/src/services/history_sampling.rs` (driven by the loop in `VEN/src/tasks/history_sampler/`)
+accumulates every 1-second sim tick into a running per-asset sum, and flushes only on a minute
+rollover of its injected clock (`now.timestamp() / 60 != window_minute`). SOC/temperature means are computed only over
 samples where that field was actually present, so an asset lacking `temp_c` doesn't drag
 its mean toward zero.
 
@@ -61,9 +60,9 @@ its mean toward zero.
 There is no tiered compaction (e.g. keep raw for a week, hourly after a month). Retention
 is a single cutoff, `HistoryConfig.retention_days` (`VEN/src/profile/schema.rs`,
 defaulting to 90 in `VEN/src/profile/defaults.rs`), applied by
-`SqliteHistoryStore::prune_before(cutoff)`: a `DELETE ... WHERE <ts-col> < ?` across seven
+`SqliteHistoryStore::prune_before(cutoff)`: a `DELETE ... WHERE <ts-col> < ?` across eight
 tables (`tick_samples`, `grid_samples`, `events_received`, `reports_sent`, `ledger_periods`,
-`notifications`, `forecast_accuracy_samples` — `user_settings` is current-state, not
+`notifications`, `forecast_accuracy_samples`, `plan_history` — `user_settings` is current-state, not
 time-series, so it's exempt), followed by `PRAGMA wal_checkpoint(PASSIVE)` to reclaim WAL
 space without blocking writers. This runs once per calendar day (the sampler's day-boundary
 check), not per write. The whole store is optional: `profile.history.enabled: false` skips
@@ -71,7 +70,7 @@ constructing `SqliteHistoryStore` and spawning the sampler entirely.
 
 ## Docker location
 
-`main.rs` derives `data_dir` from `PERSIST_PATH`'s parent (fallback `/data`) and opens
+`boot/ports.rs` (`open_history_store`) takes `data_dir` (from `PERSIST_PATH`'s parent, fallback `/data`) and opens
 `{data_dir}/history.sqlite`. `VEN/docker-compose.yml` sets `PERSIST_PATH:
 /data/state.json` per VEN and bind-mounts `./data/ven-N:/data`, so on Node1 the files are at:
 
