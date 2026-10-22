@@ -23,7 +23,7 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[ven-ui]] — React SPA, multi-VEN context, timeline with now-point, History page (last-24h default, forecast-accuracy overlay), shared chart-kit (TimeSeriesChart/StackedTimeSeriesChart/CurveChart), nullable-slider convention
 - [[reliability-and-config]] — supervised background tasks + `/tasks/status`, `DomainError` variants and the `routes/error.rs` mapping, poll backoff, boot-time profile validation, config knobs (profile vs env)
 - [[history-store]] — HistoryPort + SqliteHistoryStore (schema v12), 1-minute sampler, forecast-accuracy and plan-quality history, EV plugged/curtailment-source rows, BFF recorder (single credential, health status, fleet telemetry link), SettingsPort
-- [[fleet-tooling]] — fleet.sh (up/down/status), bulk VEN registration, GB-06/GB-09
+- [[fleet-tooling]] — standing ven-1..20 fleet, fleet.sh (up/down/status), bulk 3.1 VEN provisioning, per-VEN broker credentials, db_reset
 - [[experiment-harness]] — scenario YAMLs (S-1..S-10), real-time runner and resumable batch, stakeholder KPIs with measured limit compliance, comparison reports
 - [[notifications]] — user notification feed: ring + SSE + persistence, edge-triggered producers, dedup_key rolling-window collapse + history viewer
 - [[heuristics-pipeline]] — base-load learner: seven weekday buckets shrunk toward the overall mean, EWMA window, profile knobs, daily job, asset-owned forecast, forecast accuracy, BASELINE reports
@@ -68,4 +68,4 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[dso-retailer-unbundled-tariff-coordination]] — legally-unbundled DSO/retailer tariff coordination: multi-program protocol support, why an unbounded virtual DSO price is dishonest (shadows the real tariff), DLMP shadow-price duality with the envelope, regulator revenue-cap as the actual answer to "who sets the relation"
 
 ---
-Pages: 48 · Last sync: 2026-10-22 (scoped: ven-ui, milp-planner, asset-layer, deviation-arbiter, openadr-interface, history-store, simulator, reliability-and-config, heuristics-pipeline, real-measurement-mqtt, experiment-harness re-verified; other pages see review.md).
+Pages: 48 · Last sync: 2026-10-22 (scoped: ven-ui, milp-planner, asset-layer, deviation-arbiter, openadr-interface, history-store, simulator, reliability-and-config, heuristics-pipeline, real-measurement-mqtt, experiment-harness, fleet-tooling re-verified; other pages see review.md).

@@ -2,96 +2,98 @@
 title: Fleet Tooling
 type: component
 created: 2026-07-11
-updated: 2026-07-31
-synced_commit: aff3f57
-sources: [fleet.sh, scripts/gen_fleet_profiles.py, scripts/fleet_status.py, scripts/db_reset.sh, scripts/seed_vtn.py, VEN/src/config.rs]
+updated: 2026-10-22
+synced_commit: 650b626
+sources: [fleet.sh, scripts/gen_fleet_profiles.py, scripts/fleet_status.py, scripts/db_reset.sh, scripts/seed_vtn.py, scripts/personas.py, scripts/gen_fleet_mqtt_secrets.py, VEN/scale_out/README.md, VEN/scale_out/node2/docker-compose.yml, VEN/docker-compose.yml, VEN/profiles/README.md, VEN/src/config.rs, VEN/src/profile/polling.rs]
 tags: [fleet, docker, provisioning, ven, phase2]
 ---
 
 # Fleet Tooling
 
-Phase 2 ("Fleet Enablement") replaces the hand-seeded trio ([[deployment-topology]]'s
-`ven-{1,2,3}`) with `fleet.sh up N` — an arbitrary-size, disposable VEN fleet for load
-and scaling work, layered *alongside* the seeded trio rather than replacing it.
+There are two ways a lab fleet exists, and they differ in how much of the deployment is
+generated:
 
-## Why this shape: the self-registration dead end
+- **The standing fleet** — `ven-1` … `ven-20` with hand-written profiles
+  (`VEN/profiles/ven-N.yaml`, varied asset mixes) and hand-written compose files: `ven-1`…`ven-3` in
+  `VEN/docker-compose.yml` on the primary host, `ven-4`…`ven-20` in `VEN/scale_out/node2/docker-compose.yml`
+  on the second ([[deployment-topology]]). This is what the experiments and fleet monitoring run against.
+- **The generated fleet** — `fleet.sh up N`, an arbitrary-size disposable fleet of `fleet-ven-NNN` for load and
+  scaling work, layered alongside the standing one (Phase 2, "Fleet Enablement").
 
-The phase's original plan had each VEN self-register on startup (`POST /vens` with its
-own credential). Investigation before writing any code found this is architecturally
-blocked in this project's openleadr-rs fork: `POST /vens`
-(`openleadr-rs/openleadr-vtn/src/api/ven.rs`) is gated by a hardcoded `VenManagerUser`
-extractor, not an OAuth scope — a VEN's own credential (role `VEN`) can never call it,
-regardless of what scope it's granted.
+## The standing fleet and scale-out
 
-Three options were weighed: give every fleet VEN a VenManager credential (a real
-over-privilege that gets worse as fleet size grows), patch the openleadr-rs fork (real
-upstream-fork surgery for a project trying to diverge from it as little as possible),
-or register the whole fleet in bulk with a VenManager credential *before* any VEN
-container starts. The third was chosen — no fleet VEN ever holds an elevated
-credential; the registration step lives entirely in `gen_fleet_profiles.py`, reusing
-the existing, already-idempotent `provision_vens()` from `scripts/seed_vtn.py` (the
-same function that provisions `ven-1`/`ven-2`/`ven-3`).
+`VEN/scale_out/nodeN/` holds one additional physical host's deployment. The numbering starts at 2 because
+each `nodeN` is the Nth host *beyond* the primary, whose own compose file is deliberately not renamed. A
+second host cannot join the primary's docker network or resolve `vtn`/`bff` by DNS, so its compose reaches the
+primary over the LAN (`PRIMARY_HOST_LAN_IP` in its `.env`) and bind-mounts its own nginx config that points the
+UI's registry proxy at the primary's BFF. Profiles stay in `VEN/profiles/`, because they are application
+configuration independent of the host that runs them; `data/` is git-ignored and must be owned by the VEN's
+non-root uid (2000:2000).
 
-## `fleet.sh` — the three subcommands
+Every VEN in both compose files reaches the lab's fleet broker for live telemetry (`FLEET_MQTT_HOST/PORT/
+USERNAME`; [[fleet-monitoring]]). The password is **derived per VEN**, not shared: `scripts/gen_fleet_mqtt_secrets.py`
+computes `HMAC-SHA256(root secret, ven name)`, so one root secret yields any number of VEN credentials and the
+same VEN gets the same password on both hosts without exchanging anything. The root never leaves the operator;
+the script emits the broker's account list (`--env-file`) and, per VEN, a file carrying only that VEN's
+`FLEET_MQTT_PASSWORD` (`--per-ven-dir`) — a file per VEN rather than one aggregate because compose's
+`env_file:` feeds the container but is not a source for `${...}` interpolation in the same service, so an
+interpolated per-VEN variable resolves to the empty string silently. The files are git-ignored and optional, so
+a bare checkout starts and the VEN fails to authenticate loudly instead of sharing a credential quietly
+(an ACL pins each credential to its own topic; `scripts/test_fleet_acl.sh`).
 
-- **`up N [--seed S] [--fresh]`**: `scripts/gen_fleet_profiles.py` generates N
-  profiles (`fleet-ven-{i:03d}`) with a randomized-but-seeded asset mix (EV/battery
-  presence, capacities, PV/base-load scale — same shape as the hand-written
-  `ven-1/2/3` profiles), a `VEN/docker-compose.fleet.yml` override, and a
-  `VEN/fleet/manifest.json`; bulk-provisions all N via `provision_vens()`; then
-  `docker compose up -d --build` and health-polls each instance. `--fresh` runs
-  `db_reset.sh` first.
-- **`down [--purge]`**: stops the fleet containers; `--purge` also removes the
-  generated data directories, profiles, compose file, and manifest — a clean slate
-  for the next `up`.
-- **`status`**: `scripts/fleet_status.py` — per-VEN `/health` plus a cross-check
-  against the VTN's own `GET /vens` (using the `ven-manager` fixture credential) so a
-  container that's "up" but never actually registered is visible as a mismatch.
+## Provisioning: why bulk, with a business credential
 
-## Personas (Phase 4, WP4.5)
+The phase's original plan had each VEN self-register at startup. That is blocked by the VTN: creating VEN objects
+needs a business-level credential, which a VEN must never hold (a fleet-wide over-privilege that grows with the
+fleet). So registration is done **once, in bulk, before the containers start**, by
+`provision_vens()` in `scripts/seed_vtn.py` — the same idempotent function that provisions the standing 20.
 
-`fleet.sh up N --personas eco:0.4,comfort:0.4,commuter:0.2` assigns each
-generated VEN a persona (seeded largest-remainder split — `scripts/personas.py`
-is the single source of truth, with a `python3 scripts/personas.py` self-check).
-The persona nudges the generated asset mix (EV/battery probability, base-load
-range) and lands in `VEN/fleet/manifest.json`; at experiment time
-`run_experiment.py --personas` gives each fleet VEN its persona's EV session
-(request mode / target / departure / budget) and comfort-curve override, and
-`kpi.py --manifest` segments KPIs per persona ([[experiment-harness]]).
-Presets are pure configuration over the Phase-4 features — documented in
-`VEN/profiles/README.md`.
+On OpenADR 3.1 it is three calls under the lab's one bootstrap business client (`bl-client`, the only user in
+SQL, `VTN/fixtures/01_bl_client.sql`): create the user **with its scopes already set**, give it a credential,
+create the VEN object carrying the `clientID`. Setting the scopes in the first call closes the window in which
+a VEN could mint a scope-less token and then poll an empty world for the token's lifetime (GB-49,
+[[openadr-interface]]). An already-provisioned VEN (its credential answers) is reconciled rather than skipped.
+`seed_vtn.py` also seeds the demo programs and events and declares every payload's quantity and unit on the wire,
+each program pointing at the published profile document ([[wire-contract]]).
 
-## GB-09: poll-startup jitter, not per-profile intervals
+## `fleet.sh` — the generated fleet
 
-The backlog item asked for poll intervals to become a profile key ("useful for
-testing"). Investigation found the real goal — "N VENs don't align their polls" — is
-met more simply by a one-time startup delay: `VEN/src/config.rs` gained
-`poll_startup_jitter_s` (env `POLL_STARTUP_JITTER_S`), threaded into all three poll
-spawners ([[reliability-and-config]]) as a sleep before their first poll attempt. The
-generator staggers this by instance index (4s stride). Moving poll intervals into the
-profile schema itself was judged unnecessary scope for what the goal actually needed.
+- **`up N [--seed S] [--fresh] [--personas …]`** runs `scripts/gen_fleet_profiles.py`, which writes N seeded
+  profiles (`fleet-ven-NNN`: PV and base load always, EV and battery by probability), a
+  `VEN/docker-compose.fleet.yml` and a `VEN/fleet/manifest.json`, then bulk-provisions through
+  `provision_vens()`; then `docker compose up -d --build` and a health poll per instance (ports from 8300).
+  `--fresh` runs `db_reset.sh` first.
+- **`down [--purge]`** stops the fleet; `--purge` also removes the generated data (through a throwaway root
+  container, since bind-mount directories are created root-owned), profiles, compose file and manifest.
+- **`status`** (`scripts/fleet_status.py`): per-VEN `/health` cross-checked against the VTN's own VEN list, so a
+  container that is up but never registered shows as a mismatch.
 
-## GB-06: `scripts/db_reset.sh`
+Personas (`scripts/personas.py`, the single source of truth, self-checking) are `eco` (opportunistic EV, aggressive
+comfort curve), `comfort` (as-soon-as-possible EV, flat high curve) and `commuter` (by-deadline EV ready at 07:00).
+`--personas eco:0.4,comfort:0.4,commuter:0.2` assigns them by seeded largest-remainder split, nudges the generated
+asset mix and records the persona in the manifest; the experiment harness then gives each VEN its persona's EV
+session and comfort override at run time ([[experiment-harness]]).
 
-Drops and recreates the VTN's `public` (openleadr-rs's own tables, re-applied via
-SQLx auto-migration on VTN restart) and `lab_recorder` ([[history-store]]'s VTN-side
-recorder schema) Postgres schemas, then reloads
-`openleadr-rs/fixtures/test_user_credentials.sql` — replacing the manual `docker exec
-psql < fixtures.sql` step from the original setup procedure (see README.md §Setup).
+> **DRIFT** The generator has not followed the VEN's later changes, so `fleet.sh up` is not known to work today.
+> (1) The generated compose uses build context `.` (the `VEN/` directory) with `Dockerfile`, but the VEN image now
+> builds from the repository root (`VEN/Dockerfile` copies `lab-core/`), as the hand-written compose files do.
+> (2) It sets `POLL_STARTUP_JITTER_S`, which `VEN/src/config.rs` no longer reads: startup jitter is now the profile's
+> `polling.startup_jitter_fixed_pct` / `startup_jitter_random_max_pct` (a share of `events_secs`; the
+> `POLL_STARTUP_JITTER_*_PCT` env vars are test overrides), so the staggering is silently inert and a generated fleet
+> brought up together polls in lockstep ([[reliability-and-config]]). (3) It carries no `FLEET_MQTT_*` settings, so
+> generated VENs are invisible to [[fleet-monitoring]]. Re-verification needs a docker host; see [[ven-code-vs-docs-audit]] for the wiki's
+> record of other open drifts.
 
-## Verified live on Node1; N=10 deliberately deferred
+## `scripts/db_reset.sh`
 
-A full `up 3` → `status` → idempotent second `up` (all three VENs correctly reported
-"already provisioned — skipping") → `down --purge` cycle ran clean, including real
-MILP plan generation on a fleet VEN and the per-instance jitter visible in its logs.
-Per-VEN memory is modest (13–80MB at N=3) — not the constraint. What is: this Node1
-([[deployment-topology]]) already runs roughly 20 unrelated production containers
-with only ~660MB free RAM and a load average around 3 *before* the fleet starts, and
-a single VEN's MILP solve alone briefly used 109% CPU. Concurrent solves across 10
-VENs on this shared quad-core box risk starving those other services — a CPU, not
-memory, constraint. The full N=10 exit demonstration is deferred to a deliberately
-scheduled low-usage window rather than run ad hoc.
+Drops and recreates the VTN's `public` schema (re-migrated on VTN restart) and reloads the bootstrap client fixture,
+replacing a manual `psql < fixtures.sql` step. **`lab_recorder` is preserved by default**: it holds the BFF recorder's
+history, over a million `reports_received` rows accumulated across months, and nothing regenerates it. A clean VTN
+bring-up has no reason to destroy it; the script once dropped it unconditionally. `--wipe-recorder` drops it too,
+printing the row count first ([[history-store]] for the VEN-side counterpart, [[vtn-stack]]).
 
-Phase 3's [[experiment-harness]] builds on this tooling: `run_experiment.py`
-follows the same run-on-the-docker-host convention and its scenarios drive the
-same stack the fleet brings up.
+## Capacity
+
+Per-VEN memory is modest; the constraint on a shared host is CPU, because concurrent MILP solves across many VENs
+compete with the other production containers ([[milp-planner]]). That is why the standing fleet is split across two
+hosts, and why the N=10 exit demonstration was left to a scheduled low-usage window rather than run ad hoc.
