@@ -2,31 +2,58 @@
 title: Deviation Arbiter
 type: component
 created: 2026-07-28
-updated: 2026-10-15
-synced_commit: dfdb62b
-sources: [VEN/src/controller/arbiter.rs, VEN/src/controller/arbiter/, VEN/src/entities/arbiter_residual.rs, VEN/src/tasks/sim_tick/arbiter_glue.rs, VEN/src/tasks/sim_tick/tick.rs, VEN/src/state/arbiter.rs, VEN/src/routes/hems/arbiter.rs, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_milp_planner.md, docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md, docs/reference/KEY_LEARNINGS.md, docs/history/project_journal.md]
+updated: 2026-10-21
+synced_commit: 650b626
+sources: [VEN/src/controller/arbiter.rs, VEN/src/controller/arbiter/, VEN/src/entities/arbiter_residual.rs, VEN/src/tasks/sim_tick/arbiter_glue.rs, VEN/src/tasks/sim_tick/setpoints.rs, VEN/src/tasks/sim_tick/tick.rs, VEN/src/state/arbiter.rs, VEN/src/routes/hems/arbiter.rs, VEN/ui/src/components/devices/ArbiterSettingsCard.tsx, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_milp_planner.md, docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md, docs/reference/KEY_LEARNINGS.md, docs/history/project_journal.md]
 tags: [arbiter, deviation, real-time, marginal-cost, ven]
 ---
 
 # Deviation Arbiter
 
-The single real-time layer that reconciles the [[milp-planner]]'s plan against what the
-[[simulator]] actually measures each tick, replacing the ad hoc mix of the opportunistic
-EV-surplus overlay and no owner for "who corrects a deviation." `controller::arbiter::reconcile`
-runs once per 1 s tick (`tasks/sim_tick/arbiter_glue.rs`), ranks the available levers
-(battery, EV, heater-pause, heater emergency curtail/absorb, PV curtailment) by their
-current marginal €/kWh, and greedily consumes the tick's `deviation_kw` cheapest-lever-first,
-respecting each lever's remaining capacity (an EV already at target SoC or a battery at its
-SoC limit contributes zero, not merely low priority) — `docs/architecture/VEN_ARCHITECTURE.md`
-§2.1.
+The single owner of every reactive (non-plan, non-VTN-override) actuator adjustment: it reconciles
+the [[milp-planner]]'s plan against what the [[simulator]] actually measures each tick, and keeps a
+hard import limit. Two passes run through **one shared lever machinery**
+(`controller/arbiter/ranked.rs::apply_ranked_levers`): candidate levers, ranked by current marginal
+€/kWh with preemption-margin hysteresis, applied greedily cheapest first, each consuming what it
+actually achieved and respecting its remaining capacity (an EV at target SoC or a battery at its SoC
+limit contributes zero, not merely low priority). What differs between the passes is data
+(`LeverPolicy`: `DEVIATION_POLICY`, `DISPATCH_POLICY`, the limit pass's own), never a second code path
+(`docs/architecture/VEN_ARCHITECTURE.md` §2.1, "Arbiter").
 
-Since W5a (`bdc6236c`) a lever belongs to the asset that declares it (`Asset::arbiter_lever`,
-`entities/asset.rs::ArbiterLeverKind`), not to a fixed asset id: two batteries are two levers,
-ranked like any others, with a cost tie broken by lever-kind precedence and then roster order
-(`VEN/src/controller/arbiter/ranked.rs`). Diagnostics name a lever `<kind>:<asset_id>`, EVs each have
-their own overlay, and the [[simulator]] receives the heater emergency mode and the EV departure per
-asset. The dispatch override and the comms-loss clamp use the same declarations
-(`controller/arbiter/dispatch.rs`, `tasks/sim_tick/dispatch_override.rs`) — see [[asset-layer]].
+- **Deviation correction** (`reconcile`, `deviation_arbiter_enabled`, default off): corrects the
+  difference between a live projection of net site power and the plan's signed net.
+- **Limit enforcement** (`limit::enforce_import_limit`, `limit_enforcement_enabled`, default on): the
+  second pass (GB-47). It is memoryless and recomputed each tick from the tick's setpoint map, and it may
+  cut a planned EV allocation or discharge the battery whatever the objective, so a timed-out MILP
+  incumbent that put a heater stage inside a cap, or unforecast load, is met from the next tick while the
+  planner catches up. Excess nothing can shed (forced power, the heater's comfort floor) is reported as
+  `unresolved_kw`, never hidden.
+
+A lever belongs to the asset that declares it (`Asset::arbiter_lever`,
+`entities/asset.rs::ArbiterLeverKind`: `Storage`, `SurplusCharge`, `PausableLoad`), not to a fixed asset
+id: two batteries are two levers, ranked like any others, with a cost tie broken by lever-kind
+precedence and then roster order (`controller/arbiter/ranked.rs`). Diagnostics name a lever
+`<kind>:<asset_id>`, EVs each have their own overlay, and the [[simulator]] receives the heater
+emergency mode and the EV departure per asset. PV and base load are not levers; the arbiter counts their
+**previewed** power for this tick (`LiveKwByAsset`, `SimState::peek_pv_kw`/`peek_base_load_kw`), never a
+one-tick-stale snapshot. See [[asset-layer]].
+
+## Tick order
+
+`tasks/sim_tick/setpoints.rs::build_tick_setpoints`: the plan's base setpoints
+(`dispatcher::build_setpoints`) → deviation correction (`reconcile`, when enabled; otherwise the
+pre-arbiter `dispatcher::apply_surplus_ev_overlay`) → `dispatch_stages` (`controller/arbiter/stages.rs`):
+a VTN DISPATCH_SETPOINT window steers the storage levers to its setpoint, then the comms-loss clamp, then
+the limit pass last. So a hard import limit also bounds a dispatch setpoint above it, while staying inside
+the comms-loss per-asset bounds. Both passes steer to `min(plan signed net, hard limit − LIMIT_MARGIN_KW)`:
+the hard limit is 0 during an alert window, else the VTN import limit in force at `now` from the
+time-aware capacity schedule ([[tariffs-and-capacity]]), else a sim-injected limit. While a switching
+lever (a heater stage, the EV's minimum-charge floor) led the limit pass last tick its target sits
+`LIMIT_RELEASE_HYSTERESIS_KW` lower, so a shed stage is restored only with room to spare.
+
+Under the opportunistic objective the arm is different: no plan allocation is followed and
+`opportunistic_step` decides from the tick's balance, then goes through the same `dispatch_stages`
+([[opportunistic-objective]]).
 
 ## Why a single arbiter, not another reactive loop
 
@@ -39,22 +66,43 @@ rather than left as a second loop) and reads the current tick's actual PV/base-l
 one — the two specific failure modes that killed feature 017. `LEVER_PREEMPTION_MARGIN_EUR_PER_KWH`
 adds hysteresis so a lever near a cost tie doesn't chatter between ticks.
 
-## Battery/EV deviation-correction runaway (found and fixed 2026-07-30)
+## The carried command is the baseline
 
-A third, distinct real-time-oscillation bug surfaced live on ven-1: `projected_net_kw`'s
-battery/EV term fell back to `base_setpoints` (the plan's static per-slot allocation) instead of
-`AssetSnapshot.setpoint_kw` (the arbiter's own last-applied command) — the same field
-`apply_battery_lever`/`apply_ev_lever` already use as their integrator state. A correction applied
-on tick N was invisible to tick N+1's deviation calc, so it either stacked a fresh correction on
-top of the last one (runaway) or got silently reverted (`reconcile`'s `setpoints` baseline also
-defaulted to `base_setpoints`), re-creating the deviation next tick. Both call sites now read
-`setpoint_kw` for battery/EV specifically. Verified live: 12+ minutes flat at a single kW value
-post-fix, vs. the pre-fix rapid ±0.1–0.2 kW alternation every ~90 s. `docs/history/project_journal.md`
-("Deviation arbiter battery/EV runaway fix"); regression test
+Battery and EV deviation is projected from `AssetSnapshot.setpoint_kw` — the arbiter's own last-applied
+command, the same field `apply_battery_lever`/`apply_ev_lever` use as their integrator state — and
+`reconcile`'s `setpoints` baseline is seeded from it, not from the plan's static allocation
+(`projected_net_kw`, `controller/arbiter/live.rs`). Reading the plan instead would hide a correction
+applied on tick N from tick N+1's deviation calc, so it would either stack a fresh correction on the last
+one (runaway) or be silently reverted. The regression test
 `reconcile_battery_converges_under_stationary_disturbance_not_runaway_to_clamp`
-(`controller/tests/arbiter_tests.rs`) drives the real `reconcile` entry point, not just the
-lever in isolation — the pre-existing multi-tick convergence test bypassed `reconcile` and
-therefore missed this.
+(`controller/tests/arbiter_tests.rs`) drives the real `reconcile` entry point, because a convergence test
+that bypasses it misses this (`docs/history/project_journal.md`, "Deviation arbiter battery/EV runaway
+fix").
+
+## A held correction ends by one rule (R-88)
+
+Because battery and EV carry their last command forward, a correction is state the arbiter holds, and it
+needs an explicit end (`controller/arbiter/release.rs`). Each tick it also computes the **deviation if
+released**: battery and EV back at their plan values, counted at what those values draw once the command
+has landed, and PV under the generation limit that applies without the arbiter's own tightening
+(`ArbiterTick::live_released_kw`). Inside the dead band (`DEAD_BAND_KW`) the cause is gone and the whole
+correction returns to plan in one tick; settled but still needed, it is *held* (nothing moves, the lever
+stays reported active); otherwise the levers act and a shrinking disturbance is tracked down from the
+carried value. PV curtailment is the arbiter's third held correction, carried through the inverter's
+limit rather than a setpoint, and judged on the curtailed preview so it is not released and re-engaged
+every few seconds. The VEN UI shows "Deviation if released" next to the deviation. Pinned by
+`reconcile_releases_*`, `reconcile_keeps_*` and `a_held_correction_feeds_the_replan_backstop_as_energy`.
+
+## A lagging lever is bridged, not corrected (R-82, R-104, R-151)
+
+The EV charger applies a command a tick late (`response_delay_s`). The lever loop therefore hands what the
+charger has not delivered yet to the next lever, usually the battery, for that tick, so import never
+crosses a hard limit while a cut lands (`controller/arbiter/lag_bridge.rs`). The bridge is accounted per
+pass and taken out of the carried battery command afterwards; otherwise the battery would read it as a
+deviation of its own and the arbiter would undo the EV's landed change (the EV/battery hunt of R-104).
+After the limit pass `limit::hold_where_commands_land`, in `stages::dispatch_stages` and so for every
+objective, holds a lagging lever where its command lands, so a planning VEN does not release a cut EV
+into a limit breach a tick later.
 
 ## Marginal-cost signal
 
@@ -82,33 +130,28 @@ stale marginal-cost numbers.
 |---|---|---|
 | Battery | Charge/discharge adjustment within power limits | SoC bounds |
 | EV | Adjust opportunistic/session charging | Session target SoC |
-| Heater pause | Suppress in-progress heating | Zero-cost only when mid-cycle toward `temp_max_c` |
-| Heater emergency curtail/absorb | Drift below `temp_min_c` / heat above `temp_max_c` toward `temp_safety_max_c` | [[asset-layer]]'s `HeaterEmergencyMode` |
-| PV curtailment | Reduce the plan's `pv_used_kw` below forecast | Only relieves an active export cap |
+| Heater pause | Drop a stage while the comfort band allows it; levers command only exact stages (`AssetSnapshot.power_steps_kw`) | Zero-cost only when mid-cycle toward `temp_max_c`; none while the thermostat forces power |
+| Heater emergency curtail/absorb | Drift below `temp_min_c` / heat above `temp_max_c` toward `temp_safety_max_c` | [[asset-layer]]'s `HeaterEmergencyMode`; curtail only during an alert, in either pass |
+| PV curtailment | Tighten the generation limit (`PvCurtailmentSource::Arbiter`) below the plan's `pv_used_kw` | Only relieves an active export cap; last resort |
 
-## Runtime toggle and diagnostics surface
+## Runtime toggles and diagnostics surface
 
-`deviation_arbiter_enabled` (default `false` in every profile) gates the whole mechanism —
-exposed via `GET/PUT /arbiter-settings` (`routes/hems/arbiter.rs`), mirroring the pre-existing
-`/assets/{asset_id}/ev-settings` pattern (per EV since W4), and surfaced in the VEN UI's `ArbiterSettingsCard` on the Devices page.
-`GET /arbiter-diagnostics` (backed by `AppState.arbiter_diagnostics`, updated every tick alongside
-the preemption-margin hysteresis state) reports the last tick's projected net site power, residual
-deviation, and active lever — the `ArbiterSettingsCard` renders this readout while the arbiter is
-enabled (ui-transparency: no reactive-lever decision without an inspectable surface). See
-`docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md` UC-15 for the observation walkthrough.
-
-> **DRIFT** The Planner tab's `CorrectionBanner` (`VEN/ui/src/pages/Planner.tsx`, labeled
-> "Plan F: Layer 1 reactive correction") listens for SSE events `correction_active`/
-> `correction_cleared` on the planner event stream, but no backend code constructs a
-> `PlannerEvent::CorrectionActive`/`CorrectionCleared` variant (`VEN/src/planner_events.rs`'s
-> `PlannerEvent` enum has no such variants) — the banner is permanently dead UI, a leftover
-> from feature 017's design vocabulary that predates this arbiter and was never wired to it.
-> See [[ven-ui]].
+`GET/PUT /arbiter-settings` (`routes/hems/arbiter.rs`) carries both toggles, each optional in the PUT body
+so one switch changes without restating the other: `deviation_arbiter_enabled` (default `false` in every
+profile) and `limit_enforcement_enabled` (default `true`, switched off only to measure the planner alone).
+They are surfaced on the VEN UI Devices page's `ArbiterSettingsCard`. `GET /arbiter-diagnostics` (backed
+by `AppState.arbiter_diagnostics`, updated every tick) reports both passes: projected net site power,
+deviation, active lever, and the limit pass's target, excess, adjustments and unresolved excess, plus the
+measured net power the tick came to; the card renders it while a pass is enabled (ui-transparency: no
+reactive-lever decision without an inspectable surface). `ControllerEvent::ArbiterDecision` in
+`GET /trace/events` records decisions, not ticks — emitted only when a pass's leading lever or unresolved
+state changes (`controller/arbiter/decision.rs`). Observation walkthrough:
+`docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md` UC-15; the limit pass is pinned by
+`tests/features/ven_import_limit_enforcement.feature`.
 
 ## Relationship to the dispatcher
 
-The arbiter and [[dispatcher]]'s `apply_surplus_ev_overlay` overlap in intent (both react to live
-PV surplus for EV charging) but are not both active: when `deviation_arbiter_enabled` is true,
-the arbiter's EV lever is the one live reactive layer for a tick; the dispatcher's separate
-overlay function still exists in code, gated to the `deviation_arbiter_enabled=false` rollout
-path only, but the arbiter is designed to be its eventual replacement.
+The arbiter and [[dispatcher]]'s `apply_surplus_ev_overlay` overlap in intent (both react to live PV
+surplus for EV charging) but are not both active: with `deviation_arbiter_enabled` the arbiter's EV
+lever is the one live reactive layer for a tick; the dispatcher's overlay runs only when the deviation
+pass is off (`setpoints.rs`), and the limit pass and `dispatch_stages` apply either way.

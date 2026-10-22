@@ -156,10 +156,7 @@ ones included, with no asset id in its own code; per-slot decisions, hatched est
 [[milp-planner]] marginal-cost dual as a "Marginal €" column, and — only when
 `Plan.penalty_rules_active` is non-empty — a "Peak demand" row, green/red per slot
 against the tightest active `threshold_kw`, WP6.3/BL-09); `SessionProgressBoard`;
-collapsed `TraceTable` accordion; a `CorrectionBanner` snackbar labeled "Plan F: Layer 1
-reactive correction" that is permanently dead — it listens for SSE `correction_active`/
-`correction_cleared` events that no backend code emits (it is not wired to
-[[deviation-arbiter]]; see that page's DRIFT callout).
+collapsed `TraceTable` accordion.
 
 **SessionProgressBoard** (`components/sessions/SessionProgressBoard.tsx`, 9ba32e7)
 renders one card per
@@ -183,7 +180,7 @@ reader visually reads "generation at the bottom, consumption piling up above it.
 
 Controller page: the PV asset's `AssetTimelineChart` shades hardware-capped, planned-curtailment,
 manual-override, and unplanned regions distinctly, reflecting `PvState.curtailment_source` from
-[[asset-layer]]'s PV curtailment model (`generation_limit_kw`; sources `none`, `plan`, `capacity`, `manual`).
+[[asset-layer]]'s PV curtailment model (`generation_limit_kw`; sources `none`, `plan`, `capacity`, `arbiter`, `manual`, `comms_loss`).
 
 **Per-asset chart declarations and state shading** (052-ev-plugged-band, 2026-10-04): what an
 asset's `AssetTimelineChart` draws beyond its power line — its state line (SoC or tank

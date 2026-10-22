@@ -17,18 +17,18 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 ## Components
 - [[milp-planner]] — two-phase HiGHS MILP on one shared model skeleton, assets declare their own part (no kind in the core), adoption gate, absolute replan grid with per-VEN phase, comfort curve, peak-demand penalty, file map
 - [[dispatcher]] — build_setpoints on the 1 s sim tick, surplus-EV overlay, shiftable-load runtimes
-- [[openadr-interface]] — event→signal translation tables, report obligations, poll_events/detect.rs split, events received now recorded to history (R-64)
+- [[openadr-interface]] — wire-crate event types, PayloadReader units, wire rejection and granted-scope notice, one capacity schedule and interval-timing rule, change detection and replan triggers, obligation-only accumulated reports declaring their units
 - [[simulator]] — physics models behind SimulatorPort, /sim endpoints (UI only), injectable clock/seedable RNG (R-24), sim-inject double-option null-clear fix, sim_inject_enabled gate + call-source logging + SIGTERM persist fix (R-65)
-- [[asset-layer]] — Asset trait + AssetConfig dispatch (R-08 macro forwarder + file split), history ring buffers, AssetMilpContext, PV generation_limit_kw rename + manual override + rated_kw/inverter_max_kw fix, site_meter.rs deleted (R-62)
+- [[asset-layer]] — one `Asset` trait with declared kind/lever/rank (no config enum), capability traits, site meter is not an asset, PV generation-limit sources and per-array weather/snow, heater thermostat deadband + planner pins, EV schedule, determinism
 - [[ven-ui]] — React SPA, multi-VEN context, timeline with now-point, History page (last-24h default, forecast-accuracy overlay), shared chart-kit (TimeSeriesChart/StackedTimeSeriesChart/CurveChart), nullable-slider convention
 - [[reliability-and-config]] — task supervision, typed DomainError, profile validation, config knobs, EvSessionService removed (BL-41)
-- [[history-store]] — VEN HistoryPort/SqliteHistoryStore + sampler + routes, VTN BFF recorder, forecast-accuracy tracking (schema v8), plan_snapshots removed (R-63)
+- [[history-store]] — HistoryPort + SqliteHistoryStore (schema v12), 1-minute sampler, forecast-accuracy and plan-quality history, EV plugged/curtailment-source rows, BFF recorder (single credential, health status, fleet telemetry link), SettingsPort
 - [[fleet-tooling]] — fleet.sh (up/down/status), bulk VEN registration, GB-06/GB-09
 - [[experiment-harness]] — scenario YAMLs, real-time runner, KPI extraction, comparison reports
 - [[notifications]] — user notification feed: ring + SSE + persistence, edge-triggered producers, dedup_key rolling-window collapse + history viewer
 - [[heuristics-pipeline]] — learned base-load baselines: trapezoid appliance noise, weekday/weekend EWMA profiles, planner/forecast consumers
 - [[opportunistic-objective]] — non-planning dispatch on the same site: one `opportunistic_step` live and as forecast, for planner-vs-baseline comparison
-- [[deviation-arbiter]] — single real-time reconciler: marginal-cost lever ranking, residual escalation to replan, replaces the twice-removed absorber + opportunistic overlay; battery/EV runaway-correction bug found and fixed, `/arbiter-diagnostics` readout added
+- [[deviation-arbiter]] — two passes on one lever machinery (deviation correction, limit enforcement), per-asset levers, tick order and dispatch stages, held-correction release, lag bridge, residual escalation to replan, `/arbiter-settings` and diagnostics
 - [[weather-forecast]] — MQTT-ingested external forecast → physics-based PV generation, wired into both the planner and the live simulator's PV ground truth; source-liveness E2E coverage (R-56)
 - [[real-measurement-mqtt]] — real PV/baseline-load meter readings over MQTT (ven-1 only), 3-tier PV precedence (measured > weather > sin), two-gate (env var + profile) enablement, live-tick-only (never feeds the planner)
 
@@ -68,4 +68,4 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[dso-retailer-unbundled-tariff-coordination]] — legally-unbundled DSO/retailer tariff coordination: multi-program protocol support, why an unbounded virtual DSO price is dishonest (shadows the real tariff), DLMP shadow-price duality with the envelope, regulator revenue-cap as the actual answer to "who sets the relation"
 
 ---
-Pages: 48 · Last sync: 2026-10-21 (scoped: ven-ui and milp-planner re-verified at a3a306b; other pages see review.md).
+Pages: 48 · Last sync: 2026-10-21 (scoped: ven-ui, milp-planner, asset-layer, deviation-arbiter, openadr-interface, history-store re-verified; other pages see review.md).
