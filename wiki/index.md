@@ -45,8 +45,8 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[wiki-maintenance]] — how this wiki stays current (sync/ingest/query/lint workflow)
 
 ## Use Cases
-- [[system-use-cases]] — DR scenario catalogue mapped to lab signals and BDD coverage
-- [[openadr-spec-use-cases]] — spec-implied VEN use cases, gap-checked (✅/🟡/❌) against the code
+- [[system-use-cases]] — DR scenario catalogue (14 use cases) mapped to lab signals and BDD coverage
+- [[openadr-spec-use-cases]] — spec-implied VEN use cases, gap-checked (✅/🟡/❌) against the code and the certification backlog
 
 ## Decisions
 - [[milp-over-greedy]] — why the planner uses a two-phase MILP instead of greedy scheduling
@@ -68,4 +68,4 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[dso-retailer-unbundled-tariff-coordination]] — legally-unbundled DSO/retailer tariff coordination: multi-program protocol support, why an unbounded virtual DSO price is dishonest (shadows the real tariff), DLMP shadow-price duality with the envelope, regulator revenue-cap as the actual answer to "who sets the relation"
 
 ---
-Pages: 48 · Last sync: 2026-10-22 (scoped: ven-ui, milp-planner, asset-layer, deviation-arbiter, openadr-interface, history-store, simulator, reliability-and-config, heuristics-pipeline, real-measurement-mqtt, experiment-harness, fleet-tooling re-verified; other pages see review.md).
+Pages: 48 · Last sync: 2026-10-22 (scoped: ven-ui, milp-planner, asset-layer, deviation-arbiter, openadr-interface, history-store, simulator, reliability-and-config, heuristics-pipeline, real-measurement-mqtt, experiment-harness, fleet-tooling, openadr-spec-use-cases, system-use-cases re-verified; other pages see review.md).
