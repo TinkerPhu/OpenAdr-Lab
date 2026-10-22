@@ -32,6 +32,8 @@ pub struct TickInputs {
     pub ambient_temp_c_override: Option<f64>,
     pub heater_temp_min_override: Option<f64>,
     pub heater_temp_max_override: Option<f64>,
+    /// The sim's comfort target (`heater_setpoint_c` inject): every heater's cut-out ceiling.
+    pub heater_target_c_override: Option<f64>,
     /// `(curtail, absorb)` emergency-mode overrides per heater id (the arbiter's or an
     /// inject's); a heater without an entry follows its thermostat.
     pub heater_emergency_by_asset: HashMap<String, (Option<bool>, Option<bool>)>,
@@ -125,6 +127,7 @@ impl TickInputs {
             ambient_temp_c_override: None,
             heater_temp_min_override: None,
             heater_temp_max_override: None,
+            heater_target_c_override: None,
             heater_emergency_by_asset: HashMap::new(),
             base_load_kw_override: None,
             base_load_alpha: DEFAULT_BASE_LOAD_ALPHA,

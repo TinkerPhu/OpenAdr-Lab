@@ -20,15 +20,20 @@ impl TickOverridable for Heater {
     /// trait) so there's no ambiguity either way. Kept rather than renamed to
     /// avoid touching the inherent method's own (unrelated) call sites.
     fn apply_tick_overrides(&mut self, _state: &mut AssetState, overrides: &TickOverrides) {
-        // A request may lower the ceiling to its own target, never raise it past `temp_max_c`.
-        let request_ceiling_c = overrides
+        // A target (a request's, or the sim's comfort target) may lower the ceiling to itself,
+        // never raise it past `temp_max_c` or a sim-injected ceiling.
+        let target_ceiling_c = overrides
             .heater_request_ceiling_c
             .map(|c| c.min(self.temp_max_c_profile));
+        let ceiling_c = match (overrides.heater_temp_max_override, target_ceiling_c) {
+            (Some(max_c), Some(target_c)) => Some(max_c.min(target_c)),
+            (max_c, target_c) => max_c.or(target_c),
+        };
         Self::apply_tick_overrides(
             self,
             overrides.heater_ambient_temp_c_override,
             overrides.heater_temp_min_override,
-            overrides.heater_temp_max_override.or(request_ceiling_c),
+            ceiling_c,
             overrides.heater_emergency_curtail_override,
             overrides.heater_emergency_absorb_override,
         );
@@ -69,12 +74,6 @@ impl Thermostat for Heater {
         Self::plan_trajectory(self, live_state)
     }
 
-    /// Moved here verbatim from `AssetConfig::thermostat_setpoint_kw`'s only
-    /// real arm (Heater is the only asset kind with thermostat behavior
-    /// today). Returns `f64` directly rather than `Option<f64>` — the
-    /// original's `None` case was purely "not a Heater," which capability-gating
-    /// (`as_thermostat() -> Option<&dyn Thermostat>`) already handles; within
-    /// this arm the original always returned `Some(...)`.
     fn default_request_target_c(&self) -> Option<f64> {
         self.default_target_temp_c
     }
@@ -92,12 +91,7 @@ impl Thermostat for Heater {
         }
     }
 
-    fn thermostat_setpoint_kw(&self, state: &AssetState, target_c: f64) -> f64 {
-        let s: &HeaterState = own(state);
-        if s.temperature_c < target_c {
-            self.max_kw
-        } else {
-            0.0
-        }
+    fn thermostat_setpoint_kw(&self) -> f64 {
+        self.max_kw
     }
 }

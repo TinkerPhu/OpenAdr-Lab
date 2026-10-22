@@ -68,7 +68,7 @@ pub struct OpportunisticRequests {
 
 /// Request targets handed to the simulator per asset (`TickInputs::request_targets`): each
 /// EV's session target SoC, and each heater's start-now target as its cut-out ceiling (the
-/// heater caps it at its own `temp_max_c`). A sim inject of the same quantity wins.
+/// heater caps it at its own `temp_max_c`). The sim's comfort target wins over a request's.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RequestTargets {
     pub ev_soc_target_frac_by_asset: HashMap<String, f64>,

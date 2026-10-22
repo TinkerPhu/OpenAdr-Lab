@@ -16599,3 +16599,22 @@ BY_DEADLINE-waits, BY_DEADLINE-with-no-slack and plugged-in-EV-with-no-request s
 is start-now) is exactly what changed. GB-58: the Fleet card shows no service level.
 
 **Open.** The day-long run was under the old rules; it is repeated after deploy (openspec task 4.4).
+
+### R-150: the sim's comfort target holds without chattering the relay
+
+**What.** The "Comfort target" inject (`heater_setpoint_c`) now reaches every heater as its cut-out ceiling
+(`TickInputs::heater_target_c_override`, lowered to `min(target, an injected temp_max_c, the profile's)` in
+`Heater::apply_tick_overrides`) and the heater's setpoint while the target is held is full power
+(`Thermostat::thermostat_setpoint_kw()`, no arguments). The heater cuts out at the target through its ceiling latch and waits
+`thermostat_delta_c` before reheating. Test: `tasks/sim_tick/tests/heater_target_hold.rs` counts relay switches over
+600 one-second ticks (161 before, 1 now).
+
+**Why.** The setpoint was a bare on/off at the target, recomputed every tick with no hysteresis, so the relay switched every
+10-15 s; the heater's deadband only latched at `temp_max_c`/`temp_min_c`.
+
+**Decisions.** The row said to delete `thermostat_setpoint_kw`, `SimState::thermostat_setpoints_kw` and the thermostat branch of
+`build_setpoints`. They stay, smaller: under a planning objective nothing else commands the heater to full power in a slot the
+plan leaves unallocated, so the "hold the target" command still has to come from somewhere, and the ceiling now does the
+cutting. A sim-injected `temp_max_c` and a target now take the lower of the two (a request's ceiling used to lose to the
+inject; the sim's target wins over a request's). The target caps planned heat too, in every slot (accepted in the row). The
+tick golden did not change: its 30 ticks never reach the target.

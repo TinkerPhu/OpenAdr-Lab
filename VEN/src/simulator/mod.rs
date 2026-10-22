@@ -343,6 +343,7 @@ impl SimState {
             ambient_temp_c_override,
             heater_temp_min_override,
             heater_temp_max_override,
+            heater_target_c_override,
             heater_emergency_by_asset,
             base_load_kw_override,
             base_load_alpha,
@@ -417,10 +418,12 @@ impl SimState {
                     .get(&entry.id)
                     .copied()
             });
-            tick_overrides.heater_request_ceiling_c = request_targets
-                .heater_ceiling_c_by_asset
-                .get(&entry.id)
-                .copied();
+            // The sim's comfort target wins over a request's, as the other sim injects do.
+            tick_overrides.heater_request_ceiling_c = heater_target_c_override.or_else(|| {
+                (request_targets.heater_ceiling_c_by_asset)
+                    .get(&entry.id)
+                    .copied()
+            });
             // Its own feeds (W5b): an array's weather and generation-limit share, a measured
             // asset's reading, a base load's heuristic and its own Behaviour B baseline.
             let id = entry.id.as_str();

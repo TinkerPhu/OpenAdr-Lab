@@ -101,9 +101,11 @@ pub trait Thermostat {
     /// state gives no basis to project from.
     fn plan_trajectory(&self, live_state: &AssetState) -> Option<HeaterPlanTrajectory>;
 
-    /// The on/off (or discrete-stage) setpoint \[kW\] that drives temperature
-    /// toward `target_c` from the current state.
-    fn thermostat_setpoint_kw(&self, state: &AssetState, target_c: f64) -> f64;
+    /// The setpoint \[kW\] that heats toward a user comfort target: full power. The target
+    /// itself is the asset's cut-out ceiling (`TickOverrides::heater_request_ceiling_c`), so
+    /// the asset cuts out at it and waits its deadband before reheating; commanding on/off
+    /// around the target from outside chattered the relay (R-150).
+    fn thermostat_setpoint_kw(&self) -> f64;
 
     /// The target (°C) a user request aims for when it states none, or `None` when this
     /// thermostat declares no default (then such a request is refused, not guessed).

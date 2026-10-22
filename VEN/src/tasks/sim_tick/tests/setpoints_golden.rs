@@ -359,6 +359,7 @@ pub(super) fn replay(s: &Scenario, mut each: impl FnMut(usize, &ArbiterOutcome, 
         );
         sim.tick(TickInputs {
             pv_irradiance_override: ctx.inject.pv_irradiance,
+            heater_target_c_override: ctx.inject.heater_setpoint_c,
             ..TickInputs::new(1.0, now, o.setpoints.clone())
         });
         each(tick, &o, &sim);

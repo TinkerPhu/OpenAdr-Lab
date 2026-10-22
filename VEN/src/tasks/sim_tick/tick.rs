@@ -180,6 +180,7 @@ fn tick_inputs(
         ambient_temp_c_override: ctx.inject.ambient_temp_c,
         heater_temp_min_override: ctx.inject.heater_temp_min_c,
         heater_temp_max_override: ctx.inject.heater_temp_max_c,
+        heater_target_c_override: ctx.inject.heater_setpoint_c,
         heater_emergency_by_asset,
         base_load_kw_override: ctx.inject.base_load_kw,
         base_load_alpha: ctx.inject.base_load_alpha,

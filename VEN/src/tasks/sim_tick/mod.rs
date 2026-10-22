@@ -9,6 +9,9 @@ mod finalize;
 mod forecast_guard;
 mod forecast_wiring;
 #[cfg(test)]
+#[path = "tests/heater_target_hold.rs"]
+mod heater_target_hold;
+#[cfg(test)]
 #[path = "tests/limit_lag.rs"]
 mod limit_lag;
 mod post_lock;

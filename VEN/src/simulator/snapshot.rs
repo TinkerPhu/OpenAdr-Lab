@@ -95,21 +95,17 @@ impl SimState {
         }
     }
 
-    /// Each `Thermostat` asset's own setpoint for a user comfort target
-    /// (`heater_setpoint_c` inject); empty when no target is set. The
-    /// dispatcher applies these instead of deciding on/off from temperatures.
+    /// Each `Thermostat` asset's own setpoint while a user comfort target is held
+    /// (`heater_setpoint_c` inject); empty when no target is set. The target itself reaches the
+    /// asset as its ceiling (`TickInputs::heater_target_c_override`), where it cuts out.
     pub fn thermostat_setpoints_kw(&self, target_c: Option<f64>) -> HashMap<String, f64> {
-        let Some(target_c) = target_c else {
+        if target_c.is_none() {
             return HashMap::new();
-        };
+        }
         self.iter_assets()
             .filter_map(|(entry, cfg)| {
-                cfg.as_thermostat().map(|t| {
-                    (
-                        entry.id.clone(),
-                        t.thermostat_setpoint_kw(&entry.state, target_c),
-                    )
-                })
+                cfg.as_thermostat()
+                    .map(|t| (entry.id.clone(), t.thermostat_setpoint_kw()))
             })
             .collect()
     }
@@ -260,7 +256,8 @@ mod tests {
         );
         assert_eq!(
             sim.thermostat_setpoints_kw(Some(18.0)).get(heater),
-            Some(&0.0)
+            Some(&3.0),
+            "the target is the cut-out ceiling, not a comparison made here"
         );
         assert!(sim.thermostat_setpoints_kw(None).is_empty());
     }
