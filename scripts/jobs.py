@@ -15,8 +15,9 @@ records when it happened.
     python3 scripts/jobs.py run <id>   # run one job whatever its schedule
     python3 scripts/jobs.py done <id>  # record a human checklist item as done
 
-Exit codes for `due`: 0 = nothing due, 1 = something is due. That makes it
-usable from a hook that only wants to speak up when there is something to say.
+Exit codes for `due`: 0 = nothing due, 1 = something is due, for scripts that
+branch on it. The SessionStart hook runs `due --hook` instead, which always
+exits 0, because Claude Code only shows a hook's output to Claude on exit 0.
 """
 
 import argparse
@@ -211,18 +212,24 @@ def main() -> int:
     parser.add_argument("action", choices=["due", "list", "run", "done"])
     parser.add_argument("job_id", nargs="?")
     parser.add_argument("--quiet", action="store_true",
-                        help="say nothing when nothing is due (for hooks)")
+                        help="say nothing when nothing is due")
+    parser.add_argument("--hook", action="store_true",
+                        help="for the SessionStart hook: implies --quiet and always exits 0")
     args = parser.parse_args()
 
     if not JOBS_FILE.exists():
         print(f"No {JOBS_FILE.name} found", file=sys.stderr)
-        return 2
+        return 0 if args.hook else 2
     data = load()
 
     if args.action == "list":
         return cmd_list(data)
     if args.action == "due":
-        return cmd_due(data, args.quiet)
+        code = cmd_due(data, args.quiet or args.hook)
+        # Claude Code adds a SessionStart hook's stdout to the session only on exit 0;
+        # exit 1 is a "hook error" notice and Claude sees nothing. The script's own
+        # exit 1 ("something is due") stays for callers that want it.
+        return 0 if args.hook else code
     if args.action == "run":
         return cmd_run(data, args.job_id)
     if args.action == "done":
