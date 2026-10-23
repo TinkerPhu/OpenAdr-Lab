@@ -22,8 +22,8 @@
       "description": "Is a newer openspec release out than the one that generated our skills?",
       "command": "{python} scripts/check_openspec_version.py",
       "interval_days": 7,
-      "last_run": "2026-10-23T05:58:36Z",
-      "last_status": "finding (exit 1)",
+      "last_run": "2026-10-23T06:00:57Z",
+      "last_status": "ok",
       "notes": "The only check: there is no CI."
     },
     {
