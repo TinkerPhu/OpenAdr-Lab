@@ -3738,3 +3738,11 @@ bought rewards the controller that serves less. Put a service level (state of ch
 beside any energy or cost figure, and check that a baseline's requests are honoured as stated (ASAP now, BY_DEADLINE by
 its deadline) before reading its saving. A latest-start rule keeps itself started when its margin is additive, because
 the time to target falls with the clock while the asset runs; a proportional margin grows the slack and stops it.
+
+## Judge an objective by what was delivered and what it left in the stores (fleet-service-level, 2026-10-23)
+
+Energy and cost say what an objective spent, not what it bought. Two quantities, both declared by the asset that
+owns the need, make a comparison fair: the energy its owner is missing (a level, summed over its *increases*, so a
+departure, a comfort breach and a missed deadline are one rule and a dropped sample cannot hide a step) and the
+change in what its stores hold (a difference, so each asset's reference point cancels). An asset that cannot
+know when something is due (a deadline needs the clock) latches it from the tick, not from a bare state.

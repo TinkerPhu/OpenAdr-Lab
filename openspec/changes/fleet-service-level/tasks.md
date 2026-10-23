@@ -20,7 +20,7 @@
 
 ## 4. Docs, issues, release
 
-- [ ] 4.1 Wave into `docs/architecture/VEN_ARCHITECTURE.md` (the two asset declarations, the latch, the difference from plan warnings), the fleet architecture page under `docs/architecture/`, `docs/use-cases/SYSTEM-USE-CASES.md` section 14 (reading the comparison with the service level) and the HEMS observation manual; verify by reading them for current state only
-- [ ] 4.2 Journal entry (the 2026-10-21 run as evidence: 0 kWh charged, 36 % less planned import) and a KEY_LEARNINGS entry on judging an objective by service and carry-over beside energy; delete the GB-58 row from `docs/BACKLOG.md`; file with all four fields the departure state of charge and minutes below comfort drill-down, and a longer record than the 7 days of raw telemetry
+- [x] 4.1 Wave into `docs/architecture/VEN_ARCHITECTURE.md` (the two asset declarations, the latch, the difference from plan warnings), the fleet architecture page under `docs/architecture/`, `docs/use-cases/SYSTEM-USE-CASES.md` section 14 (reading the comparison with the service level) and the HEMS observation manual; verify by reading them for current state only
+- [x] 4.2 Journal entry (the 2026-10-21 run as evidence: 0 kWh charged, 36 % less planned import) and a KEY_LEARNINGS entry on judging an objective by service and carry-over beside energy; delete the GB-58 row from `docs/BACKLOG.md`; file with all four fields the departure state of charge and minutes below comfort drill-down, and a longer record than the 7 days of raw telemetry
 - [ ] 4.3 After merge and deploy (VENs first, then BFF and VTN UI) to Node1 and Node2: read the card over the next fleet objective switch; verify the card shows numbers for the window and record them in the journal
 - [ ] 4.4 Delete `openspec/changes/fleet-service-level` after 4.1-4.3, and note in `fleet-objective-compare` task 7 and `opportunistic-deadline-dispatch` task 4.4 that the service-level reading now exists

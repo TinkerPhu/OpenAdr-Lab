@@ -1135,6 +1135,11 @@ ranked assets`, `Leading` (the asset taking surplus or covering import), `Unreso
 once when the deadline leaves no slack; one in `OPPORTUNISTIC` mode stays at 0 kW until there is
 a surplus. An EV with no request charges as soon as it is plugged in.
 
+**Service level:** on the Devices page the Device Specs table shows, per asset, the energy its owner
+is missing (`Unserved`) and the energy its store holds (`Stored`), a dash where the asset declares
+none. An EV shows 0 kWh unserved while plugged in; the moment it leaves below its target it shows
+the gap and keeps it for the whole trip. The battery always shows a dash for unserved energy.
+
 **Switching back:** choose **Cost** again; within a minute or two the plan header shows a solved
 plan and the assets follow its allocations again.
 

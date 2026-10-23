@@ -16618,3 +16618,31 @@ plan leaves unallocated, so the "hold the target" command still has to come from
 cutting. A sim-injected `temp_max_c` and a target now take the lower of the two (a request's ceiling used to lose to the
 inject; the sim's target wins over a request's). The target caps planned heat too, in every slot (accepted in the row). The
 tick golden did not change: its 30 ticks never reach the target.
+
+### 056: the service level (fleet-service-level, sections 1-3)
+
+**What.** Every asset declares what its owner is missing and what its store holds
+(`Asset::unserved_energy_kwh`, `Asset::stored_energy_kwh`) on `AssetSnapshot`: EV (latched at departure,
+`EvState::unserved_at_departure_kwh`), heater (below the comfort floor), shiftable load (the run left
+after the deadline, `past_deadline` latched by a new `TickOverridable`), battery (stored only).
+`EvCharger::energy_to_soc_kwh` is the one product behind the time to target, a session's core energy
+and the unserved energy; the heater reuses `heater_energy_above_min_kwh`, so no new energy-per-degree
+function was added. The BFF's `GET /api/fleet/service` accumulates the increases of the level and the
+carry-over from stored telemetry (`fleet_service.rs`), kind-free; the Fleet page has a "Service
+delivered" card beside the plan comparison and the VEN UI's Device Specs table shows both figures.
+BDD: `tests/features/ven_service_level.feature`.
+
+**Why.** The first day-long fleet switch (2026-10-21) read as 36 % less planned import while the EVs were
+not charged; a comparison that cannot be won by serving less needs the service next to the energy.
+
+**Decisions.** The EV's target is `soc_target_frac`, which the planner (`ev_session_context`, the
+forecast-class band) and the arbiter's implicit request already use, so no planner is blamed for a target
+it never aimed at. The shiftable load needed the clock, which a state-only declaration lacks, so it latches
+`past_deadline` on the tick. A heater's *requested target past its time* is not counted (GB-62): the heater
+knows the target as its ceiling but not the time. The route has no handler test because no BFF handler can be
+driven in a unit test (R-149, deferred); its shaping is covered in `fleet_service.rs`. Building the BFF
+needed a WSL-native target dir (`$HOME/bff-target`): on `/mnt/c` cargo failed removing a temporary archive
+directory.
+
+**Open.** Deploy (VENs first, then BFF and VTN UI) and read the card over the next fleet objective
+switch (openspec task 4.3); filed: GB-60 (per-kind drill-down), GB-61 (longer than 7 days), GB-62.

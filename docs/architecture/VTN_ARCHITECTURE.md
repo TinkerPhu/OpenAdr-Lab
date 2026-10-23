@@ -162,6 +162,22 @@ plan's horizon, never zero. The telemetry, trace and plan writers share one batc
 (`fleet_store::batch_write_loop`). Tests: `fleet_plan.rs` (`mod tests`),
 `tests/features/fleet_plan_feed.feature`, `tests/features/fleet_objective_control.feature`.
 
+Plans say what was intended; what owners *received* is read from the telemetry. Each VEN's snapshot
+carries every asset's declared `unserved_energy_kwh` and `stored_energy_kwh`
+(`VEN_ARCHITECTURE.md`, "Service level"), and `GET /api/fleet/service?from=&to=`
+(`VTN/bff/src/fleet_service.rs`) reduces the stored raw rows to one sample per VEN, asset and minute
+(`fleet_store::asset_samples`) and answers, per asset, per VEN and for the fleet, the unserved
+energy accrued (the sum of the increases of the level, so a departure, a comfort breach and a missed
+deadline are counted the same way and a dropped sample keeps the step) and the carry-over (last
+stored energy minus first). The report names no asset kind: a kind that declares the two figures is
+counted. A sample without a figure is skipped, never read as zero; every total carries
+`contributingVens`; a window that starts before the raw horizon (`source_for`) answers
+`available: false` with the reason. The Fleet page's "Service delivered" card
+(`components/ServiceDelivered.tsx`) asks it for the span since the newest objective switch and the
+equal span before (`utils/fleetService.ts` `serviceWindows`, cut on a five-minute grid), so an
+objective that serves less is visible beside the energy it saves. Tests: `fleet_service.rs`
+(`mod tests`), `__tests__/ServiceDelivered.test.tsx`, `__tests__/fleetService.test.ts`.
+
 ---
 
 ## 4. OpenADR Message Sequences
