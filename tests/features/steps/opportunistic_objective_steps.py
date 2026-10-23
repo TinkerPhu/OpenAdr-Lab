@@ -183,3 +183,64 @@ def step_net_power_held_between(context, low_kw, high_kw, hold_s, seconds):
         f"net site power not held in [{low_kw}, {high_kw}] kW for {hold_s}s within {seconds}s "
         f"(last {last} kW)"
     )
+
+
+def _asset(asset_id):
+    r = ven_get("/sim")
+    if not r.ok:
+        return None
+    return r.json()["assets"].get(asset_id)
+
+
+@given("the EV is plugged in on the snapshot")
+def step_ev_plugged_on_snapshot(context):
+    # The departure is the plugged-to-away transition, so the tick must have seen it plugged.
+    poll_until(
+        lambda: _asset("ev") or {},
+        lambda a: a.get("plugged") == 1.0,
+        timeout=20,
+        description="the EV plugged on /sim",
+    )
+
+
+@when("the EV leaves")
+def step_ev_leaves(context):
+    r = ven_post("/sim/inject", json={"ev_plugged": False})
+    r.raise_for_status()
+
+
+@then('within {seconds:d} seconds the "{asset_id}" reports more than {kwh:g} kWh unserved')
+def step_reports_unserved_more_than(context, seconds, asset_id, kwh):
+    poll_until(
+        lambda: _asset(asset_id) or {},
+        lambda a: (a.get("unserved_energy_kwh") or 0.0) > kwh,
+        timeout=seconds,
+        description=f"{asset_id} unserved energy above {kwh} kWh",
+    )
+
+
+@then('within {seconds:d} seconds the "{asset_id}" reports no unserved energy')
+def step_reports_no_unserved(context, seconds, asset_id):
+    poll_until(
+        lambda: _asset(asset_id) or {},
+        lambda a: a.get("unserved_energy_kwh") == 0.0,
+        timeout=seconds,
+        description=f"{asset_id} declares 0 kWh unserved",
+    )
+
+
+@then('within {seconds:d} seconds the "{asset_id}" reports stored energy')
+def step_reports_stored(context, seconds, asset_id):
+    poll_until(
+        lambda: _asset(asset_id) or {},
+        lambda a: (a.get("stored_energy_kwh") or 0.0) > 0.0,
+        timeout=seconds,
+        description=f"{asset_id} stored energy",
+    )
+
+
+@then('the "{asset_id}" declares no unserved energy')
+def step_declares_no_unserved(context, asset_id):
+    asset = _asset(asset_id)
+    assert asset is not None, f"{asset_id} is not on /sim"
+    assert "unserved_energy_kwh" not in asset, f"{asset_id}: {asset['unserved_energy_kwh']}"
