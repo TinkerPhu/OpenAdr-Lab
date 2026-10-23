@@ -15,8 +15,8 @@
 
 - [x] 3.1 VEN UI: asset cards on the Devices page show unserved energy and stored energy through the shared energy formatter, omitted for an asset that declares none; verify with component tests in `Devices.test.tsx` (EV short 15 kWh, battery with stored energy only) and eslint clean
 - [x] 3.2 VTN UI: a "Service delivered" card on `Fleet.tsx` beside `PlanComparison`: the two quantities declared as data (label, formatter) and looked up; before and after windows of equal length around `latestObjectiveSwitch`; per-VEN, per-asset drill-down; "no data" and "unavailable" states; `api/client.ts` and `api/types.ts`; verify with component tests (equal windows, higher unserved after, unavailable, a VEN dropping out) and eslint clean
-- [ ] 3.3 BDD in `tests/features/` (the opportunistic-objective feature or a new `ven_service_level.feature`): an EV that leaves below its target reports the missing energy on its snapshot; an EV that leaves at its target reports none; the battery reports none; steps in the existing step files; verify with `python ci/audits/audit_step_definitions.py`
-- [ ] 3.4 Debt gate and audits: `python ci/audits/audit_debt_gate.py`, `audit_ven_architecture.py`, `audit_file_sizes.py`, `audit_duplication.py`; verify all pass
+- [x] 3.3 BDD in `tests/features/` (the opportunistic-objective feature or a new `ven_service_level.feature`): an EV that leaves below its target reports the missing energy on its snapshot; an EV that leaves at its target reports none; the battery reports none; steps in the existing step files; verify with `python ci/audits/audit_step_definitions.py`
+- [x] 3.4 Debt gate and audits: `python ci/audits/audit_debt_gate.py`, `audit_ven_architecture.py`, `audit_file_sizes.py`, `audit_duplication.py`; verify all pass
 
 ## 4. Docs, issues, release
 
