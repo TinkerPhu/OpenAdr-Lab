@@ -375,7 +375,12 @@ a view of what the fleet expects to draw either way, and a way back.
   plugged in is charged at once (no request) or by its deadline (`BY_DEADLINE`), never left idle.
   Its saving against the planners is the tariff's shape, not knowledge: the latest start is
   price-blind. Planned import energy alone does not say whether the owners got the charge they
-  needed; a service-level reading (state of charge at departure) is an open issue.
+  needed; the **Service delivered** card beside it does: over the span since the switch and the
+  equal span before, the unserved energy (an EV that left below its target, a tank below its
+  comfort floor, a job past its deadline, summed over the fleet and per VEN and asset) and the
+  carry-over (the change in energy held in batteries, EVs and tanks), with how many VENs each side
+  is built from. A window older than the raw telemetry (seven days) is shown as unavailable, never
+  as zero. Carry-over depends on where in the day each window starts and ends.
 - **Drill-down:** a row opens to that VEN's adopted plan (net and per-asset power, from the same
   plan store, `GET /api/fleet/vens/:ven/plan`); under the opportunistic objective it is a
   simulated forecast.

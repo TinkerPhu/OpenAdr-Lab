@@ -418,6 +418,25 @@ instead of solving (§2.3.3), and nothing a planning objective does changes.
   not a deadline, which is why the implicit request is ASAP, not BY_DEADLINE. The fleet's first
   opportunistic day (EVs left to surplus only: 0 kWh charged, import planned 36 % lower but
   unserved) is why.
+- **Service level: what the owner is missing and what the store holds.** Every asset declares two
+  electric-equivalent energies on its `AssetSnapshot` (`Asset::unserved_energy_kwh`,
+  `Asset::stored_energy_kwh`, both `Option`, absent when the asset has none), so they reach `/sim`,
+  the VEN UI's Device Specs table and the fleet telemetry with the rest of the snapshot. The level
+  is what is missing against what the asset's own rules say is due: an EV owes nothing while
+  plugged in and, from the tick it leaves, the energy to its target at that instant
+  (`EvState::unserved_at_departure_kwh`, latched at the plugged-to-away transition in
+  `apply_usage_sim_tick`, cleared at plug-in); a heater owes the energy to lift the tank back to
+  its comfort floor (zero inside `SHORTFALL_TOLERANCE_KWH`); a shiftable load owes the rest of its
+  run once `latest_end` has passed (`ShiftableLoadState::past_deadline`); a battery owes none, its
+  minimum state of charge being a limit it holds itself. Stored energy is the reference-free
+  quantity a difference of two samples uses: state of charge times capacity (battery, EV also
+  while away) and the energy above the comfort floor for a tank. `EvCharger::energy_to_soc_kwh`
+  is the one product behind the time to target, a session's core energy and the unserved energy.
+  This is not the planner's plan-time warnings (`EvCoreEnergyUnmet`, `HeaterTargetUnmet`,
+  `BudgetShortfall`), which predict a shortfall from a solve and are absent under the opportunistic
+  objective; the declarations are what a site delivered. The fleet report that reads them is in
+  `VTN_ARCHITECTURE.md`. Tests: `assets/ev.rs`, `assets/heater.rs`, `assets/shiftable_load.rs`,
+  `assets/battery.rs`, `simulator/snapshot.rs`, `tests/features/ven_service_level.feature`.
 - **Where commands land.** After the limit pass the shared stages also cut a lagging lever
   (the EV charger applies a command a tick late) so its command lands under the limit
   (`limit::hold_where_commands_land`, in `stages::dispatch_stages`, so for every objective);
