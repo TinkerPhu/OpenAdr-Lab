@@ -27,7 +27,8 @@ time was. `jobs.json` records each check's interval and when it last ran, and
 `scripts/jobs.py` answers "what is due".
 
 - [ ] `python scripts/jobs.py due` — nothing due prints nothing, so no news is good news
-      (the `SessionStart` hook in `.claude/settings.json` already runs this for you)
+      (the `SessionStart` hook in `.claude/settings.json` already runs `due --hook` for you; the
+      hook form always exits 0, because Claude only sees a hook's output on exit 0)
 - [ ] `python scripts/jobs.py run` — runs every due check that has a command
 - [ ] `python scripts/jobs.py done <id>` — for the ones only a human can do, once handled
 

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python scripts/jobs.py due --quiet",
+            "command": "python scripts/jobs.py due --hook",
             "timeout": 30
           }
         ]
