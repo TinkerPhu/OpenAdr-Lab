@@ -97,6 +97,10 @@ def step_site_with_plugged_ev(context, soc, battery_soc):
         },
     )
     r.raise_for_status()
+    # The next feature starts from the EV this one left: hand it back plugged and half full.
+    context.add_cleanup(
+        lambda: ven_post("/sim/inject", json={"ev_plugged": True, "ev_soc": 0.5})
+    )
 
 
 @given("the site has no EV charging, the heater in its band and the battery at {battery_soc:g} SoC")
