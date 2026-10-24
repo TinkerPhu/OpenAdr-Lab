@@ -588,7 +588,9 @@ pub async fn power_series(
 
 /// One row per VEN and minute (the last sample in that minute) with the snapshot's per-asset
 /// object, for the service-level report. Only the raw table carries the payload, so a window
-/// that needs the rollup answers `None`: the report is "unavailable" there, never zero.
+/// that needs the rollup answers `None`: the report is "unavailable" there, never zero. Only the
+/// two declared figures leave the database: an asset's other values are not this report's business,
+/// and one of them (a PV setpoint of `f64::MAX`, "no limit") is a number `serde_json` cannot read.
 pub async fn asset_samples(
     pool: &PgPool,
     from: DateTime<Utc>,
@@ -600,7 +602,11 @@ pub async fn asset_samples(
     }
     let rows = sqlx::query_as(
         "SELECT DISTINCT ON (ven_name, date_trunc('minute', ts))
-                ven_name, date_trunc('minute', ts), payload_json -> 'assets'
+                ven_name, date_trunc('minute', ts), 
+                (SELECT jsonb_object_agg(a.key, jsonb_build_object(
+                            'unserved_energy_kwh', a.value -> 'unserved_energy_kwh',
+                            'stored_energy_kwh', a.value -> 'stored_energy_kwh'))
+                   FROM jsonb_each(payload_json -> 'assets') a)
          FROM lab_recorder.fleet_telemetry
          WHERE ts >= $1 AND ts < $2
          ORDER BY ven_name, date_trunc('minute', ts), ts DESC",
