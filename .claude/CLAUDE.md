@@ -150,9 +150,10 @@ dto: avoid DTO normalization. pass through upstream field names (e.g. OpenADR sp
 wire-contracts: an optional field in an external protocol is mandatory in this project. Every
 message we emit declares what its values mean; every message we accept is interpreted from what it
 says, never from an assumption in the reader. The failure this prevents is a number on the wire
-whose quantity, unit or sign lives only in the sender's head — GB-50: the VEN reads capacity limits
-as kW and writes power as W, no `payloadDescriptors` exist anywhere, and `experiments/kpi.py`
-carries a `* duration` compensation for a payload type the spec defines as energy.
+whose quantity, unit or sign lives only in the sender's head — GB-50 (closed): the VEN used to read
+capacity limits as kW and write power as W with no `payloadDescriptors` anywhere, and
+`experiments/kpi.py` compensated with a `* duration` for a payload type the spec defines as energy.
+Today both directions are declared; docs/reference/WIRE_PROFILE.md holds the current contract.
   - Emit strictly. Never send a value whose quantity, unit, sign convention and reading type are
     not declared on the wire (OpenADR: program/event `payloadDescriptors`, `reportDescriptors`,
     report `payloadDescriptors`). "The spec marks it optional" is not a reason to omit it; it is
