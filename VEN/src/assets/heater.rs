@@ -386,6 +386,12 @@ impl Asset for Heater {
         Some(self.stored_energy_inner_kwh(own(state)))
     }
 
+    /// The time to lift the tank to the target it holds, loss included
+    /// (`heater_time_to_target.rs`); the latest start of a BY_DEADLINE heater request.
+    fn full_effort_time_to_target_s(&self, state: &AssetState) -> Option<f64> {
+        self.full_effort_time_to_target_s_inner(own(state))
+    }
+
     fn control_schema(&self) -> Vec<ControlDescriptor> {
         super::heater_control_schema::control_schema()
     }

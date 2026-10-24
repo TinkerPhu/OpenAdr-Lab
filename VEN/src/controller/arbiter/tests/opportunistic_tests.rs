@@ -400,13 +400,30 @@ mod request_regime {
         assert!(r.excluded.contains("ev"));
     }
 
-    /// The heater declares no time to target: its BY_DEADLINE request is served as ASAP.
+    /// The heater declares its time to target, loss included: a BY_DEADLINE heater request
+    /// waits for its latest start like the EV's (GB-59).
     #[test]
-    fn a_by_deadline_request_without_a_declared_time_to_target_starts_at_once() {
-        let sim = site(&[heater_at(40.0)]);
-        assert_eq!(sim.assets["heater"].full_effort_time_to_target_s, None);
-        let deadline = now() + Duration::hours(12);
+    fn a_by_deadline_heater_request_waits_until_its_latest_start() {
+        let sim = site(&[heater_at(19.0)]);
+        let to_target_s = sim.assets["heater"].full_effort_time_to_target_s.unwrap();
+        assert!(to_target_s > 0.0, "{to_target_s}");
+        let lead = Duration::milliseconds((to_target_s * 1000.0) as i64) + margin();
+        let deadline = now() + lead + Duration::hours(3);
         let requests = [("heater".to_string(), StartBy(deadline))].into();
+        let r = request_regime(&sim, defaults(&sim), &requests, |_| true, now());
+        assert!(!r.excluded.contains("heater"));
+        assert_eq!(r.waiting.len(), 1);
+        assert_eq!(r.waiting[0].asset_id, "heater");
+        let slack = r.waiting[0].start_by - (deadline - lead);
+        assert!(slack.num_milliseconds().abs() <= 1000, "{slack}");
+    }
+
+    #[test]
+    fn a_by_deadline_heater_request_starts_at_full_effort_from_its_latest_start() {
+        let sim = site(&[heater_at(19.0)]);
+        let to_target_s = sim.assets["heater"].full_effort_time_to_target_s.unwrap();
+        let lead = Duration::milliseconds((to_target_s * 1000.0) as i64) + margin();
+        let requests = [("heater".to_string(), StartBy(now() + lead))].into();
         let r = request_regime(&sim, defaults(&sim), &requests, |_| true, now());
         assert_eq!(r.base["heater"], sim.assets["heater"].cap_max_import_kw);
         assert!(r.excluded.contains("heater"));
