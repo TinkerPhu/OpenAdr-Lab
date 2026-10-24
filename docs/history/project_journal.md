@@ -16677,3 +16677,27 @@ numeric. The query now builds, per asset, an object holding only `unserved_energ
 other value any asset ever publishes. **Key learning:** a recorder query that returns a payload column whole is exposed
 to every field of it; project what the consumer reads, in SQL. The `f64::MAX` sentinel itself is still on the
 telemetry wire from `Pv::default_setpoint`; whether it should be declared instead is a separate question.
+
+## The day-long fleet run on `opportunistic` (opportunistic-objective 10.3, fleet-service-level 4.3)
+
+**What.** Node2's ven-4..20 ran the `opportunistic` objective from 2026-10-23T18:28:49Z to 2026-10-24T18:33:57Z
+(24 h 5 min), commanded through `PUT /api/fleet/vens/:ven/objective` and returned to `min_cost`, which is every
+VEN's profile objective. ven-1..3 had been on `opportunistic` since 2026-10-20 and are inside the same card window.
+
+**Fleet service card over the window** (`GET /api/fleet/service`, read after the query fix above):
+
+| quantity | value | VENs counted |
+|---|---|---|
+| unserved energy | 0.0 kWh | 17 |
+| carry-over (stored energy, last minus first) | +37.3 kWh | 19 |
+
+No asset that declares `unserved_energy_kwh` (EV, heater) reported a missed target over the day. The carry-over
+is dominated by a few EVs (ven-18 +31.2 kWh, ven-5 +29.8, ven-11 +16.6 against ven-7 -15.7) and one heater
+(ven-2 -14.8): it is last minus first on a window that did not start and end in the same state, so it is a
+stored-energy balance, not a saving. The fleet plan card showed 20 contributing VENs with planned net import
+between about 17 and 51 kW over the evening.
+
+**What it does not show.** There was no `min_cost` run of the same VENs in the same window, so the card says
+opportunistic delivered the service, not what it cost or saved against `min_cost`; that comparison is
+`fleet-objective-compare`'s. The run predates GB-59 on the Node2 VENs, so the heater's latest-start behaviour was
+not exercised.
