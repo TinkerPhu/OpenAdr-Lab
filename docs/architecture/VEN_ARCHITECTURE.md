@@ -402,8 +402,9 @@ instead of solving (§2.3.3), and nothing a planning objective does changes.
   takes part in the pass like a surplus-only one. It starts at full power once
   `now >= deadline - time_to_target - DEADLINE_MARGIN_S`, the time to target being the asset's
   own declaration (`Asset::full_effort_time_to_target_s` on `AssetSnapshot`: the EV from its
-  state of charge, the shiftable load from its remaining run; the heater declares none and so
-  starts at once). The margin (15 minutes) is additive on purpose: once the asset runs, its time
+  state of charge, the shiftable load from its remaining run, the heater from its temperature
+  and its own loss: `(C/k) ln((eq - T) / (eq - target))` with `eq = ambient + (P - draw)/k`, `None`
+  when full power never reaches the target; an asset that declares none starts at once). The margin (15 minutes) is additive on purpose: once the asset runs, its time
   to target falls with the clock, the slack stays put and the request stays started with nothing
   stored; a proportional margin would grow the slack while running and stop it again. Surplus
   taken while waiting shortens the time to target and so moves the start later. A deadline that

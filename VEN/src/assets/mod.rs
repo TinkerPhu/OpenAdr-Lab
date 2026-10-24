@@ -26,6 +26,7 @@ mod heater_emergency;
 mod heater_milp;
 mod heater_pins;
 mod heater_thermostat;
+mod heater_time_to_target;
 mod history;
 pub mod load_window;
 mod max_power;

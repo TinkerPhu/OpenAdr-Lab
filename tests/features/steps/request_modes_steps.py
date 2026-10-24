@@ -190,3 +190,24 @@ def step_delete_mode_session(context):
 def step_reset_inject(context):
     r = ven_post("/sim/inject/reset", json=None)
     assert r.ok, f"inject reset failed: {r.status_code}"
+
+
+@when('I POST a mode heater request with mode "{mode}" ending in {hours:g} hours')
+def step_post_mode_heater_request(context, mode, hours):
+    # A temperature target one degree above the injected reading: the heater's own time to
+    # target (loss included) is minutes, so the latest start is the deadline less that and the
+    # margin.
+    departure = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    r = ven_post(
+        "/user-requests",
+        json={
+            "asset_id": "heater",
+            "target_temp_c": 21.0,
+            "deadlines": [{"latest_end": departure}],
+            "mode": mode,
+        },
+    )
+    r.raise_for_status()
+    context.mode_session = r.json()

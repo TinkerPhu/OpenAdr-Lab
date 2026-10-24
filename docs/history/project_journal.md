@@ -16646,3 +16646,22 @@ directory.
 
 **Open.** Deploy (VENs first, then BFF and VTN UI) and read the card over the next fleet objective
 switch (openspec task 4.3); filed: GB-60 (per-kind drill-down), GB-61 (longer than 7 days), GB-62.
+
+
+### GB-59: a BY_DEADLINE heater request waits for its latest start
+
+**What.** The heater declares `Asset::full_effort_time_to_target_s` (`assets/heater_time_to_target.rs`): the time
+at full power to lift the tank to the target it holds (its ceiling, `temp_max_c`, which a request's or the sim's
+comfort target lowers each tick, R-150), with the loss it will see on the way: `(C/k) ln((eq - T)/(eq - target))`,
+`eq = ambient + (P - draw)/k`, `None` when full power never gets there. The arbiter's latest start
+(`opportunistic::request_regime`) was already generic, so the heater's BY_DEADLINE request now waits and starts
+like the EV's. BDD: two scenarios in `tests/features/ven_opportunistic_objective.feature`.
+
+**Why.** Under the opportunistic objective the heater heated at once on any request, where an EV with the same
+mode waited for surplus; that made the two objectives' heater energy incomparable in the fleet run.
+
+**Decisions.** The closed form is pinned against the heater's own `step_inner` (stepping for the declared time
+reaches the target), so the declaration and the physics cannot drift. The test fixture first used a loss that
+caps full power at 35 degrees: the `None` it returned was right, the fixture was wrong.
+
+**Open.** GB-62 (a requested heater target past its time is not counted as unserved).

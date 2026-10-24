@@ -57,6 +57,22 @@ Feature: Running without planning (opportunistic objective, UC-19)
     When I POST a mode EV session with mode "BY_DEADLINE" ending in 5 hours and no budget
     Then within 30 seconds the "ev" draws at least 2 kW
 
+  # The heater declares its own time to target, loss included, so its BY_DEADLINE request waits
+  # for a latest start like the EV's: a deadline hours away leaves it idle without surplus.
+  Scenario: A BY_DEADLINE heater request waits for its latest start
+    Given the site has no PV, no EV charging, the heater in its band and the battery at 0.1 SoC
+    And the VEN runs under the "opportunistic" objective
+    When I POST a mode heater request with mode "BY_DEADLINE" ending in 6 hours
+    Then the "heater" stays at or below 0.1 kW for 20 seconds within 40 seconds
+
+  # The deadline is closer than the heater's time to target plus the margin: the latest start
+  # has passed, so it heats at once.
+  Scenario: A BY_DEADLINE heater request starts when its deadline leaves no slack
+    Given the site has no PV, no EV charging, the heater in its band and the battery at 0.1 SoC
+    And the VEN runs under the "opportunistic" objective
+    When I POST a mode heater request with mode "BY_DEADLINE" ending in 0.1 hours
+    Then within 30 seconds the "heater" draws at least 2 kW
+
   Scenario: A plugged-in EV with no request charges
     Given the site has no PV, the EV plugged at 0.3 SoC, the heater in its band and the battery at 0.1 SoC
     And the VEN runs under the "opportunistic" objective

@@ -1133,7 +1133,10 @@ ranked assets`, `Leading` (the asset taking surplus or covering import), `Unreso
 **Requests:** an EV request in `ASAP` mode starts charging within seconds even with no PV; one in
 `BY_DEADLINE` mode stays at 0 kW (listed under `Waiting`) until its latest start, or starts at
 once when the deadline leaves no slack; one in `OPPORTUNISTIC` mode stays at 0 kW until there is
-a surplus. An EV with no request charges as soon as it is plugged in.
+a surplus. An EV with no request charges as soon as it is plugged in. A heater temperature
+request in `BY_DEADLINE` mode waits the same way: idle (listed under `Waiting`) until its latest
+start, which counts the loss the tank will see on the way up, or heating at once when the
+deadline leaves no slack.
 
 **Service level:** on the Devices page the Device Specs table shows, per asset, the energy its owner
 is missing (`Unserved`) and the energy its store holds (`Stored`), a dash where the asset declares

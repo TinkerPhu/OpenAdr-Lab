@@ -39,7 +39,7 @@ snapshot, and the arbiter SHALL read that declaration without converting energy 
 that declares none SHALL be served as if its BY_DEADLINE request were ASAP.
 
 #### Scenario: Asset without a declaration
-- **WHEN** a heater holds a BY_DEADLINE target and declares no time to target
+- **WHEN** an asset holds a BY_DEADLINE target and declares no time to target
 - **THEN** it starts now, as an ASAP request does
 
 ### Requirement: A plugged-in EV below target is charged without a request
