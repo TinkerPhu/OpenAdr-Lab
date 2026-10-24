@@ -16665,3 +16665,15 @@ reaches the target), so the declaration and the physics cannot drift. The test f
 caps full power at 35 degrees: the `None` it returned was right, the fixture was wrong.
 
 **Open.** GB-62 (a requested heater target past its time is not counted as unserved).
+
+## The Fleet service card reads only the two figures it sums (fix/service-query-asset-fields)
+
+**What.** `GET /api/fleet/service` answered 502 over a day-long window: `fleet_store::asset_samples` pulled each
+sample's whole per-asset object and `serde_json` refused a number in it. The number was the PV asset's
+`setpoint_kw` / `default_setpoint_kw`, `f64::MAX` ("no generation limit"), which Postgres stores as a 309-digit
+numeric. The query now builds, per asset, an object holding only `unserved_energy_kwh` and `stored_energy_kwh`.
+
+**Why.** The report is by construction about the two declared figures; reading the rest only made it depend on every
+other value any asset ever publishes. **Key learning:** a recorder query that returns a payload column whole is exposed
+to every field of it; project what the consumer reads, in SQL. The `f64::MAX` sentinel itself is still on the
+telemetry wire from `Pv::default_setpoint`; whether it should be declared instead is a separate question.
