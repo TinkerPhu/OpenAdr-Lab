@@ -55,8 +55,6 @@ export function makeGrid(fields: Partial<GridSnapshot> = {}): GridSnapshot {
     voltage_v: 230,
     import_kwh: 0,
     export_kwh: 0,
-    import_limit_kw: Number.MAX_VALUE,
-    export_limit_kw: -Number.MAX_VALUE,
     ...fields,
   };
 }
