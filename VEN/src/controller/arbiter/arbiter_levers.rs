@@ -92,7 +92,7 @@ pub(super) fn current_setpoint_kw(
     setpoints
         .get(asset_id)
         .copied()
-        .or_else(|| sim.assets.get(asset_id).map(|s| s.setpoint_kw))
+        .or_else(|| sim.assets.get(asset_id).map(|s| s.setpoint_or_power_kw()))
         .unwrap_or(0.0)
 }
 

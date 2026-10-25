@@ -36,6 +36,15 @@ Feature: VEN Simulator
     And the sim response has device "heater"
     And the sim response has device "pv"
 
+  # R-153: an asset whose power does not follow a setpoint (the PV) publishes none, and no
+  # quantity field carries a number that means "none" (f64::MAX, "no generation limit").
+  Scenario: A PV asset publishes no setpoint and the snapshot carries no unbounded number
+    When I query VEN-1 simulator state
+    Then the sim response has device "pv"
+    And the sim device "pv" does not have field "setpoint_kw"
+    And the sim device "pv" does not have field "default_setpoint_kw"
+    And the sim response carries no unbounded number
+
   Scenario: EV asset has expected fields in sim response
     When I query VEN-1 simulator state
     Then the sim device "ev" has field "power_kw"

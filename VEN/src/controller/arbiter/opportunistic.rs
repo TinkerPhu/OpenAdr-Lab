@@ -247,7 +247,10 @@ pub fn opportunistic_pass(
         ..Default::default()
     };
     for (id, snap) in ranked {
-        let base_kw = base.get(id).copied().unwrap_or(snap.default_setpoint_kw);
+        let base_kw = base
+            .get(id)
+            .copied()
+            .unwrap_or_else(|| snap.default_setpoint_kw.unwrap_or(snap.power_kw));
         let (setpoint_kw, drawn_kw) = allocate(snap, base_kw, balance_kw);
         let moved = (drawn_kw - snap.power_when_command_lands_kw(base_kw)).abs() > 1e-9;
         if moved && result.leading_asset_id.is_none() {

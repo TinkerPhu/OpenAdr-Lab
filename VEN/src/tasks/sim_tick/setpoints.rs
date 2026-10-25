@@ -46,11 +46,7 @@ pub(crate) fn build_tick_setpoints(
         Some(plan) => {
             controller::dispatcher::build_setpoints(plan, sim_snap, thermostat_setpoints_kw, now)
         }
-        None => sim_snap
-            .assets
-            .iter()
-            .map(|(id, snap)| (id.clone(), snap.default_setpoint_kw))
-            .collect(),
+        None => sim_snap.default_setpoints_kw(),
     };
     let alert_active = lab_core::time_window::any_covering(&ctx.alert_windows, now);
     // A sim-injected import limit stands in only while no VTN limit is in force.

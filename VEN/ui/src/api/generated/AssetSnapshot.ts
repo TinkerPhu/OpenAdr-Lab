@@ -42,13 +42,15 @@ available_charge_kwh?: number,
  */
 forced_power_kw?: number, 
 /**
- * Default setpoint for this asset (kW) when no plan is active.
+ * Default setpoint for this asset (kW) when no plan is active. Absent for an asset that
+ * follows no setpoint (`Asset::publishes_setpoint`): a number meaning "none" would
+ * be read as a quantity by whoever forgot to ignore it.
  */
-default_setpoint_kw: number, 
+default_setpoint_kw?: number, 
 /**
- * Last setpoint applied by the VEN controller (kW).
+ * Last setpoint applied by the VEN controller (kW); absent as `default_setpoint_kw` is.
  */
-setpoint_kw: number, 
+setpoint_kw?: number, 
 /**
  * The asset's own embodied carbon per kWh it generates (`Asset::embodied_co2_g_kwh`);
  * `None` for an asset that generates nothing.

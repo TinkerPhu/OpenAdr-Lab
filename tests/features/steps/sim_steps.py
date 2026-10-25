@@ -95,6 +95,30 @@ def step_sim_device_has_field(context, device, field):
     )
 
 
+@then('the sim device "{device}" does not have field "{field}"')
+def step_sim_device_lacks_field(context, device, field):
+    asset = context.sim_response.get("assets", {}).get(device)
+    assert asset is not None, f"Device '{device}' not found in sim assets"
+    assert field not in asset, (
+        f"Expected sim.assets['{device}'] to publish no '{field}', got {asset[field]!r}"
+    )
+
+
+def _unbounded_numbers(value, path="sim"):
+    """Paths of every number beyond 1e300: a "none" sentinel (f64::MAX) in a quantity field."""
+    if isinstance(value, dict):
+        return [p for k, v in value.items() for p in _unbounded_numbers(v, f"{path}.{k}")]
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value) > 1e300:
+        return [path]
+    return []
+
+
+@then("the sim response carries no unbounded number")
+def step_sim_no_unbounded_number(context):
+    found = _unbounded_numbers(context.sim_response)
+    assert not found, f"A number meaning 'none' is on the wire at {found}"
+
+
 @then('the sim response has device "{device}"')
 def step_sim_has_device(context, device):
     assets = context.sim_response.get("assets", {})

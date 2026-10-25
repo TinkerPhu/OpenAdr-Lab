@@ -54,11 +54,7 @@ fn setpoints_from(
     thermostat_setpoints_kw: &HashMap<String, f64>,
 ) -> HashMap<String, f64> {
     // Start with defaults from snapshot
-    let mut setpoints: HashMap<String, f64> = sim
-        .assets
-        .iter()
-        .map(|(id, snap)| (id.clone(), snap.default_setpoint_kw))
-        .collect();
+    let mut setpoints: HashMap<String, f64> = sim.default_setpoints_kw();
 
     for alloc in slot_allocs.into_iter().flatten() {
         setpoints.insert(alloc.asset_id.clone(), alloc.power_kw);
@@ -309,8 +305,6 @@ mod tests {
                 voltage_v: 230.0,
                 import_kwh: 0.0,
                 export_kwh: 0.0,
-                import_limit_kw: f64::MAX,
-                export_limit_kw: -f64::MAX,
             },
             assets,
         }

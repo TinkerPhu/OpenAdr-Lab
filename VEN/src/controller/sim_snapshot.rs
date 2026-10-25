@@ -24,6 +24,15 @@ pub struct SimSnapshot {
 }
 
 impl SimSnapshot {
+    /// Every asset's default setpoint (kW), for the assets that have one: the baseline the
+    /// dispatcher and the sim tick start a setpoint map from.
+    pub fn default_setpoints_kw(&self) -> HashMap<String, f64> {
+        self.assets
+            .iter()
+            .filter_map(|(id, snap)| Some((id.clone(), snap.default_setpoint_kw?)))
+            .collect()
+    }
+
     /// The assets in roster order (profile order), ties by id: the one order every
     /// per-asset loop of the arbiter uses, so a tie between equal levers always breaks the
     /// same way.
@@ -48,7 +57,9 @@ impl SimSnapshot {
     }
 }
 
-/// Grid meter snapshot.
+/// Grid meter snapshot. The VTN capacity limits in force are not part of it: they live in the
+/// capacity picture (`entities::capacity`), one source, and an unbounded limit would be a number
+/// meaning "none" (R-153).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct GridSnapshot {
     /// Net site power [kW], positive = import.
@@ -56,15 +67,6 @@ pub struct GridSnapshot {
     pub voltage_v: f64,
     pub import_kwh: f64,
     pub export_kwh: f64,
-    /// Maximum site import power currently allowed by an active VTN capacity
-    /// event (`assets::GridState::import_limit_kw`) — NOT a fixed hardware/
-    /// interconnection rating. Defaults to `f64::MAX` (unbounded) when no VTN
-    /// event is active.
-    pub import_limit_kw: f64,
-    /// Maximum site export power currently allowed by an active VTN capacity
-    /// event (`assets::GridState::export_limit_kw`, always ≤ 0). Defaults to
-    /// `-f64::MAX` (unbounded) when no VTN event is active.
-    pub export_limit_kw: f64,
 }
 
 /// Per-asset snapshot with precomputed capability fields.
@@ -103,10 +105,16 @@ pub struct AssetSnapshot {
     /// keeps its place in the `/sim` JSON.
     #[serde(flatten)]
     pub response: crate::entities::asset::SetpointResponse,
-    /// Default setpoint for this asset (kW) when no plan is active.
-    pub default_setpoint_kw: f64,
-    /// Last setpoint applied by the VEN controller (kW).
-    pub setpoint_kw: f64,
+    /// Default setpoint for this asset (kW) when no plan is active. Absent for an asset that
+    /// follows no setpoint (`Asset::publishes_setpoint`): a number meaning "none" would
+    /// be read as a quantity by whoever forgot to ignore it.
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_setpoint_kw: Option<f64>,
+    /// Last setpoint applied by the VEN controller (kW); absent as `default_setpoint_kw` is.
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setpoint_kw: Option<f64>,
     /// Asset-specific state values from `cfg.state_values()` (soc, temp_c, etc.).
     /// Flattened into the top-level JSON object for backward-compatibility. Left out of the
     /// TypeScript type: a numeric index signature beside the typed fields would make
@@ -162,6 +170,12 @@ pub struct AssetSnapshot {
 }
 
 impl AssetSnapshot {
+    /// The setpoint a reader that needs a number holds this asset at: its own, or, for an asset
+    /// that follows none, what it is drawing (the one value that changes nothing).
+    pub fn setpoint_or_power_kw(&self) -> f64 {
+        self.setpoint_kw.unwrap_or(self.power_kw)
+    }
+
     /// Convenience: get a value from the state `values` map.
     #[inline]
     pub fn val(&self, key: &str) -> Option<f64> {
@@ -225,8 +239,8 @@ mod tests {
             available_charge_kwh: Some(5.0),
             forced_power_kw: None,
             response: SetpointResponse::continuous(),
-            default_setpoint_kw: 0.0,
-            setpoint_kw: 0.0,
+            default_setpoint_kw: Some(0.0),
+            setpoint_kw: Some(0.0),
             values,
             history: Default::default(),
             embodied_co2_g_kwh: None,

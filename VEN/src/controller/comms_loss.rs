@@ -97,8 +97,6 @@ mod tests {
                 export_kwh: 0.0,
                 // Unbounded, i.e. no VTN capacity event — see GridSnapshot's
                 // own doc comments; 0.0 would read as "no import allowed".
-                import_limit_kw: f64::MAX,
-                export_limit_kw: -f64::MAX,
             },
             assets: Default::default(),
         }

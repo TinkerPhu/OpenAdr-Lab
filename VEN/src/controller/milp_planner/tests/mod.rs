@@ -239,7 +239,7 @@ fn refresh_from_asset(
         asset,
         state,
         entry.power_kw,
-        entry.setpoint_kw,
+        entry.setpoint_or_power_kw(),
     );
     *entry = AssetSnapshot {
         default_setpoint_kw: entry.default_setpoint_kw,
@@ -297,7 +297,7 @@ fn set_ev_state(snap: &mut SimSnapshot, plugged: Option<bool>, soc_frac: Option<
             consumption_kwh_per_km: 0.18,
             soc_target_frac: v("soc_target"),
             soc_target_profile: v("soc_target"),
-            default_charge_kw: ev.default_setpoint_kw,
+            default_charge_kw: ev.default_setpoint_kw.expect("the EV follows a setpoint"),
             min_soc_frac: v("min_soc"),
             min_charge_kw: v("min_charge_kw"),
             response_delay_s: 0.0,

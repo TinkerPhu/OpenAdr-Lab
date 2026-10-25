@@ -65,8 +65,8 @@ impl SimState {
                     available_charge_kwh,
                     forced_power_kw: cfg.forced_power_kw(&entry.state),
                     response: cap.response.clone(),
-                    default_setpoint_kw: cfg.default_setpoint(),
-                    setpoint_kw: entry.setpoint_kw,
+                    default_setpoint_kw: cfg.publishes_setpoint().then(|| cfg.default_setpoint()),
+                    setpoint_kw: cfg.publishes_setpoint().then_some(entry.setpoint_kw),
                     values,
                     history: cfg.history_view(&entry.state),
                     embodied_co2_g_kwh: cfg.embodied_co2_g_kwh(),
@@ -90,8 +90,6 @@ impl SimState {
                 voltage_v: self.grid.voltage_v,
                 import_kwh: self.grid.import_kwh,
                 export_kwh: self.grid.export_kwh,
-                import_limit_kw: self.grid_asset.state.import_limit_kw,
-                export_limit_kw: self.grid_asset.state.export_limit_kw,
             },
             assets: assets_map,
         }
@@ -206,6 +204,45 @@ mod tests {
         assert_eq!(declared("heater"), (true, true));
         assert_eq!(declared("pv"), (false, false));
         assert_eq!(declared("base_load"), (false, false));
+    }
+
+    /// R-153: an asset whose power does not follow a setpoint publishes none. The PV's internal
+    /// "no generation limit" default is `f64::MAX`, a number that means "none" and that a
+    /// recorder cannot even store as a float; the snapshot (and so the fleet telemetry) must
+    /// carry the field's absence instead, and every asset that does follow one keeps its value.
+    #[test]
+    fn an_asset_that_follows_no_setpoint_publishes_none() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/profiles/test.yaml");
+        let profile: crate::profile::Profile =
+            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let sim = SimState::from_params(&profile.asset_params(), chrono::Utc::now());
+        let wire = serde_json::to_value(sim.to_sim_snapshot()).unwrap();
+        let pv = &wire["assets"]["pv"];
+        assert!(pv.get("setpoint_kw").is_none(), "pv: {pv}");
+        assert!(pv.get("default_setpoint_kw").is_none(), "pv: {pv}");
+        for id in ["battery", "ev", "heater", "base_load"] {
+            let a = &wire["assets"][id];
+            assert!(a["setpoint_kw"].is_number(), "{id}: {a}");
+            assert!(a["default_setpoint_kw"].is_number(), "{id}: {a}");
+        }
+        fn unbounded_numbers(v: &serde_json::Value, path: &str, found: &mut Vec<String>) {
+            match v {
+                serde_json::Value::Number(n) if n.as_f64().is_some_and(|f| f.abs() > 1e300) => {
+                    found.push(path.to_string())
+                }
+                serde_json::Value::Object(m) => {
+                    m.iter()
+                        .for_each(|(k, v)| unbounded_numbers(v, &format!("{path}.{k}"), found));
+                }
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        unbounded_numbers(&wire, "snapshot", &mut found);
+        assert!(
+            found.is_empty(),
+            "a \"none\" sentinel is on the wire at {found:?}"
+        );
     }
 
     /// R-114: the typed `raw` keeps the JSON it replaced - the simulator's three keys, a

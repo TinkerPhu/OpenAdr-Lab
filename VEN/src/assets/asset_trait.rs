@@ -172,6 +172,14 @@ pub trait Asset: Send + Sync {
         unimplemented!("Asset::default_setpoint() only applies to AssetConfig-backed asset kinds")
     }
 
+    /// Whether the setpoint is a quantity this asset has: `false` for one whose power does not
+    /// follow a setpoint at all (PV), whose internal `default_setpoint` is then only the "no
+    /// generation limit" default of its forecast. Snapshots and fleet telemetry publish the
+    /// setpoint of an asset that has one and leave the field out for one that has none (R-153).
+    fn publishes_setpoint(&self) -> bool {
+        true
+    }
+
     /// This asset's runtime-controllable parameters, for `GET /sim/schema`.
     fn control_schema(&self) -> Vec<ControlDescriptor> {
         unimplemented!("Asset::control_schema() only applies to AssetConfig-backed asset kinds")
