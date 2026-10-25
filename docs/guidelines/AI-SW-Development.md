@@ -53,7 +53,7 @@ Do these steps once, before any project work begins.
 ## Prompting Recommendations
 
 **Useful prompting vocabulary:** 
-multiple options, concise,  comprehensive, deep dive, contradiction, duplication / inline, dead/unused code, violation, missing details, review, creap/bleed in.
+multiple options, concise,  comprehensive, deep dive, contradiction, duplication / inline, dead/unused code, violation, missing details, review, creap/bleed in, objective.
 
 **Useful prompting techniques:**
 - *"Paraphrase my description so I can confirm I expressed myself correctly."*
@@ -64,6 +64,10 @@ multiple options, concise,  comprehensive, deep dive, contradiction, duplication
 **Prompt library:** Maintain a living collection of prompts that have proven effective, organized by use case (architecture review, code review, test generation, documentation sync, etc.). Given the document's emphasis on writing everything down, this is a natural extension of the key-learnings workflow.
 
 **Handling AI hallucinations:** AI agents confidently state incorrect things. Always compile and run tests after AI-generated code. Cross-check generated architecture diagrams against actual imports. When in doubt, prompt the AI to cite sources or flag uncertainty.
+
+**Way of explaining** when i ask you to explain, explain with at least one example, give options with pros and cons and a recommendation with reason
+
+**Way of interviewing** when i ask you to interview me about a topic, suggest options with pros and cons and give a recommendation with reason. allways give me room to ask questions or start a side discussion during the interview.
 
 ---
 
@@ -132,10 +136,17 @@ Refactor before adding new features in an affected area. Require all tests to pa
 
 ---
 
+## Interviewing
+
+'Interview me about open points to this feature. suggest several options with pros and cons and recommendation. give me the opportunity to ask
+side questions and start side discussions at each interview question.
+
+---
+
 ## Controlling
 
 - Conduct regular (automatic) code reviews.
-- Have AI create a Mermaid schematic of the module architecture. Display all entities, classes, and their dependencies. List all architectural violations. Search for and resolve technical debt.
+- Have AI create a drawio (Comic style shape, normal font) or Mermaid or Ascii schematic of the module architecture. Display all entities, classes, and their dependencies. List all architectural violations. Search for and resolve technical debt.
 - Periodically close the gap between code and docs:
   1. Have the AI generate a description of the current code.
   2. Compare it to the existing documentation.
