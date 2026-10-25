@@ -3,7 +3,7 @@ title: Distributor Business Case — Tiered VTN/VEN Rollout
 type: query
 created: 2026-07-06
 updated: 2026-10-22
-synced_commit: 650b626
+synced_commit: 97a6abc
 sources:
   - docs/openadr_3_1_specs/
   - docs/REQUIREMENTS.md
