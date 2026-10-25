@@ -41,6 +41,7 @@
       0.172 EUR/kWh) and a KEY_LEARNINGS entry: a baseline must serve the same demand as what it is compared with
 - [x] 4.3 File issues with all four fields: service-level KPI (SoC at departure, unserved energy) on the Fleet plan
       card, needs-decision; heater latest start, too-big, first step is a time-to-target on the heater
-- [ ] 4.4 After merge and deploy to Node1 and Node2: repeat the fleet run of `opportunistic-objective` 10.3 and read
+- [ ] 4.4 After merge and deploy to Node1 and Node2: repeat the fleet run of `opportunistic-objective` 10.3 (the
+      service-level card exists and one run is in the journal, 2026-10-24, which predates GB-59 on Node2) and read
       the card with the KPI issue in mind; record in the journal; then delete this change and
       `opportunistic-objective`
