@@ -3,7 +3,7 @@ title: MILP Planner
 type: component
 created: 2026-07-04
 updated: 2026-10-21
-synced_commit: a3a306b
+synced_commit: 1ad1ab5
 sources: [docs/architecture/ven_milp_planner.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/controller/milp_planner/, VEN/src/controller/milp_interactions.rs, VEN/src/controller/solver_port.rs, VEN/src/controller/asset_milp_port.rs, VEN/src/tasks/planning/, VEN/src/services/planning/, VEN/src/simulator/plan_context.rs, VEN/src/entities/time_grid.rs, VEN/src/entities/plan_cost.rs, VEN/src/entities/comfort_spend.rs, VEN/src/controller/milp_planner/solver_duals.rs, VEN/src/entities/asset.rs, VEN/src/entities/planner_params.rs, VEN/src/profile/validate.rs, VEN/src/assets/ev_milp.rs, VEN/src/assets/heater_milp.rs]
 tags: [planner, milp, highs, optimization]
 ---

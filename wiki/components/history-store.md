@@ -3,7 +3,7 @@ title: History Store (VEN local persistence + VTN recorder)
 type: component
 created: 2026-07-10
 updated: 2026-10-21
-synced_commit: 650b626
+synced_commit: 97a6abc
 sources: [VEN/src/history_store/, VEN/src/controller/history_port.rs, VEN/src/entities/history.rs, VEN/src/tasks/history_sampler/, VEN/src/services/history_sampling.rs, VEN/src/services/forecast.rs, VEN/ui/src/pages/PlanHistory.tsx, VEN/src/routes/hems/history.rs, VEN/ui/src/pages/History.tsx, VTN/bff/src/recorder.rs]
 tags: [history, sqlite, persistence, vtn, recorder, ports]
 ---

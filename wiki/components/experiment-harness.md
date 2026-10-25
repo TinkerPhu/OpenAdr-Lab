@@ -3,7 +3,7 @@ title: Experiment Harness
 type: component
 created: 2026-07-11
 updated: 2026-10-22
-synced_commit: 650b626
+synced_commit: 97a6abc
 sources: [experiments/, VEN/src/tasks/sim_tick/tick.rs, docs/guidelines/FLEET_EXPERIMENT_DESIGN.md, docs/reference/R97_PLANNER_BENCHMARKS.md]
 tags: [experiments, kpi, scenarios, phase3]
 ---

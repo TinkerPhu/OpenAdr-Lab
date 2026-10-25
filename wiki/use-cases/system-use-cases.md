@@ -3,7 +3,7 @@ title: System Use Cases
 type: use-case
 created: 2026-07-04
 updated: 2026-10-22
-synced_commit: 650b626
+synced_commit: 97a6abc
 sources: [docs/use-cases/SYSTEM-USE-CASES.md, tests/features/, docs/use-cases/SYSTEM-USE-CASE-MANUAL.md, docs/use-cases/COMFORT-PERSONAS-USE-CASE-MANUAL.md, docs/use-cases/HEMS-USE-CASE-OBSERVATION-MANUAL.md]
 tags: [use-cases, dr, bdd]
 ---
