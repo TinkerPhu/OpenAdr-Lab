@@ -16701,3 +16701,24 @@ between about 17 and 51 kW over the evening.
 opportunistic delivered the service, not what it cost or saved against `min_cost`; that comparison is
 `fleet-objective-compare`'s. The run predates GB-59 on the Node2 VENs, so the heater's latest-start behaviour was
 not exercised.
+
+## A value that means "none" leaves the wire as an absent field (fix/r153-no-setpoint-sentinel, R-153)
+
+**What.** The PV's internal default setpoint is `f64::MAX` (its forecast's "no generation limit"), and it went out on
+`/sim` and the fleet telemetry as the PV's `setpoint_kw` and `default_setpoint_kw`; the grid snapshot carried
+`import_limit_kw` / `export_limit_kw` of `±f64::MAX` when no VTN limit was active. `AssetSnapshot.setpoint_kw` and
+`default_setpoint_kw` are now `Option`, declared by `Asset::publishes_setpoint` (false for PV, whose power follows no
+setpoint); a reader that needs a number takes `AssetSnapshot::setpoint_or_power_kw`, and the setpoint maps of the
+dispatcher and the sim tick come from `SimSnapshot::default_setpoints_kw` (two copies of that map became one).
+`GridSnapshot` lost its two limits: nothing read them since R-72, and the limits in force are the capacity picture's.
+
+**Why.** The BFF's service query had answered 502 for a day because it could not parse the 309-digit number
+Postgres stores for `f64::MAX`; narrowing the query fixed that reader, this removes the number. The PV's internal
+default stays `f64::MAX` because `simulate_forward` reads a setpoint as an export cap, so "uncapped" is a real
+value there; it just never leaves the VEN. The planning-mode tick golden was re-recorded for the dropped `pv` entry
+of each recorded setpoint map (570 lines, nothing else changed).
+
+**Key learning.** Two sources of one number are two chances to publish a sentinel: the grid limits were a duplicate
+of the capacity picture that nobody read, which is why nothing noticed them. Declare "has none" on the asset that
+has none, and test the wire for it (`an_asset_that_follows_no_setpoint_publishes_none`, and the BDD scenario in
+`ven_simulator.feature`), not each reader.
