@@ -3746,3 +3746,9 @@ owns the need, make a comparison fair: the energy its owner is missing (a level,
 departure, a comfort breach and a missed deadline are one rule and a dropped sample cannot hide a step) and the
 change in what its stores hold (a difference, so each asset's reference point cancels). An asset that cannot
 know when something is due (a deadline needs the clock) latches it from the tick, not from a bare state.
+
+A number that means "none" (`f64::MAX` for "no limit") is a quantity to every reader that forgets to ignore it: a
+recorder cannot store it as a float, a sum treats it as kW, and the one reader that did not know answered 502. The
+asset that has no value leaves the field out (`Asset::publishes_setpoint`), and a test walks the whole snapshot for any
+number beyond 1e300 so the next sentinel fails there instead of in a consumer. A value nobody reads is the likeliest
+place for one to hide: the grid snapshot's two limits were a duplicate of the capacity picture.
