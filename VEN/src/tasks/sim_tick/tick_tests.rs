@@ -205,9 +205,9 @@ mod tests {
             .get(crate::ids::ASSET_BATTERY)
             .expect("battery asset must be present");
         assert!(
-            battery.setpoint_kw > 0.0,
+            battery.setpoint_kw.is_some_and(|kw| kw > 0.0),
             "arbiter must charge the battery to absorb the unplanned PV surplus \
-             (plan expected 0 kW net exchange), got setpoint {}",
+             (plan expected 0 kW net exchange), got setpoint {:?}",
             battery.setpoint_kw
         );
     }

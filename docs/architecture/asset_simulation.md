@@ -449,6 +449,9 @@ None. Output is entirely determined by profile / active inject.
 - `import_limit_kw = f64::MAX` (unlimited) at startup
 - `export_limit_kw = −f64::MAX` (unlimited) at startup
 
+These two are the Grid asset's internal state only: `GridSnapshot` (so `/sim` and the fleet telemetry) carries no
+limit, because an unbounded one would be a number meaning "none"; the limits in force are the capacity picture's.
+
 ### Output State
 
 - `net_power_kw` — grid power (positive = import, negative = export)

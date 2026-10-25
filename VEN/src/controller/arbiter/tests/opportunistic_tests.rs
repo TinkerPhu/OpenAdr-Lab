@@ -70,11 +70,7 @@ fn pass(sim: &SimSnapshot, pv_kw: f64, base_kw: f64, excluded: &[&str]) -> Arbit
         limit_target_kw: None,
         prev_bridge_kw_by_asset: &bridge,
     };
-    let base: HashMap<String, f64> = sim
-        .assets
-        .iter()
-        .map(|(id, a)| (id.clone(), a.default_setpoint_kw))
-        .collect();
+    let base: HashMap<String, f64> = sim.default_setpoints_kw();
     let excluded: BTreeSet<String> = excluded.iter().map(|s| s.to_string()).collect();
     opportunistic_pass(&tick, &base, &excluded)
 }
@@ -221,10 +217,7 @@ mod request_regime {
     }
 
     fn defaults(sim: &SimSnapshot) -> HashMap<String, f64> {
-        sim.assets
-            .iter()
-            .map(|(id, a)| (id.clone(), a.default_setpoint_kw))
-            .collect()
+        sim.default_setpoints_kw()
     }
 
     /// The EV's own time to its target at full effort, as it declares it.

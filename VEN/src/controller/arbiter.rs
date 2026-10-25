@@ -323,7 +323,7 @@ pub fn reconcile(
     // transient. Mirrors `projected_net_kw`'s use of `snap.setpoint_kw` for
     // the same assets, above.
     for id in release::carried_ids(sim) {
-        setpoints.insert(id.to_string(), sim.assets[id].setpoint_kw);
+        setpoints.insert(id.to_string(), sim.assets[id].setpoint_or_power_kw());
     }
     lag_bridge::drop_last_bridge(&mut setpoints, tick.prev_bridge_kw_by_asset);
 

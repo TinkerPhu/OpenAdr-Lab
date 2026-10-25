@@ -307,7 +307,11 @@ impl Asset for PvInverter {
     }
 
     fn default_setpoint(&self) -> f64 {
-        f64::MAX // no generation limit by default
+        f64::MAX // no generation limit by default: the forecast's cap, never published
+    }
+
+    fn publishes_setpoint(&self) -> bool {
+        false
     }
 
     fn control_schema(&self) -> Vec<ControlDescriptor> {

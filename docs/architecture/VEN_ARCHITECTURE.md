@@ -251,7 +251,9 @@ Pure-function module (`controller/dispatcher.rs`) driven by the 1 s tick in
 `tasks/sim_tick/`. `build_setpoints()` translates the current `PlanTimeSlot` into device
 setpoints — narrowed to plan-allocation only:
 
-1. Seeds every asset with its `default_setpoint_kw`
+1. Seeds every asset that has one with its `default_setpoint_kw` (`SimSnapshot::default_setpoints_kw`; a PV, whose
+   power follows no setpoint, publishes none: `Asset::publishes_setpoint`, so neither `/sim` nor the fleet telemetry
+   carries `f64::MAX` for it)
 2. For each `AssetAllocation` in the plan slot covering `now`: overwrites that asset's setpoint
 3. Caps PV export at the active capacity limit
 
