@@ -16722,3 +16722,26 @@ of each recorded setpoint map (570 lines, nothing else changed).
 of the capacity picture that nobody read, which is why nothing noticed them. Declare "has none" on the asset that
 has none, and test the wire for it (`an_asset_that_follows_no_setpoint_publishes_none`, and the BDD scenario in
 `ven_simulator.feature`), not each reader.
+
+## The Fleet page shows every tariff, ranked as the VEN ranks them (fix/fleet-tariff-groups-display, GB-64)
+
+**What.** `GET /api/fleet/signals` now returns, per VEN, only the bands that win where events overlap, and the
+Fleet page draws one import and one export curve per distinct tariff, labelled `<short event name> · <n> VENs` with
+the VEN list on hover. Which event wins is one function, `lab_core::event_priority::resolve`, moved out of the VEN's
+`rate_schedule.rs`; the VEN's tariff and capacity parsers and the BFF's `bands_for_ven` call it, and a new rule in
+`audit_ven_architecture.py` fails when an event is ranked by `content.priority` anywhere else. The workbench keeps
+its live-plus-draft chart (the largest tariff, with a note when others exist); both charts share `TariffLinesChart`.
+
+**Why.** The 2026-10-29 fleet experiment sent five targeted price events to five VEN groups and the fleet power
+curve flattened (planned peak 111 to 35 kWh/h, metered about 33 kW), while the tariff card beside it drew one
+group's bands plus the standard event it overrode. The card reads as "this price made that curve", so it has to be
+the price each VEN acted on.
+
+**Issues.** (1) The BFF comment said `Priority` has no accessor; the VEN had ranked by its `Ord` all along, so no
+accessor was needed and the BFF simply did not rank. (2) A first sweep with a heredoc turned `\b` in a regex into a
+backspace byte and a failed UTF-8 write emptied `fleet_signals.rs` (restored from git): write such edits with
+explicit encodings and check the audit fails on a planted violation. (3) Non-numeric payloads no longer produce a
+value-less band in the feed, since the shared ranking only reads numbers.
+
+**Key learning.** A chart that sits beside another reads as its cause. When the thing drawn is derived, derive it
+with the rule the actor uses, not a copy of it.

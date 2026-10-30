@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
-  sharedTariff,
+  tariffGroups,
+  shortNames,
   tariffRows,
+  tariffLineRows,
   priceBands,
   IMPORT_KEY,
   EXPORT_KEY,
@@ -62,59 +64,132 @@ describe("priceBands", () => {
   });
 });
 
-describe("sharedTariff", () => {
+const NOW = T0 + HOUR / 2;
+
+/** A tariff of one PRICE and one EXPORT_PRICE band, carried by event `name`. */
+function tariffOf(name: string | null, price: number, eventID = name ?? "ev"): SignalBand[] {
+  return [
+    band({ payloadType: "PRICE", value: price, eventName: name, eventID }),
+    band({ payloadType: "EXPORT_PRICE", value: price * 0.75, eventName: name, eventID }),
+  ];
+}
+
+describe("tariffGroups", () => {
   it("folds twenty identical VENs into one tariff", () => {
-    const shared = sharedTariff(fleetOf(20));
-    expect(shared.agreeingVens).toBe(20);
-    expect(shared.dissentingVens).toEqual([]);
-    expect(shared.bands).toHaveLength(3);
+    const { groups, knownVens, unpricedVens } = tariffGroups(fleetOf(20), NOW);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].vens).toHaveLength(20);
+    expect(groups[0].bands).toHaveLength(3);
+    expect(knownVens).toBe(20);
+    expect(unpricedVens).toEqual([]);
   });
 
-  it("names a VEN priced differently and keeps the majority's tariff", () => {
-    const odd = LAB_BANDS.map((b) =>
-      b.payloadType === "PRICE" && b.value === 0.4 ? { ...b, value: 0.99 } : b,
-    );
-    const shared = sharedTariff(
+  it("keeps every distinct tariff, largest first, and none is a dissenter", () => {
+    const fleet = signals([
+      { venName: "ven-1", bands: tariffOf("exp-PRICE-g0", 0.1) },
+      { venName: "ven-2", bands: tariffOf("exp-PRICE-g1", 0.2) },
+      { venName: "ven-3", bands: tariffOf("exp-PRICE-g1", 0.2) },
+      { venName: "ven-10", bands: tariffOf("exp-PRICE-g1", 0.2) },
+      { venName: "ven-4", bands: tariffOf("exp-PRICE-g2", 0.3) },
+    ]);
+    const { groups } = tariffGroups(fleet, NOW);
+    expect(groups.map((g) => g.vens)).toEqual([
+      ["ven-2", "ven-3", "ven-10"],
+      ["ven-1"],
+      ["ven-4"],
+    ]);
+  });
+
+  it("is one tariff whichever event ids carry it", () => {
+    const { groups } = tariffGroups(
       signals([
-        { venName: "ven-1", bands: LAB_BANDS },
-        { venName: "ven-2", bands: LAB_BANDS },
-        { venName: "ven-10", bands: odd },
+        { venName: "ven-1", bands: tariffOf("a", 0.1, "id-a") },
+        { venName: "ven-2", bands: tariffOf("a", 0.1, "id-b") },
       ]),
+      NOW,
     );
-    expect(shared.dissentingVens).toEqual(["ven-10"]);
-    expect(shared.agreeingVens).toBe(2);
-    expect(shared.bands.find((b) => b.payloadType === "PRICE")?.value).toBe(0.4);
+    expect(groups).toHaveLength(1);
   });
 
-  it("does not call an untargeted VEN a dissenter", () => {
-    const shared = sharedTariff(
+  it("counts a VEN with no price as unpriced, not as a tariff", () => {
+    const { groups, unpricedVens, knownVens } = tariffGroups(
       signals([
         { venName: "ven-1", bands: LAB_BANDS },
-        // Sent a limit but no price — not disagreement about price.
         { venName: "ven-2", bands: [band({ payloadType: "IMPORT_CAPACITY_LIMIT", value: 3 })] },
       ]),
+      NOW,
     );
-    expect(shared.dissentingVens).toEqual([]);
-    expect(shared.agreeingVens).toBe(1);
-    expect(shared.knownVens).toBe(2);
+    expect(groups).toHaveLength(1);
+    expect(unpricedVens).toEqual(["ven-2"]);
+    expect(knownVens).toBe(2);
   });
 
-  it("reports dissenters in counting order, not byte order", () => {
-    const other = (v: number) => LAB_BANDS.map((b) => ({ ...b, value: v }));
-    const shared = sharedTariff(
+  it("labels each group by the short event name and its VEN count, with the VENs on hover", () => {
+    const { groups } = tariffGroups(
       signals([
-        { venName: "ven-1", bands: LAB_BANDS },
-        { venName: "ven-2", bands: LAB_BANDS },
-        { venName: "ven-10", bands: other(0.7) },
-        { venName: "ven-3", bands: other(0.8) },
+        { venName: "ven-1", bands: tariffOf("exp-flat-PRICE-g0", 0.1) },
+        { venName: "ven-2", bands: tariffOf("exp-flat-PRICE-g1", 0.2) },
+        { venName: "ven-3", bands: tariffOf("exp-flat-PRICE-g1", 0.2) },
       ]),
+      NOW,
     );
-    expect(shared.dissentingVens).toEqual(["ven-3", "ven-10"]);
+    expect(groups.map((g) => g.label)).toEqual(["g1 · 2 VENs", "g0 · 1 VEN"]);
+    expect(groups[0].hover).toBe("exp-flat-PRICE-g1: ven-2, ven-3");
+  });
+
+  it("labels a group with no event name by its VEN count alone", () => {
+    const { groups } = tariffGroups(signals([{ venName: "ven-1", bands: tariffOf(null, 0.1) }]), NOW);
+    expect(groups[0].label).toBe("tariff · 1 VEN");
+  });
+
+  it("keeps labels unique when two tariffs would read alike", () => {
+    const { groups } = tariffGroups(
+      signals([
+        { venName: "ven-1", bands: tariffOf("same", 0.1) },
+        { venName: "ven-2", bands: tariffOf("same", 0.2) },
+      ]),
+      NOW,
+    );
+    expect(new Set(groups.map((g) => g.label)).size).toBe(2);
   });
 
   it("is empty when nothing was priced", () => {
-    expect(sharedTariff(undefined).bands).toEqual([]);
-    expect(sharedTariff(signals([])).agreeingVens).toBe(0);
+    expect(tariffGroups(undefined, NOW).groups).toEqual([]);
+    expect(tariffGroups(signals([]), NOW).knownVens).toBe(0);
+  });
+});
+
+describe("shortNames", () => {
+  it("leaves out the part every name shares, cut at a separator", () => {
+    expect(shortNames(["exp-flat-PRICE-g0", "exp-flat-PRICE-g1"])).toEqual(["g0", "g1"]);
+  });
+
+  it("keeps a single name, or names that are all alike, whole", () => {
+    expect(shortNames(["exp-flat-PRICE-g0"])).toEqual(["exp-flat-PRICE-g0"]);
+    expect(shortNames(["same", "same"])).toEqual(["same", "same"]);
+  });
+
+  it("does not cut inside a word", () => {
+    expect(shortNames(["tariff-night", "tariff-nightly"])).toEqual(["night", "nightly"]);
+  });
+
+  it("passes a missing name through", () => {
+    expect(shortNames(["a-x", null, "a-y"])).toEqual(["x", null, "y"]);
+  });
+});
+
+describe("tariffLineRows", () => {
+  it("carries any number of lines in one row array, each pinned at the left edge", () => {
+    const rows = tariffLineRows(
+      [
+        { key: "g0", bands: [band({ value: 0.1 })] },
+        { key: "g1", bands: [band({ value: 0.2 })] },
+      ],
+      T0 + HOUR / 2,
+      T0 + 2 * HOUR,
+    );
+    expect(rows[0].values?.g0).toBe(0.1);
+    expect(rows[0].values?.g1).toBe(0.2);
   });
 });
 

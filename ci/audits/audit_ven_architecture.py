@@ -121,6 +121,11 @@ The rules, and why each exists:
      script passed through a shell heredoc does): the message reads "does not              open
      the grid". It happened to eleven user- and operator-visible messages before this rule.
 
+  19. No event ranked by its `priority` outside `lab-core/src/event_priority.rs`. Which event wins
+     where events overlap is one rule (BL-02, GB-45): the VEN's tariff and capacity parsers and the
+     BFF's signal bands call `lab_core::event_priority::resolve`. A second ordering by priority
+     is how the Fleet page came to draw a tariff the VENs did not act on (GB-64).
+
 Reuses `strip_test_blocks` from audit_file_sizes.py rather than carrying a
 second copy of the same rule.
 """
@@ -361,6 +366,10 @@ CHECKS = [
      lambda: [h for h in forbid("vtn-auth", [VEN_SRC, BFF_SRC, LAB_CORE_SRC],
                                 HAND_ATTACHED_TOKEN)
               if "lab-core/src/vtn_auth.rs" not in h.replace(os.sep, "/")]),
+    ("event priority read outside lab-core's event_priority",
+     lambda: [h for h in forbid("event-priority", [VEN_SRC, BFF_SRC, LAB_CORE_SRC],
+                                r"\.content\s*\.priority\b")
+              if "lab-core/src/event_priority.rs" not in h.replace(os.sep, "/")]),
     ("an asset kind named in the planner core or the plan", asset_kind_in_planner),
     ("an asset's solution detail read outside its kind", solution_detail_outside_its_kind),
     ("a string literal that lost its line continuation", collapsed_continuations),

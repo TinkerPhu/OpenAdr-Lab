@@ -141,7 +141,7 @@ pub fn preview(
     let truncated =
         expanded.len() >= MAX_LOOPED_INTERVALS && expanded.last().is_some_and(|t| t.end < to);
     Preview {
-        bands: bands_for_ven(event, reader, "draft", from, to),
+        bands: bands_for_ven(std::slice::from_ref(event), reader, "draft", from, to),
         truncated,
         max_looped_intervals: MAX_LOOPED_INTERVALS,
     }
@@ -226,7 +226,7 @@ mod tests {
         let stored = lab_core::test_fixtures::events_from_json(body).remove(0);
         let (from, to) = (t("2026-10-18T00:00:00Z"), t("2026-10-21T00:00:00Z"));
         let via_preview = preview(&draft, &reader(), from, to).bands;
-        let via_fleet = bands_for_ven(&stored, &reader(), "ven-1", from, to);
+        let via_fleet = bands_for_ven(std::slice::from_ref(&stored), &reader(), "ven-1", from, to);
         // The draft carries a placeholder id; everything else must be identical.
         assert_eq!(via_preview.len(), via_fleet.len());
         for (a, b) in via_preview.iter().zip(&via_fleet) {

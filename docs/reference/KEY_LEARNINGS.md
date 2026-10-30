@@ -3752,3 +3752,20 @@ recorder cannot store it as a float, a sum treats it as kW, and the one reader t
 asset that has no value leaves the field out (`Asset::publishes_setpoint`), and a test walks the whole snapshot for any
 number beyond 1e300 so the next sentinel fails there instead of in a consumer. A value nobody reads is the likeliest
 place for one to hide: the grid snapshot's two limits were a duplicate of the capacity picture.
+
+## A tariff drawn next to a result must be the one the actors acted on (fleet-tariff-groups, 2026-10-30)
+
+The Fleet page drew the tariff beside the fleet power curve. With five targeted tariffs it drew the largest group's
+bands plus the event those bands overrode, because the feed listed every event that targeted a VEN and the UI folded
+VENs to "the majority's tariff". The result looked unexplained and the displayed cause was wrong. Rank overlapping
+events with the one function the VEN uses (`lab_core::event_priority::resolve`), show every distinct tariff with its
+VENs, and say what the page cannot know (the tariff as it was at a past time, GB-66). A derived display that
+re-implements the actor's rule, or hides the cases that do not fit its single-answer assumption, is wrong at the
+moment the experiment gets interesting.
+
+## Edit scripts in a shell heredoc: escapes and encodings (2026-10-30)
+
+A Python edit passed through a shell heredoc turned `\b` in a regex into a backspace byte (the audit rule then
+matched nothing, silently), and `open(path, "w")` with the default Windows encoding raised after truncating the file
+to zero bytes. Write both ways with explicit `encoding="utf-8"` and `newline=""`, build special characters from
+`chr`/`bytes` values, and prove a new audit rule by planting a violation and watching it fail.

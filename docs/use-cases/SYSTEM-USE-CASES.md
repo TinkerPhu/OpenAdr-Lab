@@ -293,6 +293,19 @@ was.
 An event the BFF cannot parse is counted and shown, because fewer bands than
 the VTN sent must not look like a quiet grid.
 
+Where events overlap, a VEN's bands are the **winning** ones: the feed ranks
+them with the rule the VEN applies (`lab_core::event_priority`: lower priority
+number first, an absent priority last, the newer event at equal priority), so a
+priority-1 price for ven-3 replaces the open price for ven-3 only. The Fleet
+page's **Tariffs** card draws one import curve and one export curve per
+distinct tariff — VENs with identical price bands are one tariff, whichever
+event carries it — each labelled with the short event name and the number of
+VENs (`g3 · 6 VENs`) and listing the VENs on hover. A split of the fleet over
+several tariffs (a staggering experiment) is shown, never reported as
+disagreement. The card draws the VTN's events as they stand now, so hours
+before a tariff change are drawn with the new tariff (GB-66). Pinned by
+`tests/features/fleet_tariff_groups.feature`.
+
 **What to test:**
 - `tests/features/fleet_telemetry.feature`
 - `VTN/bff/src/fleet.rs`, `VTN/bff/src/fleet_reactions.rs`,

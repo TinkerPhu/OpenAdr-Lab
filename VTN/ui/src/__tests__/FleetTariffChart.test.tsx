@@ -101,7 +101,7 @@ describe("FleetTariffChart", () => {
     expect(axis.domain[0]).toBeGreaterThan(0);
   });
 
-  it("says so when the fleet was not sent one tariff", () => {
+  it("draws the largest group and points at the others when VENs are on different tariffs", () => {
     const odd = LAB_BANDS.map((b) => ({ ...b, value: 0.99 }));
     renderChart(
       signals([
@@ -110,7 +110,13 @@ describe("FleetTariffChart", () => {
         { venName: "ven-3", bands: odd },
       ]),
     );
-    expect(screen.getByTestId("fleet-tariff-disagree")).toHaveTextContent("ven-3");
+    expect(screen.getByTestId("fleet-tariff-other-groups")).toHaveTextContent("1 other tariff");
+    expect(screen.getByTestId("fleet-tariff-other-groups")).toHaveTextContent("2 VENs");
+  });
+
+  it("says the curves are the VTN's events as of now", () => {
+    renderChart(fleet(20));
+    expect(screen.getByTestId("fleet-tariff-source")).toHaveTextContent("VTN events as of now");
   });
 
   it("adds a solid draft series beside the live tariff when given a draft", () => {
@@ -183,8 +189,8 @@ describe("FleetTariffChart", () => {
 
   it("stays quiet when every VEN got the same tariff", () => {
     renderChart(fleet(20));
-    expect(screen.queryByTestId("fleet-tariff-disagree")).not.toBeInTheDocument();
-    expect(screen.getByTestId("fleet-tariff-source")).toHaveTextContent("20 of 20");
+    expect(screen.queryByTestId("fleet-tariff-other-groups")).not.toBeInTheDocument();
+    expect(screen.getByTestId("fleet-tariff-source")).toHaveTextContent("20 VENs");
   });
 
   it("explains an unpriced window instead of drawing an empty chart", () => {
