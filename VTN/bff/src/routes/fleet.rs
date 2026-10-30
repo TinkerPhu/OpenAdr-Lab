@@ -372,10 +372,7 @@ pub async fn fleet_signals(
     let vens: Vec<_> = ven_names
         .iter()
         .map(|name| {
-            let bands: Vec<_> = events
-                .iter()
-                .flat_map(|ev| crate::fleet_signals::bands_for_ven(ev, &reader, name, q.from, to))
-                .collect();
+            let bands = crate::fleet_signals::bands_for_ven(&events, &reader, name, q.from, to);
             json!({ "venName": name, "bands": bands })
         })
         .collect();

@@ -18,7 +18,7 @@ import { VenPlanChart } from "../components/VenPlanChart";
 import {
   fleetObjectiveChoices, latestObjectiveSwitch, objectiveCounts, objectiveMix, sourceLabel,
 } from "../utils/fleetObjective";
-import { FleetTariffChart } from "../components/FleetTariffChart";
+import { FleetTariffGroupsChart } from "../components/FleetTariffGroupsChart";
 import { FleetReactions } from "../components/FleetReactions";
 import { formatAge } from "../utils/relativeTime";
 import { formatKwOrDash } from "@lab/ui/unitFormat";
@@ -225,9 +225,9 @@ export function FleetPage() {
             dip means something different depending on whether the hour got
             expensive or a limit landed. */}
         <Typography variant="subtitle2" color="text.secondary">
-          Tariff
+          Tariffs
         </Typography>
-        <FleetTariffChart
+        <FleetTariffGroupsChart
           signals={signals.data}
           windowMinutes={chosen.minutes}
           tickMinutes={chosen.tickMinutes}

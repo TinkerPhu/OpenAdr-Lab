@@ -18,6 +18,7 @@
 //! own capability or forecast (`asset-competence-assurance`), the VEN's
 //! planning, the BFF's aggregation policy.
 
+pub mod event_priority;
 pub mod event_timing;
 pub mod fleet_channel;
 pub mod test_fixtures;

@@ -78,6 +78,8 @@ Two known obstacles the iteration will meet, and what to do about each:
   price converges, add `IMPORT_CAPACITY_LIMIT` as the guarantee (C2), with the price doing the
   steering and the limit holding the peak.
 
+Reading the result: the Fleet page's Tariffs card draws one import and one export curve per distinct tariff, labelled with the VENs on it (GB-64), so a staggered tariff and the fleet power beside it can be read together. It draws the VTN's events as of now; the tariff at a past time is GB-66.
+
 ## 4. Does a VTN-side MILP help?
 
 Not as the first tool. A direct MILP would need every site's assets, forecasts, comfort rules and

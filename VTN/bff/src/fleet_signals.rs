@@ -12,7 +12,8 @@
 //! interval *i* runs, which is precisely what GB-48 was.
 
 use chrono::{DateTime, Utc};
-use lab_core::event_timing::{timed_intervals, wire_name, OadrEvent};
+use lab_core::event_priority::resolve;
+use lab_core::event_timing::OadrEvent;
 use lab_core::wire_contract::{DeclaredBy, PayloadReader};
 use serde::Serialize;
 
@@ -43,11 +44,6 @@ pub struct SignalBand {
     pub refused: Option<String>,
 }
 
-// Priority is deliberately absent: `openleadr_wire::event::Priority` is a
-// newtype with no accessor, and a band nothing draws is not worth reaching
-// around a type's own encapsulation for. When overlapping events need ranking
-// here, the accessor belongs upstream.
-
 /// The reader every band is valued through: what each event and its program declare, plus the
 /// profile default (GB-50). A failed program listing costs the program tier, not the bands.
 pub async fn payload_reader(business: &crate::vtn_client::VtnClient) -> PayloadReader {
@@ -69,62 +65,74 @@ pub fn targets_ven(targets: &[String], ven_name: &str) -> bool {
     targets.is_empty() || targets.iter().any(|t| t == ven_name)
 }
 
-/// Resolve one event into the bands it puts on one VEN inside `[from, to)`.
+/// The bands that apply to one VEN inside `[from, to)`: of the events that target it, the winner
+/// of every overlap, per payload type, ranked the way the VEN ranks them
+/// (`lab_core::event_priority::resolve`, the one implementation). A band therefore never shows a
+/// value that an outranking event replaced for this VEN.
 ///
-/// Returns nothing when the event does not target the VEN, and clips the bands
-/// to the window so a month-long tariff does not arrive as a month-long band.
+/// Clipped to the window: the caller drew an axis, and a band that runs off it misleads about its
+/// extent. A payload whose declared unit the profile does not read has no value and says why
+/// (`refused`), as a VEN drops it too. Payloads that carry no number have no band.
 pub fn bands_for_ven(
-    event: &OadrEvent,
+    events: &[OadrEvent],
     reader: &PayloadReader,
     ven_name: &str,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> Vec<SignalBand> {
-    let targets: Vec<String> = event
-        .content
-        .targets
+    let targeted: Vec<OadrEvent> = events
         .iter()
-        .map(|t| t.to_string())
-        .collect();
-    if !targets_ven(&targets, ven_name) {
-        return Vec::new();
-    }
-
-    let event_id = event.id.to_string();
-    let event_name = event.content.event_name.clone();
-
-    timed_intervals(event)
-        .into_iter()
-        .filter(|iv| iv.start < to && iv.end > from)
-        .flat_map(|iv| {
-            // Clipped to the asked-for window: the caller drew an axis, and a
-            // band that runs off it is a band that misleads about its extent.
-            let band_from = iv.start.max(from);
-            let band_to = iv.end.min(to);
-            let (id, name) = (event_id.clone(), event_name.clone());
-            iv.interval.payloads.iter().map(move |p| {
-                let read = reader.read(event, p);
-                let reading = read.as_ref().and_then(|r| r.as_ref().ok());
-                SignalBand {
-                    from: band_from,
-                    to: band_to,
-                    event_id: id.clone(),
-                    event_name: name.clone(),
-                    payload_type: wire_name(&p.value_type),
-                    value: reading.map(|r| r.value),
-                    units_declared_by: reading.and_then(|r| match r.declared_by {
-                        DeclaredBy::Event => Some("EVENT"),
-                        DeclaredBy::Program => Some("PROGRAM"),
-                        DeclaredBy::ProfileDefault => Some("PROFILE_DEFAULT"),
-                        DeclaredBy::NothingToDeclare => None,
-                    }),
-                    refused: read
-                        .and_then(|r| r.err())
-                        .map(|refusal| refusal.to_string()),
-                }
-            })
+        .filter(|ev| {
+            let targets: Vec<String> = ev.content.targets.iter().map(|t| t.to_string()).collect();
+            targets_ven(&targets, ven_name)
         })
-        .collect()
+        .cloned()
+        .collect();
+    let resolved = resolve(&targeted, reader, None);
+
+    let clipped = |start: DateTime<Utc>, end: DateTime<Utc>| {
+        (start < to && end > from).then(|| (start.max(from), end.min(to)))
+    };
+    let mut bands: Vec<SignalBand> = Vec::new();
+    for segment in &resolved.segments {
+        let Some((band_from, band_to)) = clipped(segment.start, segment.end) else {
+            continue;
+        };
+        for (payload_type, winner) in &segment.winners {
+            bands.push(SignalBand {
+                from: band_from,
+                to: band_to,
+                event_id: winner.event_id.clone(),
+                event_name: winner.event_name.clone(),
+                payload_type: payload_type.clone(),
+                value: Some(winner.value),
+                units_declared_by: match winner.declared_by {
+                    DeclaredBy::Event => Some("EVENT"),
+                    DeclaredBy::Program => Some("PROGRAM"),
+                    DeclaredBy::ProfileDefault => Some("PROFILE_DEFAULT"),
+                    DeclaredBy::NothingToDeclare => None,
+                },
+                refused: None,
+            });
+        }
+    }
+    for r in &resolved.refused {
+        let Some((band_from, band_to)) = clipped(r.start, r.end) else {
+            continue;
+        };
+        bands.push(SignalBand {
+            from: band_from,
+            to: band_to,
+            event_id: r.refusal.event_id.clone(),
+            event_name: r.event_name.clone(),
+            payload_type: r.refusal.payload_type.clone(),
+            value: None,
+            units_declared_by: None,
+            refused: Some(r.refusal.to_string()),
+        });
+    }
+    bands.sort_by(|a, b| (a.from, &a.payload_type).cmp(&(b.from, &b.payload_type)));
+    bands
 }
 
 #[cfg(test)]
@@ -137,6 +145,17 @@ mod tests {
 
     fn event(json: serde_json::Value) -> OadrEvent {
         lab_core::test_fixtures::events_from_json(json).remove(0)
+    }
+
+    /// One event's bands for one VEN: the common case of these tests.
+    fn bands_of(
+        ev: &OadrEvent,
+        reader: &PayloadReader,
+        ven_name: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Vec<SignalBand> {
+        bands_for_ven(std::slice::from_ref(ev), reader, ven_name, from, to)
     }
 
     fn limit_event(targets: serde_json::Value) -> OadrEvent {
@@ -155,7 +174,7 @@ mod tests {
 
     #[test]
     fn a_targeted_ven_gets_the_band_with_its_value_and_type() {
-        let bands = bands_for_ven(
+        let bands = bands_of(
             &limit_event(serde_json::json!(["ven-1"])),
             &PayloadReader::default(),
             "ven-1",
@@ -171,7 +190,7 @@ mod tests {
 
     #[test]
     fn a_ven_the_event_does_not_target_gets_nothing() {
-        let bands = bands_for_ven(
+        let bands = bands_of(
             &limit_event(serde_json::json!(["ven-1"])),
             &PayloadReader::default(),
             "ven-7",
@@ -186,7 +205,7 @@ mod tests {
     /// result looks like a quiet grid.
     #[test]
     fn an_empty_target_list_reaches_every_ven() {
-        let bands = bands_for_ven(
+        let bands = bands_of(
             &limit_event(serde_json::json!([])),
             &PayloadReader::default(),
             "ven-19",
@@ -200,7 +219,7 @@ mod tests {
     /// extent.
     #[test]
     fn bands_are_clipped_to_the_asked_for_window() {
-        let bands = bands_for_ven(
+        let bands = bands_of(
             &limit_event(serde_json::json!([])),
             &PayloadReader::default(),
             "ven-1",
@@ -213,7 +232,7 @@ mod tests {
 
     #[test]
     fn an_event_entirely_outside_the_window_contributes_nothing() {
-        let bands = bands_for_ven(
+        let bands = bands_of(
             &limit_event(serde_json::json!([])),
             &PayloadReader::default(),
             "ven-1",
@@ -232,7 +251,7 @@ mod tests {
             "intervalPeriod": {"start": "2026-09-22T09:00:00Z", "duration": "PT1H"},
             "intervals": [{"id": 0, "payloads": [{"type": "SIMPLE", "values": [2]}]}]
         }));
-        let bands = bands_for_ven(
+        let bands = bands_of(
             &ev,
             &PayloadReader::default(),
             "ven-1",
@@ -254,7 +273,7 @@ mod tests {
     }
 
     fn one_band(ev: &OadrEvent, reader: &PayloadReader) -> SignalBand {
-        bands_for_ven(
+        bands_of(
             ev,
             reader,
             "ven-1",
@@ -301,5 +320,68 @@ mod tests {
             why.contains("units VOLTS") && why.contains("units KW"),
             "{why}"
         );
+    }
+
+    // GB-64: of overlapping events the band is the one the VEN acts on.
+
+    fn price_event(
+        id: &str,
+        priority: Option<i64>,
+        targets: serde_json::Value,
+        value: f64,
+    ) -> OadrEvent {
+        event(serde_json::json!({
+            "id": id, "programID": "p", "eventName": id,
+            "priority": priority, "targets": targets,
+            "intervalPeriod": {"start": "2026-09-22T08:00:00Z", "duration": "PT1H"},
+            "intervals": [{"id": 0, "payloads": [{"type": "PRICE", "values": [value]}]}]
+        }))
+    }
+
+    fn price_bands(events: &[OadrEvent], ven: &str) -> Vec<(String, Option<f64>)> {
+        bands_for_ven(
+            events,
+            &PayloadReader::default(),
+            ven,
+            t("2026-09-22T07:00:00Z"),
+            t("2026-09-22T10:00:00Z"),
+        )
+        .into_iter()
+        .map(|b| (b.event_id, b.value))
+        .collect()
+    }
+
+    #[test]
+    fn a_priority_event_replaces_the_open_price_for_its_targets_only() {
+        let events = vec![
+            price_event("standard", None, serde_json::json!([]), 0.25),
+            price_event("override", Some(1), serde_json::json!(["ven-3"]), 0.12),
+        ];
+        assert_eq!(
+            price_bands(&events, "ven-3"),
+            vec![("override".to_string(), Some(0.12))]
+        );
+        assert_eq!(
+            price_bands(&events, "ven-7"),
+            vec![("standard".to_string(), Some(0.25))]
+        );
+    }
+
+    #[test]
+    fn a_refused_payload_still_appears_beside_the_band_that_won() {
+        let mut bad =
+            serde_json::to_value(price_event("bad", Some(1), serde_json::json!([]), 9.0)).unwrap();
+        bad["payloadDescriptors"] =
+            serde_json::json!([{ "payloadType": "PRICE", "units": "KWH", "currency": "USD" }]);
+        let events = vec![
+            price_event("standard", None, serde_json::json!([]), 0.25),
+            serde_json::from_value(bad).unwrap(),
+        ];
+        let got = price_bands(&events, "ven-1");
+        assert!(
+            got.contains(&("standard".to_string(), Some(0.25))),
+            "{got:?}"
+        );
+        assert!(got.contains(&("bad".to_string(), None)), "{got:?}");
     }
 }

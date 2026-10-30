@@ -69,8 +69,8 @@ vi.mock("../components/FleetPowerChart", () => ({
   ),
 }));
 
-vi.mock("../components/FleetTariffChart", () => ({
-  FleetTariffChart: ({ windowMinutes }: { windowMinutes: number }) => (
+vi.mock("../components/FleetTariffGroupsChart", () => ({
+  FleetTariffGroupsChart: ({ windowMinutes }: { windowMinutes: number }) => (
     <div data-testid="fleet-tariff-stub">{windowMinutes}</div>
   ),
 }));
