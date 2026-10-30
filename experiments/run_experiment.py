@@ -120,6 +120,11 @@ def resolve_start_at(start_at_str, now, grace_minutes=15):
     )
 
 
+# The VTN's one business-layer credential (scripts/seed_vtn.py, VTN/fixtures/01_bl_client.sql);
+# the 3.0 "any-business" client no longer exists and answers invalid_client.
+BL_CLIENT = ("bl-client", "bl-client")
+
+
 def get_token(base, client_id, client_secret):
     def _post():
         r = requests.post(
@@ -311,7 +316,7 @@ def suspend_background_events(base, snapshot_path):
     """Save every existing VTN event to `snapshot_path`, then delete it for the run.
     The file is written before anything is deleted, so a hard kill can always be
     recovered with --restore-background-events."""
-    token = get_token(base, "any-business", "any-business")
+    token = get_token(base, *BL_CLIENT)
     events = select_background_events(list_vtn_events(base, token), created_ids=set())
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
     snapshot_path.write_text(json.dumps(events, indent=2), encoding="utf-8")
@@ -326,7 +331,7 @@ def suspend_background_events(base, snapshot_path):
 def restore_background_events(base, snapshot_path):
     """Re-create every event saved by suspend_background_events (new ids)."""
     events = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
-    token = get_token(base, "any-business", "any-business")
+    token = get_token(base, *BL_CLIENT)
     for e in events:
         post_event(base, token, strip_server_fields(e))
     print(f"  restored {len(events)} background VTN event(s) from {snapshot_path}")
@@ -887,7 +892,7 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
         )
         diag_thread.start()
 
-    token = get_token(args.vtn_url, "any-business", "any-business")
+    token = get_token(args.vtn_url, *BL_CLIENT)
     r = requests.post(
         f"{args.vtn_url}/programs",
         headers=auth(token),
@@ -966,7 +971,7 @@ def run_window(args, ven_names, fleet_map, duration_min, run_dir, scenario_label
             sleep_until(end)
     finally:
         # Deletion == cancellation in OpenADR 3; always clean up.
-        token = get_token(args.vtn_url, "any-business", "any-business")
+        token = get_token(args.vtn_url, *BL_CLIENT)
         for eid in created_events:
             requests.delete(f"{args.vtn_url}/events/{eid}", headers=auth(token), timeout=10)
         requests.delete(f"{args.vtn_url}/programs/{program_id}", headers=auth(token), timeout=10)
