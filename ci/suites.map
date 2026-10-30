@@ -18,6 +18,7 @@ docs/*                          -
 wiki/*                          -
 openspec/*                      -
 .claude/*                       -
+experiments/*                   -
 # The merge gates and the host lock are used by the suites and the runner
 ci/audits/*                     all
 ci/locks/*                      all
