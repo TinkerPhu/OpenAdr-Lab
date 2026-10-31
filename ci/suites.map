@@ -19,6 +19,9 @@ wiki/*                          -
 openspec/*                      -
 .claude/*                       -
 experiments/*                   -
+.gitignore                      -
+jobs.json                       -
+scripts/jobs.py                  -
 # The merge gates and the host lock are used by the suites and the runner
 ci/audits/*                     all
 ci/locks/*                      all

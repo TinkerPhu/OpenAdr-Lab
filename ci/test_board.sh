@@ -109,7 +109,11 @@ check "openleadr-rs runs everything"              "$ALL" "$(suites 'openleadr-rs
 ')"
 check ".md inside code is code"                   "cargo e2e resilience" "$(suites 'VEN/notes.md
 ')"
-check "a top-level non-md file runs everything"   "$ALL" "$(suites 'jobs.json
+check "a top-level non-md file runs everything"   "$ALL" "$(suites 'Makefile
+')"
+check "the repo's own tooling files run nothing"     ""     "$(suites '.gitignore
+jobs.json
+scripts/jobs.py
 ')"
 check "no changed file selects nothing"           ""  "$(suites '')"
 check "the reason lists path and rule"            "VEN/ui/a.tsx -> e2e" "$(printf 'VEN/ui/a.tsx
