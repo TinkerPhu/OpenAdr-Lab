@@ -3,7 +3,7 @@ title: Real-Measurement MQTT Feeds
 type: component
 created: 2026-08-03
 updated: 2026-10-22
-synced_commit: 97a6abc
+synced_commit: f0ad9d2
 sources: [docs/architecture/real_measurement_mqtt.md, VEN/src/measurement.rs, VEN/src/measurement_translation.rs, VEN/src/controller/measurement_port.rs, VEN/src/entities/measurement.rs, VEN/src/assets/pv.rs, VEN/src/assets/base_load.rs, VEN/src/simulator/tick_inputs.rs, VEN/src/tasks/sim_tick/context.rs, VEN/src/boot/ports.rs, VEN/src/profile/validate.rs, VEN/src/routes/measurement.rs, VEN/ui/src/pages/Measurement.tsx, tests/features/real_measurement_mqtt.feature, VEN/docker-compose.yml, VEN/profiles/ven-1.yaml]
 tags: [measurement, pv, baseload, mqtt, ven, real-hardware]
 ---

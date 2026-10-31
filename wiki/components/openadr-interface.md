@@ -3,7 +3,7 @@ title: OpenADR Interface (VEN)
 type: component
 created: 2026-07-04
 updated: 2026-10-21
-synced_commit: 97a6abc
+synced_commit: f0ad9d2
 sources: [docs/architecture/VEN_ARCHITECTURE.md, docs/reference/WIRE_PROFILE.md, VEN/src/vtn.rs, VEN/src/controller/vtn_port.rs, VEN/src/controller/openadr_interface.rs, VEN/src/controller/rate_schedule.rs, VEN/src/controller/wire_reject.rs, VEN/src/controller/token_scopes.rs, VEN/src/controller/reporter.rs, VEN/src/controller/report_payload.rs, VEN/src/controller/report_intervals.rs, VEN/src/controller/report_accumulator.rs, VEN/src/tasks/poll_events/, VEN/src/tasks/poll_signals.rs, VEN/src/tasks/obligation.rs, VEN/src/entities/capacity.rs, VEN/src/state/obligations.rs, VEN/src/services/obligation.rs, lab-core/src/]
 tags: [openadr, ven, translation, polling]
 ---

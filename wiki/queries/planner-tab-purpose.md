@@ -3,7 +3,7 @@ title: "Query: what is the Planner tab in the VEN UI for?"
 type: query
 created: 2026-07-17
 updated: 2026-10-22
-synced_commit: 97a6abc
+synced_commit: f0ad9d2
 sources: [VEN/ui/src/pages/Planner.tsx, VEN/ui/src/App.tsx, VEN/ui/src/pages/Controller.tsx, VEN/ui/src/pages/Dashboard.tsx, VEN/ui/src/components/sessions/SessionProgressBoard.tsx, VEN/ui/src/components/planner/]
 tags: [ui, planner, ux]
 ---
