@@ -1993,8 +1993,10 @@ duration anywhere → open-ended (the VTN lists only events whose lifespan has n
 start derivable → in force while the VTN lists the event. Tests: `event_timing.rs`,
 `openadr_interface.rs` `test_window_parsers_give_contiguous_intervals_their_own_windows`.
 
-**Event interval resolution** (`controller/rate_schedule.rs::collect_interval_groups`,
-shared by `parse_rate_snapshots` and `parse_capacity_schedule`): all active events'
+**Event interval resolution** (`lab_core::event_priority::resolve`, the one ranking
+implementation: called by `controller/rate_schedule.rs` for `parse_rate_snapshots` and
+`parse_capacity_schedule`, and by the BFF's `/api/fleet/signals` so the Fleet page draws the
+bands a VEN acts on; it also returns the payloads skipped for an unreadable unit): all active events'
 intervals (after looping expansion) are split at every interval boundary into atomic
 segments; each segment takes, per payload type, the value of the highest-ranked event
 covering it that carries that type. Rank: lower `priority` wins, absent priority ranks
