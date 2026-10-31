@@ -2,8 +2,8 @@
 title: OpenADR 3
 type: concept
 created: 2026-07-04
-updated: 2026-07-06
-synced_commit: 474dec3
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [docs/REQUIREMENTS.md, docs/openadr_3_1_specs/]
 tags: [openadr, protocol, spec]
 ---

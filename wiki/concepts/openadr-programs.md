@@ -2,8 +2,8 @@
 title: OpenADR Programs
 type: concept
 created: 2026-07-06
-updated: 2026-07-07
-synced_commit: b0bd0df
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources:
   - docs/openadr_3_1_specs/
   - VEN/src/tasks/poll_programs.rs
@@ -257,14 +257,14 @@ agreement that gives both sides a stable vocabulary.
 ## Where this lab sits
 
 - Program **discovery** is implemented: the VEN polls `GET /programs` every
-  `POLL_PROGRAMS_SECS` (default 300 s, `VEN/src/tasks/poll_programs.rs`) into shared
+  `poll.programs_secs` (profile default 30 s, `POLL_PROGRAMS_SECS` overrides, `VEN/src/tasks/poll_programs.rs`) into shared
   state; events are polled and interpreted per [[openadr-interface]].
 - Program **enrollment** is simulated by hand-authored profile YAML with baked-in
   `clientID`/`clientSecret` — no BL-driven onboarding flow
   ([[openadr-spec-use-cases]], Customer row).
-- `OadrProgramConfig` (`VEN/src/entities/capacity.rs`) is quarantined design vocabulary
-  for per-program VEN configuration (signal types, capacity participation), not current
-  behaviour — tracked in `docs/BACKLOG.md` (BL-14 family).
+- Per-program VEN configuration (which signal types a VEN takes part in, capacity participation) is not
+  modelled: the VEN reacts to every event it is targeted by, whatever program carries it. It is tracked in
+  `docs/BACKLOG.md` (BL-14 family).
 
 Q&A form of this material, as originally filed: [[openadr-programs-explained]]. How a
 distributor would stage these program types commercially, from open tariff publication

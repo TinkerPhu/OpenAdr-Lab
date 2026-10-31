@@ -2,8 +2,8 @@
 title: Notification Feed
 type: component
 created: 2026-07-12
-updated: 2026-08-09
-synced_commit: 4c4f149
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [VEN/src/services/notify.rs, VEN/src/entities/notification.rs, VEN/src/routes/notifications.rs, VEN/src/history_store/notifications.rs, VEN/ui/src/components/NotificationsBell.tsx, VEN/src/tasks/poll_signals.rs, VEN/src/tasks/poll_events/, VEN/ui/src/pages/Notifications.tsx]
 tags: [notifications, ux, phase4]
 ---
@@ -50,6 +50,9 @@ deps ([[ven-hexagonal-architecture]]).
 | Newly-appearing grid-alert window | Alert | `tasks/poll_signals.rs` (once per window) |
 | VTN reachable → unreachable / back | Warn / Info | `tasks/poll_events/mod.rs` via `notify::outage_transition` |
 | New warning on an **adopted** plan | Warning→Warn, Critical→Alert, Info suppressed | `services/notify.rs::notify_new_plan_warnings` (called from the plan cycle) |
+| Reactive correction starts / clears (a lever begins or stops adjusting a setpoint for a sustained deviation; a handoff between levers is not an edge) | Warn / Info, dedup keys `arbiter-correction-active` / `-cleared` | `notify_correction_edge`, from `sim_tick/arbiter_glue.rs::record_arbiter_outcome` ([[deviation-arbiter]]) |
+| The VTN sent objects the VEN refused (malformed events, programs or reports) | Warn, one per resource per dedup window (`wire-reject-<resource>`) | `notify_wire_rejections`, from the three pollers; also a counter and a degraded `/health` entry |
+| An event declares a unit the profile does not read | Warn, as a wire rejection under `events:units` | `notify_unit_audit` (GB-50); an *assumed* unit (nothing declared) is recorded on `/health` and the Dashboard, not notified ([[wire-contract]]) |
 
 The plan-warning channel is the backbone: WP4.4's stale-rate warning and
 WP4.1-c's MAX_COST budget warning ride it without their own producer wiring.

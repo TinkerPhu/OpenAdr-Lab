@@ -2,9 +2,9 @@
 title: Weather Forecast Plugin
 type: component
 created: 2026-07-28
-updated: 2026-10-14
-synced_commit: fab41e9
-sources: [docs/architecture/weather_forecast.md, VEN/src/weather.rs, VEN/src/entities/weather.rs, VEN/src/entities/solar.rs, VEN/src/entities/pv_snow.rs, VEN/src/controller/weather_port.rs, VEN/src/routes/weather.rs, VEN/src/profile/weather_pv.rs, VEN/src/services/forecast.rs, VEN/ui/src/pages/Weather.tsx, VEN/src/services/test_support/mock_weather_port.rs]
+updated: 2026-10-31
+synced_commit: 102f7fa
+sources: [docs/architecture/weather_forecast.md, VEN/src/tasks/sim_tick/feeds.rs, VEN/src/weather.rs, VEN/src/entities/weather.rs, VEN/src/entities/solar.rs, VEN/src/entities/pv_snow.rs, VEN/src/controller/weather_port.rs, VEN/src/routes/weather.rs, VEN/src/profile/weather_pv.rs, VEN/src/services/forecast.rs, VEN/ui/src/pages/Weather.tsx, VEN/src/services/test_support/mock_weather_port.rs]
 tags: [weather, pv, forecast, mqtt, ven]
 ---
 
@@ -21,7 +21,7 @@ to the rest of the [[ven-hexagonal-architecture]].
 ## Port and adapter
 
 `WeatherForecastPort` (`controller/weather_port.rs`) is the seam — `services/` and
-`controller/` never see MQTT/JSON directly, mirroring `SimulatorPort`/`SolverPort`/`VtnPort`.
+`controller/` never see MQTT/JSON directly, mirroring `SolverPort`/`VtnPort`.
 `VEN/src/weather.rs`'s `MqttWeatherAdapter` is the concrete implementation, subscribed via
 `paho-mqtt`/`rumqttc`. Any process publishing the documented schema to the topic counts as a
 "plugin" — decoupled from VEN's process lifecycle entirely (retained messages mean a
@@ -30,52 +30,40 @@ the Zunzgen site, published by a separate `data_acquisition` project from SRF Me
 
 ## Two consumers, one resolution path
 
-Weather reaches PV through one gate, `entities::solar::fresh_weather_pv_series` (the
-forecast series when fresh and configured, nothing otherwise), which the sim tick hands to the
-live `PvInverter` — this is what stops the two views from silently diverging (closed as
-TECHNICAL_DEBTS.md R-50):
+Weather reaches PV through one gate, `entities::solar::fresh_weather_pv_series` (the forecast series when fresh
+and configured, nothing otherwise). It is evaluated **per PV array**: each array declares its own `weather:`
+geometry and rating in the VEN profile, and `tasks/sim_tick/feeds.rs::resolve_weather_pv_for_tick` makes one
+`latest()` fetch and one series evaluation per array per tick, threaded onto the array as
+`TickOverrides.pv_weather_forecast`. Because the live array and the planner read the same series, a plan and the
+headroom drawn against it cannot disagree.
 
-- **Planner input** (W3): the PV plans with its own forecast (`uncurtailed_power_kw_at`), so the
-  planner reads weather only through the PV; the sim-inject pin `pv_plan_kw` still wins. See
-  [[milp-planner]].
-- **Simulator ground truth**: `PvInverter.weather_power_kw`, resolved once per tick in
-  `tasks::sim_tick::tick_once` and used by `step_inner` in place of the sin model —
-  precedence manual sim-inject override > **measured** > weather > sin model (measured added
-  by [[real-measurement-mqtt]]; a decaying manual-override offset blends additively onto
-  whichever base wins, rather than nulling it outright — see that page's fix note). This
-  closed the gap where the weather feed only affected `/weather` diagnostics and the plan,
-  not what the simulator actually produced.
-- **API-visible path**: `services::forecast::build_weather_pv_forecast`, tagged
-  `ForecastSource::WeatherModel`, feeds `GET /weather` and the VEN UI Weather tab
-  (`WeatherRawPanel`/`WeatherDerivedPanel`) — the required UI surface for this feed per the
-  `ui-transparency` rule (`.claude/CLAUDE.md`).
+- **Planner input** (W3): each PV plans with its own forecast (`uncurtailed_power_kw_at`), so the planner reads
+  weather only through the PV asset; the sim-inject pin `pv_plan_kw` still wins. See [[milp-planner]].
+- **Simulator ground truth**: the array's `weather_power_kw`, used by `step_inner` in place of the sin model —
+  precedence manual sim-inject override > **measured** > weather > sin model (measured added by
+  [[real-measurement-mqtt]]; a decaying manual-override offset blends additively onto whichever base wins).
+- **API-visible path**: `services::forecast::build_weather_pv_forecast`, tagged `ForecastSource::WeatherModel`,
+  feeds `GET /weather` and the VEN UI Weather tab (`WeatherRawPanel`/`WeatherDerivedPanel`) — the required UI
+  surface for this feed per the `ui-transparency` rule (`.claude/CLAUDE.md`).
 
 `services/forecast.rs::slot_confidence` decays confidence linearly to a 0.2 floor at 48 h age
-(`base_confidence(age_h)`) — a starting default, not yet tuned against real forecast-accuracy
-data.
+(`base_confidence(age_h)`) — a starting default, not yet tuned against real forecast-accuracy data.
 
 ## Calibration is per-VEN and empirical
 
-`profile/weather_pv.rs`'s `weather_pv` YAML section (`VEN/profiles/ven-{1,2,3}.yaml`) sets
-`rated_kwp` and `performance_ratio` per site. These were fit against two real observed
+`profile/weather_pv.rs`'s `weather:` section on a `type: pv` asset (`VEN/profiles/ven-{1,2,3}.yaml`) sets
+`rated_kwp` and `performance_ratio` per array. These were fit against two real observed
 InfluxDB irradiance/power peaks, not left at spec defaults — ven-1's 14.4 kWp reflects a real
 installation, ven-2/ven-3 are hypothetical (12 kWp / 6→8 kWp), and `performance_ratio` moved
 0.87 → 0.84 during calibration. A future PV site added to this lab needs the same manual
 calibration pass, not just a config value copied from an existing VEN.
 
-## Source liveness (R-52, resolved 2026-07-30)
+## Source liveness
 
-`MqttWeatherAdapter::is_alive()` existed but was unreachable dead code — wired through
-`WeatherForecastPort` (all three implementors, including the test mock), surfaced as
-`source_alive` on `GET /weather` (distinct from `is_fresh`: transport health vs. content age —
-a broker connection can be up with a stale retained message, or vice versa), and given a visible
-chip on the VEN UI Weather page, per the `ui-transparency` rule. E2E coverage for this
-specific behaviour (R-56, resolved): `weather_forecast.feature` gained a scenario publishing a
-status-topic heartbeat and asserting `source_alive` flips `false`→`true`, mirroring the R-52
-unit test at BDD level. Its first real Node1 run caught a step-decorator bug (the heartbeat-publish
-step was `@given` instead of `@when`, leaving it and the following assertion undefined) — fixed,
-then reverified green; a pre-existing, unrelated intermittent flake in
-`timeline_grid.feature` (R-61) surfaced incidentally during that same verification run.
+`MqttWeatherAdapter::is_alive()` is exposed through `WeatherForecastPort` (all implementors, including the test
+mock) as `source_alive` on `GET /weather`, distinct from `is_fresh`: transport health versus content age — a
+broker connection can be up with a stale retained message, or the reverse. The VEN UI Weather page shows it as
+a chip (`ui-transparency`). `weather_forecast.feature` pins it with a status-topic heartbeat scenario.
 
 ## Known deferred gaps
 
@@ -86,18 +74,13 @@ by the PV asset from its own output against the weather (R-55, `docs/architectur
 publishes on its plaintext listener (acceptable on the trusted lab LAN, revisit before any wider
 exposure).
 
-## E2E fixture was time-of-day flaky (found 2026-08-03)
+## E2E fixture
 
-`weather_forecast.feature`'s `_sample_forecast_message` fixture published a single hourly
-sample 1h ahead of "now" — with real solar-position transposition against Zunzgen's
-coordinates, that one sample could land after sunset whenever the suite happened to run in
-the evening, zeroing every plan slot's `forecast_ac_kw` regardless of the (nonzero) GHI
-value, and failing the "non-zero, weather-influenced PV forecast" assertion
-(`tests/features/steps/weather_forecast_steps.py`). Fixed by spanning 24 hourly samples
-instead of one, guaranteeing genuine daytime coverage within the plan horizon no matter what
-wall-clock time the suite runs at. Found while first running full E2E against
-[[real-measurement-mqtt]]'s branch (unrelated to that feature itself, but blocking its own
-E2E verification since both features' scenarios run in the same suite).
+`weather_forecast.feature`'s `_sample_forecast_message` publishes 24 hourly samples, not one: with real
+solar-position transposition against the site's coordinates a single sample could land after sunset and zero
+every slot's `forecast_ac_kw`, so the "non-zero, weather-influenced PV forecast" assertion
+(`tests/features/steps/weather_forecast_steps.py`) needs guaranteed daytime coverage inside the plan horizon
+whatever the wall-clock time of the run.
 
 ## Relationship to the deviation arbiter
 

@@ -123,4 +123,4 @@ Heater-tank thermal behaviour has its own MILP-facing model
 > `&[AssetConfig]`, a positional `SimState::tick(dt_s, setpoints, now, …)` signature, and Behaviour A injects applied by the
 > tick task. In the code, `AssetConfig` is gone (one `Asset` trait), `tick` takes a
 > `TickInputs`, and the one-shot injects are applied by `simulator/inject.rs`. The physics sections are
-> still the reference for the models themselves ([[ven-code-vs-docs-audit]]).
+> still the reference for the models themselves ([[asset-layer]]).

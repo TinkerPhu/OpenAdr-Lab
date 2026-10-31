@@ -2,8 +2,8 @@
 title: "Decision: DTO Pass-Through, No Normalisation"
 type: decision
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: 102a00b
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [.claude/CLAUDE.md, docs/architecture/VTN_ARCHITECTURE.md, docs/openadr_3_1_specs/]
 tags: [decision, dto, api]
 ---
@@ -27,13 +27,14 @@ One vocabulary everywhere:
 
 ## Consequences
 
-- UI/TS types mirror spec casing (camelCase JSON keys) rather than local naming taste —
-  visible in `VEN/ui/src/api/types.ts` ([[ven-ui]]).
+- UI/TS types mirror spec casing (camelCase JSON keys) rather than local naming taste — the VEN UI's API
+  types are generated from the Rust types (`#[derive(TS)]`, `VEN/ui/src/api/generated/`, [[ven-ui]]), so the
+  spec names are written once.
 - Internally-defined quantities still follow the unit-suffix rule
   ([[sign-convention]]); pass-through applies to *spec-owned* names, not to local
   physical variables.
-- The BFF stays a thin proxy ([[vtn-stack]]) — it adds credentials, never reshapes
-  payloads.
-- `targets` is a pass-through field like any other, but its *shape* differs between spec
-  versions (3.0-era type/values maps vs 3.1's flat strings) — see the DRIFT note in
-  [[openadr-security]] for what a 3.1 migration would need to flatten.
+- The BFF stays a thin proxy for VTN objects ([[vtn-stack]]) — it adds credentials, never reshapes
+  payloads. The views it computes for the Fleet page (signal bands, service level) keep the spec's field names
+  (`eventID`, `payloadType`, `intervalPeriod`) and add only what the protocol cannot express.
+- `targets` is a pass-through field like any other: 3.1's flat strings, in the VTN, the BFF and the UIs alike
+  ([[openadr-security]]).

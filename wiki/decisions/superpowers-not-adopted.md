@@ -2,8 +2,8 @@
 title: "Decision: Superpowers Framework Not Adopted (Borrow Worktree Pattern)"
 type: decision
 created: 2026-06-25
-updated: 2026-07-31
-synced_commit: aff3f57
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [docs/guidelines/AI-SW-Development.md, docs/reference/SESSION_START.md]
 tags: [decision, tooling, workflow, agentic]
 ---

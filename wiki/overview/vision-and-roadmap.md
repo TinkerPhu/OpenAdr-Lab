@@ -2,8 +2,8 @@
 title: Vision and Roadmap
 type: overview
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: 474dec3
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [docs/BACKLOG_OpenADR_Cert.md, docs/BACKLOG.md, docs/history/project_journal.md]
 tags: [vision, roadmap, certification]
 ---
@@ -14,9 +14,11 @@ Where [[openadr-lab]] is headed, beyond the current branch.
 
 ## Long-term directions
 
-- **Swarm behaviour** — grow beyond three VENs to study how many small HEMS sites behave
-  collectively under shared DR signals (stated intent; no implementation yet — unbuilt
-  ideas live in `docs/BACKLOG.md`, per wiki policy).
+- **Swarm behaviour** — a standing fleet of 20 diverse VENs ([[fleet-tooling]], watched live through
+  [[fleet-monitoring]]) runs against one VTN, to study how many small HEMS sites behave collectively under
+  shared DR signals: herding on a common tariff, staggering the fleet with targeted group tariffs, and planning
+  versus the [[opportunistic-objective]]. The open question is which dynamic tariff relaxes the fleet's summed grid
+  power (`docs/plans/fleet_planning_experiment.md`); further unbuilt ideas live in `docs/BACKLOG.md`, per wiki policy.
 - **OpenADR certification readiness** — `docs/BACKLOG_OpenADR_Cert.md` audits the VEN
   against the OpenADR 3.1 certification requirements. Known blockers include: plain-HTTP
   transport (no TLS — "certification blocker", §2), no `/auth/server` token-endpoint

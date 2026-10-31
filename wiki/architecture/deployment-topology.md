@@ -2,8 +2,8 @@
 title: Deployment Topology
 type: architecture
 created: 2026-07-04
-updated: 2026-10-21
-synced_commit: 4c4f149
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [docs/architecture/VTN_ARCHITECTURE.md, .claude/CLAUDE.md, docs/guidelines/TESTING.md, fleet.sh, VEN/scale_out/node2/]
 tags: [deployment, docker, node1]
 ---
@@ -40,7 +40,7 @@ the Pi already runs ~20 of those unrelated containers with limited headroom.
 **Node2** is a second docker host (`.claude/CLAUDE.md` §node2-lock) that runs `ven-4`
 through `ven-20` (`VEN/scale_out/node2/docker-compose.yml`; the fleet is N=20 with ven-1..3 on Node1) plus build/test load taken off
 Node1 — it shares the same [[docker-host-lease-lock]] mechanism as Node1, its own
-independent lock keyed by host, so the two can be used concurrently by different sessions.
+independent lock (one fixed path per machine, whichever SSH alias reaches it), so the two can be used concurrently by different sessions.
 Node2 has no local VEN UI container: it proxies `/api/vens-registry` to Node1's real BFF
 over the LAN instead (`nginx/nginx.conf` there) rather than running a redundant nginx+UI
 image whose only reachable backend was Node1's anyway — one operator UI (on Node1) for the
@@ -69,5 +69,7 @@ broker on :1883 carries site measurements. Details: [[fleet-monitoring]].
 - **Full-stack runs**: on a docker host (Node2 preferred, Node1 for production-stack checks), normally
   driven by the Node3 runner ([[ci-pipeline]]); the E2E and resilience suites are described in
   [[testing-strategy]].
-- Deployments follow git pull on the Pi; builds are ARM64 (first VTN source build took
-  ~25 min, cached afterwards — docs/history/project_journal.md §1).
+- Deployments: `ci/ci-handoff.sh --deploy <host> <stack> "<services>"` ships `origin/main` — the runner builds
+  release images on Node3 and switches the production host over (`--rollback` returns to the previous images), so
+  production runs the tested commit rather than a hand-built checkout ([[ci-pipeline]]). Builds are ARM64 (a cold
+  VTN source build takes ~25 min, cached afterwards).

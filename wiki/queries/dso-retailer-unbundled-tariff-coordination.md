@@ -2,8 +2,8 @@
 title: DSO/Retailer Coordination on Tariffs When Grid and Energy Sales Are Legally Unbundled
 type: query
 created: 2026-07-31
-updated: 2026-07-31
-synced_commit: aff3f57
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources:
   - docs/openadr_3_1_specs/
   - openleadr-rs/openleadr-wire/src/program.rs
@@ -32,7 +32,8 @@ from different actors — retailer, DSO, aggregator"), and the protocol backs th
 structurally: `ProgramContent` carries `retailer_name`/`retailer_long_name` as fields
 distinct from the VTN operator identity (`openleadr-rs/openleadr-wire/src/program.rs`),
 and [[tariffs-and-capacity]]'s `TariffSnapshot` merges `PRICE` payloads **per interval
-regardless of which program/provider emitted them**, so the VEN's planner is already
+regardless of which program/provider emitted them** (overlapping events are resolved by `priority`, lower number
+first — one rule, `lab_core::event_priority`), so the VEN's planner is already
 provider-agnostic — one DSO and one retailer can each run their own program against the
 same VTN (or federated VTNs) with zero protocol change.
 

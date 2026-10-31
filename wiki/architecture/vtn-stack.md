@@ -2,8 +2,8 @@
 title: VTN Stack — openleadr-rs, BFF, UI
 type: architecture
 created: 2026-07-04
-updated: 2026-10-21
-synced_commit: f8f6775
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [docs/architecture/VTN_ARCHITECTURE.md, VTN/, openleadr-rs/, VTN/bff/src/, lab-core/src/]
 tags: [vtn, bff, openleadr-rs, architecture]
 ---
@@ -50,11 +50,12 @@ removed `programID`). VEN side: [[openadr-interface]]; what a value means on the
   `lab_core::wire_contract`) and `POST /api/signals/preview` (a draft event expanded as receivers expand
   it, via `lab_core::event_timing`). Backs the Tariff page's drag-on-chart editor, operators, templates
   and forever-repeating tariffs (`P9999Y` duration); nothing here publishes.
-- `fleet*.rs` — live telemetry, trace, plan feed, reactions, objective command: [[fleet-monitoring]].
+- `fleet*.rs` — live telemetry, trace, plan feed, reactions, objective command, service-level report and
+  per-VEN signal bands: [[fleet-monitoring]].
 - `recorder.rs` — optional (`DATABASE_URL`) write-once log of programs/events/reports/VEN snapshots in
   the `lab_recorder.*` schema ([[history-store]]).
 - `cache.rs`, `error.rs`, `vtn_client.rs` — TTL cache, error mapping, the VTN client (tested against a
   throwaway axum server, real HTTP).
 
-The BFF depends on `lab-core` for every rule the VEN also needs (interval timing, time series, units,
-token handling).
+The BFF depends on `lab-core` for every rule the VEN also needs (interval timing, event ranking, time
+series, units, token handling).

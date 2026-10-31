@@ -2,8 +2,8 @@
 title: "Decision: MILP over Greedy Scheduling"
 type: decision
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: 102a00b
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [docs/architecture/ven_milp_planner.md, docs/history/project_journal.md, docs/architecture/heater_tank_milp_planning_model.md]
 tags: [decision, planner, milp]
 ---
@@ -23,7 +23,8 @@ globally — see below.
 - **Friction as a first-class objective**: Phase 2 minimises relay switches/ramps at
   bounded extra cost (`phase2_epsilon_eur`) — hard to express greedily.
 - **Exactness with an escape hatch**: HiGHS via `good_lp`; a `fallback_plan` path exists
-  in `results.rs` when the solver fails.
+  in `results.rs` when the solver fails, and the adoption gate never lets a failed solve displace a plan that
+  solved ([[milp-planner]]).
 
 ## Costs accepted
 

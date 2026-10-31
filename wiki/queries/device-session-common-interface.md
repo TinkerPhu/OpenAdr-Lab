@@ -2,8 +2,8 @@
 title: "Query: Would a Common Interface for Device Sessions Help?"
 type: query
 created: 2026-07-04
-updated: 2026-08-09
-synced_commit: 4c4f149
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [VEN/src/entities/user_request.rs, VEN/src/services/user_request.rs, VEN/src/entities/device_session.rs, VEN/src/assets/ev.rs, VEN/src/state/mod.rs, VEN/src/tasks/planning/]
 tags: [query, device-session, architecture, milp]
 ---
@@ -40,10 +40,10 @@ wouldn't replace it.
   `[earliest_start, latest_end]`, a block-placement constraint. A trait covering all
   three would need an enum/associated-type escape hatch for "target," reimplementing the
   dispatch `SessionType` already provides.
-- Storage cardinality differs by domain fact, not accident: `state.rs` holds
-  `Option<EvSession>`, `Option<HeaterTarget>` (one EV, one heater) but
-  `Vec<ShiftableLoad>` (multiple loads can be scheduled concurrently).
-- No code today needs polymorphic iteration over sessions. `tasks/planning.rs:74-76`
+- Storage cardinality differs by domain fact, not accident: `state/mod.rs` holds, keyed by asset id, an
+  `EvSessionQueue` per EV (ordered, never-overlapping windows, several sessions) and one `HeaterTarget` per
+  heater, but a flat `Vec<ShiftableLoad>` (multiple loads can be scheduled concurrently, each its own asset).
+- No code today needs polymorphic iteration over sessions. `tasks/planning/assemble.rs`
   fetches each session type individually and feeds it to its own `*MilpContext`
   constructor — every current caller already wants the concrete type.
 
@@ -52,8 +52,7 @@ wouldn't replace it.
 DateTime<Utc>` could make sense then. Not speculatively now; nothing would consume it
 today.
 
-**BL-41 update (2026-08-05)**: `UserRequest` went from "a common interface that already
-existed" to "the only interface" for creating/ending EV/heater/shiftable sessions — the
+Since BL-41, `UserRequest` is the only interface for creating/ending EV/heater/shiftable sessions — the
 per-device `POST`/`DELETE /ev-session`, `/heater-target`, `/shiftable-loads` CRUD routes were
 removed once the UI's migration to `POST`/`DELETE /user-requests` was confirmed complete
 (the finding this query anticipated: those routes were dead surface duplicating the unified

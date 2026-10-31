@@ -7,20 +7,6 @@ history), per `wiki/CLAUDE.md`.
 
 Format: `- [ ] YYYY-MM-DD — <description> (found during <workflow>; pages: page-slug, other-slug)`
 
-- [ ] 2026-07-31 — Stale-page remainder, batch 2 of the triage started 2026-07-31, narrowed
-  during the 2026-08-09 sync (49389c1..4c4f149): that sync's own commit range touched and
-  re-verified `ven-hexagonal-architecture`, `dispatcher`, `heuristics-pipeline`,
-  `history-store`, `openadr-interface`, `device-session-common-interface`,
-  `history-store-persistence-format`, and `ven-code-vs-docs-audit` already, so they're
-  cleared from this list. Still outstanding: the `openadr_3_1_specs/`-citing pages
-  (`openadr-3`, `openadr-security`, `openadr-programs`, `dto-pass-through`,
-  `openadr-programs-explained`), `openadr-lab`/`vision-and-roadmap` (BACKLOG.md + journal
-  churn), `distributor-business-case-tiers` (large tests/features/ source list),
-  `deviation-arbiter`, `tariffs-and-capacity`, `three-tier-plan-grid`, `milp-over-greedy`,
-  `openadr-spec-use-cases`, `system-use-cases` — none of these had sources touched by
-  49389c1..4c4f149 specifically, so this sync didn't re-verify them either. Same triage
-  method as batch 1: diff `synced_commit..HEAD` against each page's sources, fix real drift,
-  bump `synced_commit` where the diff is cosmetic/unrelated. (found during /wiki-sync;
-  pages: see lint output)
-- [ ] 2026-10-21 — Coverage gap after the partial 4c4f149..f8f6775 sync: not re-verified against the 992-commit range — ven-code-vs-docs-audit (still cites the removed `AssetInterface` drift). Also unmapped: CO2 comfort bid (BL-17), site-headroom/capacity envelope engine, comms-loss curtailment (R-59). (found during /wiki-sync; pages: see lint output)
+- [ ] 2026-10-21 — Coverage gap: no page of its own for the CO₂ comfort bid (BL-17) and for the site-headroom / capacity-curve engine (`entities/site_headroom.rs`, `entities/capacity_curve.rs`, `simulator/capacity_headroom`); both are only mentioned inside `simulator`, `ven-ui` and `three-tier-plan-grid`. Comms-loss is covered across `dispatcher`, `deviation-arbiter` and `asset-layer`. (found during /wiki-sync; pages: simulator, ven-ui)
+- [ ] 2026-10-31 — `SessionFlexibility` reports the same acceptable-rate band (0.35 / 0.05 €/kWh) and an effectively unlimited budget (1.0e9 €) for every session (`VEN/src/controller/milp_planner/session_flexibility.rs`); not in the debt register. Decide: derive from the session's comfort curve, omit, or declare as a profile default (a wire-contract question as well as a magic number). (found during /wiki-sync; pages: ven-code-vs-docs-audit, reliability-and-config)
 - [ ] 2026-10-22 — `fleet.sh up` generator is behind the VEN: generated compose builds from `VEN/` (image now builds from repo root), sets the removed `POLL_STARTUP_JITTER_S` (jitter is profile `polling.*_pct` now) and no `FLEET_MQTT_*`. Needs a docker host to confirm, then fix or retire the generated-fleet path. (found during /wiki-sync; pages: fleet-tooling)

@@ -2,8 +2,8 @@
 title: OpenADR Programs Explained — Examples from VTN and VEN View
 type: query
 created: 2026-07-06
-updated: 2026-07-06
-synced_commit: d5a28b2
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources:
   - docs/openadr_3_1_specs/
   - VEN/src/tasks/poll_programs.rs
@@ -150,7 +150,7 @@ energy provider must develop their own process."*
   **ven/resource IDs**. In the lab this step is simulated by hand-authored profile YAML
   with baked-in `clientID`/`clientSecret` ([[openadr-spec-use-cases]], Customer row).
 - **There is no in-protocol "join program" call.** The VEN's `GET /programs` (polled
-  every 300 s in this lab, `VEN/src/tasks/poll_programs.rs`) is *discovery*, not
+  every 30 s in this lab, `VEN/src/tasks/poll_programs.rs`) is *discovery*, not
   enrollment — the VEN reads which programs its credentials give access to and selects
   the applicable one (§5.4). Access is governed by credentials and targeting set up at
   enrollment time ([[openadr-security]]).

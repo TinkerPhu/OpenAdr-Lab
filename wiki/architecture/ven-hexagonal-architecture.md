@@ -2,8 +2,8 @@
 title: VEN Hexagonal Architecture
 type: architecture
 created: 2026-07-04
-updated: 2026-10-21
-synced_commit: 4c4f149
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [.claude/CLAUDE.md, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/module_dependency_graph.md, VEN/src/]
 tags: [architecture, hexagonal, ports, ven]
 ---
@@ -40,7 +40,7 @@ inputs arrive only through the `AssetMilpContext` port. See [[milp-planner]] and
 
 The ports are real traits with a concrete implementation and a mock
 (`services/test_support/mock_solver_port.rs`, `mock_history_port.rs`, `mock_weather_port.rs`,
-alongside the pre-existing simulator/VTN mocks) — `tasks/planning.rs`'s planning loop calls
+alongside the simulator/VTN mocks) — the planning loop in `tasks/planning/` calls
 `SolverPort::solve` through the trait object, not `milp_planner::run_planner()` directly.
 
 ## Invariants (audit rules, current)
@@ -54,8 +54,10 @@ carried on `AssetSnapshot`); no `crate::services` in `assets/` or `simulator/`; 
 `lab-core/src/vtn_auth.rs`; no inline unit conversion outside `entities/units.rs` and no `_w`
 identifier (power is kW everywhere); no handler taking the whole `AppCtx` (each part has a `FromRef`);
 no raw read of an incoming event value outside `lab_core::wire_contract::PayloadReader`
-([[wire-contract]]); no asset kind in the planner core or `entities/plan.rs`; an
-`AssetSolutionDetail` variant is matched only in its own `assets/<kind>_declared.rs`. Generated UI types
+([[wire-contract]]); no event ranked by its `priority` outside `lab_core::event_priority` (the VEN's tariff and
+capacity parsers and the BFF's signal bands share it); no asset kind in the planner core or `entities/plan.rs`; an
+`AssetSolutionDetail` variant is matched only in its own `assets/<kind>_declared.rs`; no string literal with a run
+of six or more spaces between words (a lost `\` line continuation). Generated UI types
 (ts-rs) come from the Rust types, so the UI cannot drift from them. The module import graph
 (`docs/architecture/module_dependency_graph.md`) is generated and its coverage checked.
 
@@ -74,13 +76,12 @@ domain type; `controller/monitor.rs` consumes it without reaching into
 `state/`), and `simulator/plan_context.rs` holds the plan-cycle helpers that
 need the concrete `SimState` (sim-snapshot clone, pending-PV-inject patch,
 `build_asset_contexts`) — so `services/` touches the simulator only through
-`SimulatorPort` ([[milp-planner]]).
+the `SimHandle` ports ([[milp-planner]]).
 
 File-size caps: 500 **production** lines in `VEN/src/`, 200 in `tasks/` —
 non-blank lines excluding `#[cfg(test)]` blocks and test-only paths, exactly
 what `ci/audits/audit_file_sizes.py` measures (the allowlist is empty and stays so). The audit
-passes repo-wide; `tasks/planning.rs` sits near its cap and is the first
-candidate for a split when it next grows.
+passes repo-wide.
 
 The rationale for this ring shape is in [[hexagonal-refactoring]]; the two-speed runtime
 behaviour of the rings is described in [[hems-planning]]. `.claude/CLAUDE.md`

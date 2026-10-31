@@ -2,9 +2,9 @@
 title: Fleet Monitoring and Control Channel
 type: architecture
 created: 2026-10-21
-updated: 2026-10-21
-synced_commit: f8f6775
-sources: [lab-core/src/fleet_channel.rs, VTN/bff/src/fleet.rs, VTN/bff/src/fleet_command.rs, VTN/bff/src/fleet_plan.rs, VTN/bff/src/fleet_reactions.rs, VTN/bff/src/fleet_store.rs, docs/architecture/VTN_ARCHITECTURE.md, VTN/ui/src/pages/Fleet.tsx]
+updated: 2026-10-31
+synced_commit: 102f7fa
+sources: [lab-core/src/fleet_channel.rs, VTN/bff/src/fleet.rs, VTN/bff/src/fleet_command.rs, VTN/bff/src/fleet_plan.rs, VTN/bff/src/fleet_reactions.rs, VTN/bff/src/fleet_store.rs, VTN/bff/src/fleet_service.rs, VTN/bff/src/fleet_signals.rs, lab-core/src/event_priority.rs, docs/architecture/VTN_ARCHITECTURE.md, VTN/ui/src/pages/Fleet.tsx]
 tags: [fleet, mqtt, bff, telemetry, lab-core]
 ---
 
@@ -48,6 +48,15 @@ name) so a twenty-first VEN needs no broker edit (docs/architecture/VTN_ARCHITEC
   the latest plan per VEN with `lab_core::time_series`; "now" and "an earlier instant" are one function so
   the tariff editor's before/after comparison cannot add the two sides differently. A VEN is absent past
   its plan's horizon, never zero.
+- **Service level** (`fleet_service.rs`, `GET /api/fleet/service`): plans say what was intended, this says what
+  owners received. Every asset declares `unserved_energy_kwh` and `stored_energy_kwh` on its snapshot; the
+  report reduces the stored raw telemetry to one sample per VEN, asset and minute (`fleet_store::asset_samples`)
+  and sums the *increases* of the unserved level, so an EV leaving short, a tank under its floor and a missed
+  deadline count alike. It names no asset kind. A sample without the figure is skipped, never read as zero,
+  and a window older than the raw horizon answers `available: false`.
+- **Signal bands** (`fleet_signals.rs`, `GET /api/fleet/signals`): the VTN's events resolved per VEN, using
+  `lab_core::event_priority::resolve` — the same ranking the VEN applies — so a band is the one a VEN acts on
+  and a payload refused for its unit stays visible with `refused` set.
 - **Objective command** (`fleet_command.rs`): publishes `command/objective` retained; the VEN applies it
   through its own setter and reports back on `objective`, so "commanded" and "reported" both come from the
   broker. A command is valid only against the objectives the VEN itself declares. This is how the fleet is
@@ -56,15 +65,18 @@ name) so a twenty-first VEN needs no broker edit (docs/architecture/VTN_ARCHITEC
 ## UI surface
 
 The Fleet page (`VTN/ui/src/pages/Fleet.tsx`) shows per-VEN power curves on one axis, what the fleet was
-charged beside what it did, day/night shading, the dashboard health card for the feed, and a before/after
+charged beside what it did (a **Tariffs** card: one import and one export curve per distinct tariff, VENs with
+identical price bands being one tariff, labelled like `g3 · 6 VENs` with the VEN list on hover; it draws the
+VTN's events as they stand now, not the tariff of a past hour), day/night shading, the dashboard health card for the feed, and a before/after
 planned-energy comparison for the newest fleet-wide objective switch (the same `PlanComparison` the Tariff
-page uses). Scenarios: `tests/features/fleet_telemetry.feature`, `fleet_plan_feed.feature`,
-`fleet_objective_control.feature`.
+page uses) and a **Service delivered** card comparing the unserved energy and carry-over since that switch
+with the equal span before it. Scenarios: `tests/features/fleet_telemetry.feature`, `fleet_plan_feed.feature`,
+`fleet_objective_control.feature`, `fleet_tariff_groups.feature`, `ven_service_level.feature`.
 
 ## lab-core: one rule for both services
 
 `lab-core/` is the crate the VEN and the BFF both depend on, holding rules that are *the same question on
-both sides*: `event_timing` (when does interval i of an event run), `time_series`/`time_window`,
+both sides*: `event_timing` (when does interval i of an event run), `event_priority` (which event wins where events overlap), `time_series`/`time_window`,
 `units`, `vtn_auth` (`ClientCredentials`, the only code that attaches a token), `wire_contract`
 ([[wire-contract]]) and `fleet_channel`. It exists because GB-48 found that question decided in seven
 parsers with four rules. What does not belong: anything either side is sole authority for.

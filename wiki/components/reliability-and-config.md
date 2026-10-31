@@ -53,7 +53,7 @@ everything else 500, with the one body every route answers with, `{"error": "<me
 `EvSessionService` was deleted by BL-41 (session start and end moved into the unified `/user-requests`
 flow, [[hems-planning]]) and the dead `HvacService` with `services/hems.rs`, so nothing wraps a device session any more.
 Variants that still carry a bare `String` (`SessionConflict`, `PlanInfeasible`, `VtnUnreachable`, `StorageError`)
-are the part of the guideline's "structured over stringified" rule not yet applied. See [[ven-code-vs-docs-audit]].
+are the part of the guideline's "structured over stringified" rule not yet applied.
 
 ## Poll-loop backoff (GB-09 / BL-03)
 

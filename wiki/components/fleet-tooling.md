@@ -81,8 +81,7 @@ session and comfort override at run time ([[experiment-harness]]).
 > `polling.startup_jitter_fixed_pct` / `startup_jitter_random_max_pct` (a share of `events_secs`; the
 > `POLL_STARTUP_JITTER_*_PCT` env vars are test overrides), so the staggering is silently inert and a generated fleet
 > brought up together polls in lockstep ([[reliability-and-config]]). (3) It carries no `FLEET_MQTT_*` settings, so
-> generated VENs are invisible to [[fleet-monitoring]]. Re-verification needs a docker host; see [[ven-code-vs-docs-audit]] for the wiki's
-> record of other open drifts.
+> generated VENs are invisible to [[fleet-monitoring]]. Re-verification needs a docker host; the wiki's other open drifts are indexed in `wiki/callouts.md`.
 
 ## `scripts/db_reset.sh`
 

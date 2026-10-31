@@ -2,8 +2,8 @@
 title: OpenADR 3 Security Model
 type: concept
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: 102a00b
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [docs/openadr_3_1_specs/]
 tags: [security, oauth2, tls, openadr, spec]
 ---
@@ -59,15 +59,13 @@ Two mechanisms enforce that a VEN sees only what it owns or has been granted:
   reveals targets it wasn't granted (prevents target enumeration). Only BL may write
   targets to `ven`/`resource` objects.
 
-> **DRIFT** The spec's 3.1 `targets` shape is a flat string array (User Guide §8.13
-> examples: `"targets": ["ven_0999", "group1"]`) — Change Log issue 316 "refactor targets
-> from valueMap to strings". `.claude/CLAUDE.md`'s documented convention for this lab is
-> the pre-3.1 shape, `targets: [{type: "VEN_NAME", values: [...]}]` (an array of
-> type/values maps), matching the 3.0-generation `openleadr-rs` this lab runs
-> ([[openadr-3]]'s version-skew note). This is a concrete field-shape instance of that
-> skew — a 3.1 migration must flatten every `targets` payload across VTN, BFF, and both
-> UIs, not just add fields. See [[dto-pass-through]] for the pass-through rule this would
-> apply to.
+`targets` is a flat string array in 3.1 (User Guide §8.13 examples: `"targets": ["ven_0999", "group1"]`; Change Log
+issue 316 "refactor targets from valueMap to strings"), and the lab runs that shape end to end: the VTN's wire
+types hold strings, the BFF's per-VEN signal bands match an event's targets against the VEN name, and an empty
+`targets` means every VEN (`VTN/bff/src/fleet_signals.rs::targets_ven`). A "group" is therefore just a string
+several VENs are targeted by, or — in the Fleet page — the derived set of VENs that end up with identical price
+bands ([[fleet-monitoring]]). See [[dto-pass-through]] for the pass-through rule that keeps the field untouched
+across layers.
 
 ## Transport
 

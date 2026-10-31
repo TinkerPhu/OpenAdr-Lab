@@ -2,8 +2,8 @@
 title: Wiki Maintenance Workflow
 type: concept
 created: 2026-07-04
-updated: 2026-07-31
-synced_commit: aff3f57
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [wiki/CLAUDE.md, scripts/wiki_lint.sh, .claude/skills/, docs/reference/SESSION_START.md]
 tags: [wiki, workflow, meta]
 ---
@@ -56,12 +56,12 @@ Rules of thumb: wording tweaks in purpose.md need no enforcement pass at all; a 
 *emphasis* (new focus area, dropped goal, changed audience) warrants step 2 at the next
 sync; a *scope* change (new source types, new page categories) warrants it immediately.
 
-## Periodic (fits the quarterly-controls slot in SESSION_START.md)
+## Periodic (alongside the recurring controls in SESSION_START.md §4)
 
 Run `/wiki-lint` (mechanical script + LLM content pass: contradictions, doc drift,
-duplication of `docs/`, missing hub pages) and work through the checkboxes in
+duplication of `docs/`, missing hub pages) and work through the open items in
 `wiki/review.md` — the human-in-the-loop queue where sync/ingest park contradictions and
-coverage gaps instead of guessing.
+coverage gaps instead of guessing; a resolved item is deleted and recorded as a one-line `log.md` entry.
 
 ## Never
 

@@ -2,8 +2,8 @@
 title: Asset Layer
 type: component
 created: 2026-07-04
-updated: 2026-10-21
-synced_commit: f0ad9d2
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [VEN/src/assets/, VEN/src/simulator/mod.rs, VEN/src/entities/asset.rs, VEN/src/entities/asset_params.rs, VEN/src/entities/sim_inject.rs, VEN/src/controller/asset_milp_port.rs, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/ven_asset_interface_spec.md]
 tags: [assets, abstraction, ven]
 ---
@@ -51,6 +51,19 @@ controller, planner or UI looks one up by a fixed id. A shiftable load is the on
 is added when a request is accepted and removed when it finishes or is cancelled while pending
 (`SimState::add_asset`/`remove_asset`, `Asset::is_removable`). See [[milp-planner]] for the planner
 side and [[ven-ui]] for how the UI reads the kind.
+
+## What an asset declares about its owner's service
+
+Three questions about an asset's state are answered by the asset alone, never by a caller reading raw values
+(`asset-competence-assurance`): how it is served when it holds no request (`dispatch_without_request`; only the EV
+answers — a plugged-in EV below its target is an implicit ASAP request), how long it needs at full effort to reach
+its target (`full_effort_time_to_target_s`, from which the opportunistic latest start is derived —
+[[opportunistic-objective]]), and its **service level**: `unserved_energy_kwh` (the level of energy it owes and has
+not delivered; `None` for a battery, whose minimum state of charge is a limit it holds itself) and
+`stored_energy_kwh` (what its store holds, against a reference of its own choosing). Both ride on the asset's
+snapshot and its fleet telemetry; the BFF sums the increases of the first and the difference of the second without
+naming any kind ([[fleet-monitoring]]). An asset that follows no setpoint (PV) publishes none, so the
+snapshot never carries a sentinel number.
 
 ## The site meter is not an asset
 
@@ -165,4 +178,4 @@ negative = export/generation — see [[sign-convention]].
 > **OPEN QUESTION** `docs/architecture/VEN_ARCHITECTURE.md` §3.0 still lists a future `MeasuredAsset`
 > (a real-hardware `impl Asset` behind the same `Box<dyn Asset>`); no such type exists. Real readings
 > today enter only as `measured_*_kw` fields on the simulated PV and base load. See
-> [[ven-code-vs-docs-audit]].
+> [[real-measurement-mqtt]].

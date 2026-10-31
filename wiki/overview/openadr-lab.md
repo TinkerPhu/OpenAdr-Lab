@@ -2,24 +2,24 @@
 title: OpenADR Lab — System Overview
 type: overview
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: 474dec3
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, docs/architecture/VTN_ARCHITECTURE.md, docs/history/project_journal.md]
 tags: [overview, openadr, hems]
 ---
 
 # OpenADR Lab — System Overview
 
-A Raspberry Pi 4–hosted lab for **OpenADR 3 demand response** experimentation: one VTN stack
-and three VEN containers on a shared Docker network, each VEN modelling a residential site
-with a HEMS controller (docs/history/project_journal.md §Project Overview). Not
+A Raspberry Pi–hosted lab for **OpenADR 3 demand response** experimentation: one VTN stack and a standing
+fleet of 20 VEN containers (ven-1..3 on Node1, ven-4..20 on Node2; [[deployment-topology]]), each VEN modelling a
+residential site with a HEMS controller (docs/history/project_journal.md §Project Overview). Not
 production-grade, but deliberately production-patterned (docs/REQUIREMENTS.md §1).
 
 ## The two sides
 
 - **VTN side** — [[vtn-stack]]: the upstream `openleadr-rs` server (OAuth2 + OpenADR 3 REST,
-  PostgreSQL), fronted by a dual-credential BFF and a React operator UI
-  (docs/architecture/VTN_ARCHITECTURE.md §1–3).
+  PostgreSQL), fronted by a BFF (one business credential) and a React operator UI whose Fleet page watches
+  every site at once ([[fleet-monitoring]]) (docs/architecture/VTN_ARCHITECTURE.md §1–3).
 - **VEN side** — a Rust/Axum application per site with two subsystems
   (docs/architecture/VEN_ARCHITECTURE.md §1):
   - the **HEMS Controller**: [[openadr-interface]] (30 s VTN poll), user-request manager,
@@ -38,6 +38,7 @@ in [[system-use-cases]].
 
 ## Where things stand
 
-The whole stack is deployed and green under four test suites ([[testing-strategy]]).
-Current work (branch `refactor/3-tier-milp`) landed the 3-tier variable-step plan grid
-([[three-tier-plan-grid]]). Direction and open ambitions live in [[vision-and-roadmap]].
+The whole stack is deployed; every change reaches `main` through the Node3 runner, which runs the audits and the
+four test suites ([[ci-pipeline]], [[testing-strategy]]). The VEN plans on a 3-tier variable-step grid
+([[three-tier-plan-grid]]) or, as a comparison, dispatches without a plan ([[opportunistic-objective]]).
+Direction and open ambitions live in [[vision-and-roadmap]].

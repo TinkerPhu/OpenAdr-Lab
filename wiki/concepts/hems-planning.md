@@ -2,8 +2,8 @@
 title: HEMS Planning Concepts
 type: concept
 created: 2026-07-04
-updated: 2026-10-21
-synced_commit: 4c4f149
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [docs/REQUIREMENTS.md, docs/architecture/VEN_ARCHITECTURE.md, VEN/src/routes/hems/, VEN/src/entities/device_session.rs, VEN/src/services/user_request.rs]
 tags: [hems, planning, sessions, domain]
 ---
@@ -18,11 +18,12 @@ signals become a schedule (docs/REQUIREMENTS.md §2.3).
 The controller runs at two timescales: a **slow loop** (planner:
 `replan_interval_s` periodic, default 300 s, plus a `PlanTrigger` watch channel — any
 component can request a replan, each trigger yields exactly one plan;
-`VEN/src/tasks/planning.rs`) and a **fast loop** (dispatcher + monitor at 1 s).
-`docs/architecture/VEN_ARCHITECTURE.md` §2.2 still quotes "20 s periodic" — stale.
+`VEN/src/tasks/planning/`) and a **fast loop** (dispatcher + monitor at 1 s).
 Trigger senders in code: routes (`UserRequest`), sim inject / `POST /plan/trigger`
-(`AssetStateChange`), event poll (`RateChange` for *any* detected change), shiftable-load
-completion (`UserRequest`); `Alert` and `CapacityChange` are defined but never sent.
+(`AssetStateChange`), event poll (`RateChange` for a changed price or GHG event, `CapacityChange` for a
+changed capacity limit or reservation), alert windows (`Alert`, from `tasks/poll_signals.rs`), shiftable-load
+completion (`UserRequest`) and the deviation arbiter's accumulated absorbed energy crossing its threshold
+(`ResidualThreshold`, rate-limited by a cooldown).
 Implementations: [[milp-planner]], [[dispatcher]].
 
 ## Slot semantics
@@ -99,8 +100,9 @@ The same site can run without a plan: [[opportunistic-objective]].
 
 ## Accounting
 
-The **Asset Ledger** accumulates energy/cost/CO₂ per asset each dispatcher tick;
-it is in-memory only and resets on restart (persistence gap, REQUIREMENTS.md §2.3).
+The **Asset Ledger** accumulates energy/cost/CO₂ per asset each dispatcher tick; the open period is in memory
+and resets on restart, closed monthly periods are archived in the history store (`ledger_periods`,
+`GET /ledger?asset_id=`; REQUIREMENTS.md §2.3).
 
 The glossary's **Device Session** entry (REQUIREMENTS.md §2.3) is the vocabulary for the
 `EvSession`/`HeaterTarget`/`ShiftableLoad` structs above: a schedulable energy-or-equivalent

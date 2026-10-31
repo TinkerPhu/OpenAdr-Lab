@@ -2,8 +2,8 @@
 title: Wire Contract — Declared Units and Meanings
 type: concept
 created: 2026-10-21
-updated: 2026-10-21
-synced_commit: f8f6775
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [docs/reference/WIRE_PROFILE.md, lab-core/src/wire_contract.rs, lab-core/src/event_timing.rs, tests/features/ven_wire_units.feature, .claude/CLAUDE.md]
 tags: [openadr-3, wire, units, payload-descriptors]
 ---

@@ -3,8 +3,8 @@
 Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · scope: `purpose.md`.
 
 ## Overview
-- [[openadr-lab]] — system-level summary: VTN stack, VEN HEMS, what flows between them
-- [[vision-and-roadmap]] — swarm behaviour, certification readiness, 3.1 migration, upstream PRs
+- [[openadr-lab]] — system-level summary: VTN stack, the 20-VEN fleet, VEN HEMS, what flows between them
+- [[vision-and-roadmap]] — swarm behaviour (the standing fleet and group-tariff experiments), certification readiness, 3.1 conformance, upstream PRs
 
 ## Architecture
 - [[ven-hexagonal-architecture]] — ring map, ports, enforced invariants
@@ -12,11 +12,11 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[deployment-topology]] — Node1 docker stacks, port map, WSL dev environment, Node2 build/test-offload host (no local UI)
 - [[testing-strategy]] — four suites, VEN test pyramid, test-first and determinism rules
 - [[ci-pipeline]] — Node3 runner: handoff tickets, suite selection by path, multi-host lanes, deploy tickets, web board, merge gates
-- [[fleet-monitoring]] — lab-mqtt fleet channel (telemetry/trace/plan/objective), per-VEN ACL, BFF fleet modules, Fleet page, lab-core crate
+- [[fleet-monitoring]] — lab-mqtt fleet channel (telemetry/trace/plan/objective), per-VEN ACL, BFF fleet modules (plan, service level, signal bands), Fleet page tariff groups, lab-core crate
 
 ## Components
 - [[milp-planner]] — two-phase HiGHS MILP on one shared model skeleton, assets declare their own part (no kind in the core), adoption gate, absolute replan grid with per-VEN phase, comfort curve, peak-demand penalty, file map
-- [[dispatcher]] — build_setpoints on the 1 s sim tick, surplus-EV overlay, shiftable-load runtimes
+- [[dispatcher]] — build_setpoints on the 1 s sim tick, then the arbiter and dispatch stages (DISPATCH_SETPOINT, comms-loss, import limit), ledger accounting
 - [[openadr-interface]] — wire-crate event types, PayloadReader units, wire rejection and granted-scope notice, one capacity schedule and interval-timing rule, change detection and replan triggers, obligation-only accumulated reports declaring their units
 - [[simulator]] — roster + tick (`SimState`, `TickInputs`, per-asset feeds), site meter derivation, ports behind `SimHandle`, persistence, `/sim/inject` behaviour classes (double-option null-clear, loud logging), asset_simulation.md drift
 - [[asset-layer]] — one `Asset` trait with declared kind/lever/rank (no config enum), capability traits, site meter is not an asset, PV generation-limit sources and per-array weather/snow, heater thermostat deadband + planner pins, EV schedule, determinism
@@ -53,14 +53,14 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[hexagonal-refactoring]] — spec series 015–029, ports for testability and swappability
 - [[dto-pass-through]] — OpenADR spec field names pass through all layers unnormalised
 - [[superpowers-not-adopted]] — agentic framework evaluated 2026-06-25; only the worktree-per-feature pattern borrowed
-- [[docker-host-lease-lock]] — lease lock on Node1 (and, via wsl_lock.sh, the shared WSL instance) serializes parallel sessions' builds/tests; why not a queue file
+- [[docker-host-lease-lock]] — lease lock on a docker host (one fixed path per machine; and, via wsl_lock.sh, the shared WSL instance) serializes parallel sessions' builds/tests; why not a queue file
 
 ## Sources
 - [[power-envelope-forecast-basis]] — **open/unfinished**: summary of `docs/external_research/power-envelope-forecast-basis.md`, a two-round sourced web-research thread on why Dynamic Operating Envelope forecasts vary hour-by-hour, how DNSPs (SA Power Networks, Energex) actually compute them, and a critique of a proposed static equal-share alternative
 
 ## Queries
 - [[device-session-common-interface]] — why EvSession/HeaterTarget/ShiftableLoad stay separate structs, not one trait; BL-41 update
-- [[ven-code-vs-docs-audit]] — full VEN/src read vs docs: what matches, 10 confirmed drifts, ranked refactoring candidates
+- [[ven-code-vs-docs-audit]] — what keeps the VEN's code and docs aligned (audits, gates), and the one finding still open
 - [[openadr-programs-explained]] — what a Program is, 5 worked examples (VTN vs VEN view), multi-program enrollment, contractual out-of-band joining
 - [[distributor-business-case-tiers]] — arguments for a distributor to adopt VTN/VEN: 4 rollout tiers from open tariff publication to VPP dispatch
 - [[history-store-persistence-format]] — SQLite schema (v12: plan_snapshots dropped R-63, forecast_accuracy_samples, plan_history, capacity/headroom and plugged columns), epoch-second time encoding, per-asset-per-minute rows, flat retention pruning, docker bind-mount path
@@ -68,4 +68,4 @@ Catalog of all wiki pages. Updated on every ingest/sync. Rules: `CLAUDE.md` · s
 - [[dso-retailer-unbundled-tariff-coordination]] — legally-unbundled DSO/retailer tariff coordination: multi-program protocol support, why an unbounded virtual DSO price is dishonest (shadows the real tariff), DLMP shadow-price duality with the envelope, regulator revenue-cap as the actual answer to "who sets the relation"
 
 ---
-Pages: 48 · Last sync: 2026-10-22 (scoped: ven-ui, milp-planner, asset-layer, deviation-arbiter, openadr-interface, history-store, simulator, reliability-and-config, heuristics-pipeline, real-measurement-mqtt, experiment-harness, fleet-tooling, openadr-spec-use-cases, system-use-cases, distributor-business-case-tiers re-verified; other pages see review.md).
+Pages: 49 · Last sync: 2026-10-31 (full: every page whose sources changed was re-verified against 102f7fa; the review queue holds the open items).

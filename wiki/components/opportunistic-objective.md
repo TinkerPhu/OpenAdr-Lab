@@ -2,8 +2,8 @@
 title: Opportunistic Objective (dispatch without a plan)
 type: component
 created: 2026-10-21
-updated: 2026-10-21
-synced_commit: f8f6775
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [docs/architecture/VEN_ARCHITECTURE.md, VEN/src/controller/arbiter/, VEN/src/simulator/, tests/features/ven_opportunistic_objective.feature]
 tags: [objective, arbiter, baseline, fleet]
 ---
@@ -21,7 +21,7 @@ planner** ([[milp-planner]]). The comparison is operated fleet-wide through the 
 opportunistic arm and the planning cycle *forecasts* instead of solving; nothing a planning objective
 does changes (VEN_ARCHITECTURE §2.1, §2.3.3). The decision is one function,
 `controller::arbiter::opportunistic_step`, used live and in the forecast:
-`request_regime` (a start-now request runs at full power and leaves the pass), `opportunistic_pass`
+`request_regime` (a start-now request runs at full power and leaves the pass; a BY_DEADLINE request does so from its latest start), `opportunistic_pass`
 (site balance shared out open-loop in each asset's declared `surplus_claim_rank`), then the shared
 `dispatch_stages` (dispatch window, comms-loss clamp, limit pass) that every objective goes through, so
 limits are respected identically ([[deviation-arbiter]]).
@@ -37,8 +37,14 @@ second; an export limit is not applied in the forecast (PV is not curtailed in i
 
 ## Requests
 
-Each request mode declares how it is served without look-ahead (`non_planning_dispatch`); an EV target
-or a heater start-now reaches the asset as a per-asset tick input and the asset says when it is done
-([[hems-planning]], [[asset-layer]]). Switching back writes no leftover lever state, so the first planned
+Each request mode declares how it is served without look-ahead (`non_planning_dispatch`): ASAP is start now,
+the free modes and `MAX_COST` are surplus only, and BY_DEADLINE is `StartBy(deadline)`. A start-by request
+takes surplus while it waits, then starts at its **latest start** — the deadline less the asset's own time to
+target and a 15-minute margin (`DEADLINE_MARGIN_S`); an asset that declares no time to target starts at once.
+A plugged-in EV below target with no request is served as an implicit ASAP request (what the asset declares
+via `dispatch_without_request`), unless its opportunistic-charging switch is off. An EV target or a heater
+start-now reaches the asset as a per-asset tick input and the asset says when it is done
+([[hems-planning]], [[asset-layer]]). `GET /arbiter-diagnostics` lists the assets still `waiting` with their
+latest start, and the VEN UI's Arbiter card shows them. Switching back writes no leftover lever state, so the first planned
 tick decides as a fresh planning VEN. Tests: `controller/arbiter/tests/opportunistic_tests.rs`,
 `tests/features/ven_opportunistic_objective.feature`.

@@ -2,8 +2,8 @@
 title: Three-Tier Plan Grid
 type: concept
 created: 2026-07-04
-updated: 2026-07-04
-synced_commit: ba87f49
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [docs/architecture/ven_milp_planner.md, VEN/src/tasks/planning/]
 tags: [planner, grid, zones, alignment]
 ---
@@ -29,7 +29,7 @@ use a single coarse zone for solver speed.
 ## The alignment rule
 
 `now` is always truncated to the nearest Zone-A boundary before building the horizon:
-`now_aligned = floor(unix_ts / step_A_s) * step_A_s` (§2.2). This is load-bearing, not
+`now_aligned = floor(unix_ts / step_A_s) * step_A_s` (`services::planning::align_to_step`, §2.2). This is load-bearing, not
 cosmetic — four reasons:
 
 1. **Gate stability** — consecutive replans share identical slot grids, so the adoption
@@ -44,7 +44,7 @@ cosmetic — four reasons:
 
 | Name | Value | Used for |
 |---|---|---|
-| `wall_now` | `Utc::now()` at loop top | `plan.created_at`, gate decay, envelope, status report |
+| `wall_now` | `Utc::now()` at loop top (`tasks/planning/cycle.rs`) | `plan.created_at`, gate decay, site headroom, status report |
 | aligned `now` | `align_to_step(wall_now)` | all slot timestamps, tariff sampling, deadlines, MILP inputs |
 | request `now` | `Utc::now()` per HTTP request | timeline now-point only |
 

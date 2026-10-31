@@ -2,8 +2,8 @@
 title: CI Pipeline — the Node3 Runner
 type: architecture
 created: 2026-10-21
-updated: 2026-10-21
-synced_commit: f8f6775
+updated: 2026-10-31
+synced_commit: 102f7fa
 sources: [ci/README.md, ci/suites.map, ci/runner.sh, ci/lanes.sh, ci/deploy.sh, ci/audits/, docs/guidelines/TESTING.md]
 tags: [ci, testing, node3, merge-gate]
 ---
@@ -37,7 +37,14 @@ merged, because a suite the change needs did not run).
 changed paths. A path no rule names runs everything, so a new directory is tested in full until
 someone writes a rule for it. Rules say what a path *cannot* affect. Because a wrong skip would pass
 unnoticed, a weekly `full-suite-main` job runs everything on `main`. This is the mechanism behind the
-project's `no-needless-runs` rule: docs-only changes cost no suite.
+project's `no-needless-runs` rule: docs-only changes cost no suite. Repo tooling files (`experiments/`,
+`.gitignore`, `jobs.json`, `scripts/jobs.py`) are mapped to `-` as well; `ci/test_board.sh` pins both the
+catch-all and these exemptions.
+
+The runner reads the **installed** copy of `ci/` (`/srv/ci/bin/ci/`, written by `ci/install.sh`), not the
+checkout it is testing, so a changed `suites.map` or runner script applies to tickets only after it has
+merged and `install.sh` has been run on Node3. Until then a ticket that depends on the new rule is
+selected by the old one.
 
 ## Lanes
 
@@ -65,6 +72,7 @@ bearer token; merged tickets archive themselves after 24 h. It has no authentica
 
 `cargo fmt`, `clippy --all-targets --all-features -D warnings`, `cargo audit`, and the Python audits
 in `ci/audits/`: file sizes, the duplication ratchet, the debt gate, the step-definition check and
-`audit_ven_architecture.py` (the invariants of [[ven-hexagonal-architecture]]). The CI mechanism has
+`audit_ven_architecture.py` (the invariants of [[ven-hexagonal-architecture]], including that an event is
+ranked by `priority` only in `lab-core/src/event_priority.rs`). The CI mechanism has
 its own tests (`ci/test_*.sh`, `ci/test_web.py`). How these suites are shaped:
 [[testing-strategy]].
