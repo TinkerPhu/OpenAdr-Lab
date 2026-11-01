@@ -75,6 +75,54 @@ pub(crate) fn events_this_ven_acts_on(events: &[OadrEvent], ven_seed: &str) -> V
         .collect()
 }
 
+/// What one newly arrived event leaves behind: the history row and the trace entry.
+fn arrival(
+    evt: &OadrEvent,
+    reader: &PayloadReader,
+    now: DateTime<Utc>,
+) -> (
+    entities::history::EventReceived,
+    controller::trace::ControllerEvent,
+) {
+    let name = evt
+        .content
+        .event_name
+        .clone()
+        .unwrap_or_else(|| evt.id.to_string());
+    let intervals = evt.content.intervals.as_deref().unwrap_or_default();
+    let (signal_type, value, interval_n) = intervals
+        .first()
+        .and_then(|iv| iv.payloads.first())
+        .map(|p| {
+            let sig = p.value_type.wire_name();
+            // Through the reader, like every other value: a refused or non-numeric
+            // payload traces as 0.0.
+            let val = reader.value(evt, p).unwrap_or(0.0);
+            (sig, val, intervals.len() as u32)
+        })
+        .unwrap_or_else(|| ("UNKNOWN".to_string(), 0.0, 0));
+
+    let record = entities::history::EventReceived {
+        received_at: now,
+        event_id: evt.id.to_string(),
+        event_type: signal_type.clone(),
+        payload_json: serde_json::to_string(evt).unwrap_or_default(),
+    };
+    let arrived = controller::trace::ControllerEvent::OpenAdrArrived {
+        ts: now,
+        event_id: evt.id.to_string(),
+        // Passed through as the VTN wrote it (`dto`): this is an identity,
+        // and reformatting an identity is how two records of the same
+        // thing stop matching.
+        modification_date_time: Some(evt.modification_date_time.to_rfc3339()),
+        event_name: name,
+        signal_type,
+        value,
+        interval: interval_n,
+    };
+    (record, arrived)
+}
+
 /// Pure change-detection pass over a freshly fetched event list.
 ///
 /// Compares against previous poll state and returns all trace events that
@@ -104,44 +152,9 @@ pub(crate) fn detect_event_changes(
         if !prev_known.is_new(evt) {
             continue;
         }
-
-        let name = evt
-            .content
-            .event_name
-            .clone()
-            .unwrap_or_else(|| evt.id.to_string());
-        let intervals = evt.content.intervals.as_deref().unwrap_or_default();
-        let (signal_type, value, interval_n) = intervals
-            .first()
-            .and_then(|iv| iv.payloads.first())
-            .map(|p| {
-                let sig = p.value_type.wire_name();
-                // Through the reader, like every other value: a refused or non-numeric
-                // payload traces as 0.0.
-                let val = reader.value(evt, p).unwrap_or(0.0);
-                (sig, val, intervals.len() as u32)
-            })
-            .unwrap_or_else(|| ("UNKNOWN".to_string(), 0.0, 0));
-
-        event_records.push(entities::history::EventReceived {
-            received_at: now,
-            event_id: evt.id.to_string(),
-            event_type: signal_type.clone(),
-            payload_json: serde_json::to_string(evt).unwrap_or_default(),
-        });
-
-        trace_events.push(controller::trace::ControllerEvent::OpenAdrArrived {
-            ts: now,
-            event_id: evt.id.to_string(),
-            // Passed through as the VTN wrote it (`dto`): this is an identity,
-            // and reformatting an identity is how two records of the same
-            // thing stop matching.
-            modification_date_time: Some(evt.modification_date_time.to_rfc3339()),
-            event_name: name,
-            signal_type,
-            value,
-            interval: interval_n,
-        });
+        let (record, arrived) = arrival(evt, reader, now);
+        event_records.push(record);
+        trace_events.push(arrived);
     }
 
     // OpenAdrExpired — events that disappeared this tick
