@@ -16772,3 +16772,15 @@ first arrival of an edited event (GB-68); both filed. (3) A scripted test edit r
 
 **Key learning.** When a peer sends a version for an object, identify the object by id and version. A set of ids
 cannot tell an edit from no change.
+
+## Real .env files left the repository (fix/untrack-env-files)
+
+**What.** `VTN/.env` and `VEN/scale_out/node2/.env` are no longer tracked; `.gitignore` ignores every `.env`, and a
+`.env.example` beside each lists the variable names with placeholder values. The real files live only on the hosts, in
+`/srv/docker/openadr_lab/VTN/.env` and `/srv/docker/openadr_lab/VEN/scale_out/node2/.env` (copy the example and adjust).
+
+**Why.** They were tracked in a public repository since its early commits. The values are lab-demo values (no password
+change needed); the history still holds them until it is rewritten, which is a separate owner decision.
+
+**Key learning.** Untracking a file makes `git checkout`/`reset --hard` on a host delete its working copy: back the real
+file up outside the tree before the merge reaches a host, and restore it afterwards.

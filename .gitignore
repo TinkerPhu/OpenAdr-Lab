@@ -78,3 +78,9 @@ openspec/changes/pv-self-consumption-reward/*
 
 # scratch screenshots
 /shot_*.png
+
+# Real environment files live on the hosts only (see the .env.example beside each).
+.env
+**/.env
+!.env.example
+!**/.env.example
