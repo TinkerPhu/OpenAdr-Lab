@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 from behave import given, when, then
-from features.helpers.api_client import get_token_value, vtn_post, ven_get
+from features.helpers.api_client import get_token_value, vtn_post, vtn_put, ven_get
 from features.helpers.tariff import parse_ts, price_at
 from features.helpers.wait import poll_until
 
@@ -367,3 +367,81 @@ def step_response_is_json_object(context):
 def step_response_contains_field(context, field):
     cap = context.ven_capacity
     assert field in cap, f"Field '{field}' not in capacity response: {list(cap.keys())}"
+
+
+# ---------------------------------------------------------------------------
+# GB-63: an event the VTN edits in place reaches the VEN's tariff
+# ---------------------------------------------------------------------------
+
+def _edited_hour_body(context, price):
+    return {
+        "programID": context.saved_program_id,
+        "eventName": "gb63-edited-price",
+        "priority": 1,
+        "intervals": [{
+            "id": 0,
+            "intervalPeriod": {
+                "start": context.edited_hour_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "duration": "PT1H",
+            },
+            "payloads": [{"type": "PRICE", "values": [price]}],
+        }],
+    }
+
+
+@given("I create a one-hour PRICE event of {price:g} 34 hours from now and save its ID")
+def step_create_editable_price_event(context, price):
+    # 34 h out: clear of the +1..+4 h events and the +30 h GB-45 scenario in this feature.
+    context.edited_hour_start = (datetime.now(timezone.utc) + timedelta(hours=34)).replace(
+        minute=0, second=0, microsecond=0
+    )
+    r = vtn_post("/events", context.vtn_token, json=_edited_hour_body(context, price))
+    r.raise_for_status()
+    context.edited_event_id = r.json()["id"]
+
+
+def _wait_for_price_in_edited_hour(context, price):
+    at = context.edited_hour_start + timedelta(minutes=30)
+
+    def fetch():
+        resp = ven_get("/tariffs")
+        return resp.json() if resp.ok else []
+
+    context.ven_rates = poll_until(
+        fetch,
+        lambda rates: isinstance(rates, list) and _price_at(rates, at) == price,
+        timeout=60,
+        description=f"VEN /tariffs shows {price} in the edited hour",
+    )
+
+
+@when("I wait for the VEN /tariffs endpoint to show {price:g} in the edited hour")
+def step_wait_price_in_edited_hour(context, price):
+    _wait_for_price_in_edited_hour(context, price)
+
+
+@when("I update the saved PRICE event to {price:g} keeping its single interval")
+def step_update_price_event_in_place(context, price):
+    r = vtn_put(
+        f"/events/{context.edited_event_id}",
+        context.vtn_token,
+        json=_edited_hour_body(context, price),
+    )
+    r.raise_for_status()
+
+
+@then("within 60 seconds the VEN /tariffs endpoint shows {price:g} in the edited hour")
+def step_edited_price_reaches_tariffs(context, price):
+    _wait_for_price_in_edited_hour(context, price)
+
+
+@then("the VEN trace shows two arrivals of the saved event with different versions")
+def step_trace_shows_two_versions(context):
+    resp = ven_get("/trace/events?limit=500")
+    resp.raise_for_status()
+    versions = {
+        e.get("modification_date_time")
+        for e in resp.json()
+        if e.get("type") == "OpenAdrArrived" and e.get("event_id") == context.edited_event_id
+    }
+    assert len(versions) == 2, f"expected two versions of {context.edited_event_id}, got {versions}"

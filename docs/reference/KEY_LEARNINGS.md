@@ -3780,3 +3780,11 @@ render both diagrams and then blank them; write such a label in plain words ("Bo
 holds parentheses needs the `-.->|"text"|` form. Do not guess from the reported line: install `mermaid` plus `jsdom` in a scratch
 directory and call `mermaid.parse(text)` on the diagram block; it reproduced the preview's error exactly and showed each
 fix in seconds. To confirm a preview picks up edits at all, add a deliberate error line first.
+
+## An edit in place keeps the id and the count: identify an object by its version (event poll, 2026-11-01)
+
+The VEN decided "this event is new" by its id and "the tariff changed" by the number of intervals. A `PUT` that
+rewrote every price kept both, so the VEN did not replan and the operator watched a tariff the plan was not following.
+The VTN stamps `modificationDateTime` on every update precisely so that a reader can tell versions apart. Key the known
+objects on `(id, version)`, trace the new version as an arrival, and let one definition of "new" feed the trace, the
+history and the replan; compare derived values (as capacity already was) only where no version is sent.

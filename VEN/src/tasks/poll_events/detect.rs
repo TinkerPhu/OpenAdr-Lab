@@ -13,14 +13,15 @@ use crate::entities;
 use crate::tasks::poll_signals;
 
 pub(crate) use super::capacity_picture::CapacityPicture;
+pub(crate) use super::known_events::KnownEvents;
 use lab_core::wire_contract::{PayloadReader, WireAudit};
 
 /// Output of `detect_event_changes` — all side-effect-free results of one poll tick.
 pub(crate) struct EventChanges {
     /// Trace events to push to the controller log (arrived/expired/rate/capacity).
     pub trace_events: Vec<controller::trace::ControllerEvent>,
-    /// Updated set of event IDs seen this tick (new value for `prev_event_ids`).
-    pub current_ids: std::collections::HashSet<String>,
+    /// The events seen this tick, id and version (new value for the loop's `prev_known`).
+    pub known: KnownEvents,
     /// Parsed tariff snapshots for this tick.
     pub rates: Vec<entities::tariff_snapshot::TariffSnapshot>,
     /// Parsed capacity schedule (limits, subscriptions, reservations) for this tick — the one
@@ -82,7 +83,7 @@ pub(crate) fn events_this_ven_acts_on(events: &[OadrEvent], ven_seed: &str) -> V
 pub(crate) fn detect_event_changes(
     events: &[OadrEvent],
     reader: &PayloadReader,
-    prev_ids: &std::collections::HashSet<String>,
+    prev_known: &KnownEvents,
     prev_tariff_count: usize,
     prev_capacity: &CapacityPicture,
     now: DateTime<Utc>,
@@ -92,15 +93,15 @@ pub(crate) fn detect_event_changes(
     let capacity = CapacityPicture::at(&capacity_schedule, now);
     let signals = poll_signals::ParsedSignals::parse(events, reader);
 
-    let current_ids: std::collections::HashSet<String> =
-        events.iter().map(|e| e.id.to_string()).collect();
+    let known = KnownEvents::from_events(events);
 
     let mut trace_events = Vec::new();
     let mut event_records = Vec::new();
 
-    // OpenAdrArrived — events that are new this tick
+    // OpenAdrArrived — events that are new this tick: an unseen id, or a known id the VTN
+    // edited in place (a new `modificationDateTime`, GB-63).
     for evt in events {
-        if prev_ids.contains(evt.id.as_str()) {
+        if !prev_known.is_new(evt) {
             continue;
         }
 
@@ -144,8 +145,9 @@ pub(crate) fn detect_event_changes(
     }
 
     // OpenAdrExpired — events that disappeared this tick
-    for old_id in prev_ids {
-        if !current_ids.contains(old_id) {
+    let current_ids = known.ids();
+    for old_id in prev_known.ids() {
+        if !current_ids.contains(&old_id) {
             trace_events.push(controller::trace::ControllerEvent::OpenAdrExpired {
                 ts: now,
                 event_id: old_id.clone(),
@@ -178,7 +180,7 @@ pub(crate) fn detect_event_changes(
 
     EventChanges {
         trace_events,
-        current_ids,
+        known,
         rates,
         capacity_schedule,
         signals,
@@ -211,8 +213,14 @@ mod event_poll_tests {
         .remove(0)
     }
 
-    fn empty_ids() -> std::collections::HashSet<String> {
-        std::collections::HashSet::new()
+    /// The previous poll's events as `make_event` writes them, so an id listed here is
+    /// known at the fixture's version.
+    fn known_ids(ids: &[&str]) -> KnownEvents {
+        let events: Vec<OadrEvent> = ids
+            .iter()
+            .map(|id| make_event(id, "known", "PRICE", 0.1))
+            .collect();
+        KnownEvents::from_events(&events)
     }
 
     // (a) new event appears → OpenAdrArrived emitted
@@ -222,7 +230,7 @@ mod event_poll_tests {
         let changes = detect_event_changes(
             &events,
             &PayloadReader::default(),
-            &empty_ids(),
+            &KnownEvents::default(),
             0,
             &CapacityPicture::default(),
             ts(),
@@ -255,7 +263,7 @@ mod event_poll_tests {
         let changes = detect_event_changes(
             &events,
             &PayloadReader::default(),
-            &empty_ids(),
+            &KnownEvents::default(),
             0,
             &CapacityPicture::default(),
             ts(),
@@ -282,8 +290,7 @@ mod event_poll_tests {
     /// "something changed around then".
     #[test]
     fn arrived_and_expired_together_carry_every_id_a_replan_was_caused_by() {
-        let mut prev_ids = empty_ids();
-        prev_ids.insert("gone".to_string());
+        let prev_ids = known_ids(&["gone"]);
         let events = vec![make_event("fresh", "New", "PRICE", 0.2)];
         let changes = detect_event_changes(
             &events,
@@ -319,8 +326,7 @@ mod event_poll_tests {
     /// id is, and the id is what the chain is keyed on.
     #[test]
     fn expired_carries_the_event_id() {
-        let mut prev_ids = empty_ids();
-        prev_ids.insert("ev1".to_string());
+        let prev_ids = known_ids(&["ev1"]);
         let changes = detect_event_changes(
             &[],
             &PayloadReader::default(),
@@ -349,7 +355,7 @@ mod event_poll_tests {
         let changes = detect_event_changes(
             &events,
             &PayloadReader::default(),
-            &empty_ids(),
+            &KnownEvents::default(),
             0,
             &CapacityPicture::default(),
             ts(),
@@ -366,8 +372,7 @@ mod event_poll_tests {
     #[test]
     fn already_seen_event_emits_no_history_record() {
         let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
-        let mut prev_ids = empty_ids();
-        prev_ids.insert("ev1".to_string());
+        let prev_ids = known_ids(&["ev1"]);
         let changes = detect_event_changes(
             &events,
             &PayloadReader::default(),
@@ -382,8 +387,7 @@ mod event_poll_tests {
     // (b) event disappears → OpenAdrExpired emitted
     #[test]
     fn removed_event_emits_expired() {
-        let mut prev_ids = empty_ids();
-        prev_ids.insert("ev1".to_string());
+        let prev_ids = known_ids(&["ev1"]);
         let changes = detect_event_changes(
             &[],
             &PayloadReader::default(),
@@ -416,8 +420,7 @@ mod event_poll_tests {
                 "payloads": [{"type": "PRICE", "values": [0.25]}]
             }]
         }));
-        let mut prev_ids = empty_ids();
-        prev_ids.insert("ev1".to_string()); // already seen → no OpenAdrArrived
+        let prev_ids = known_ids(&["ev1"]); // already seen → no OpenAdrArrived
         let changes = detect_event_changes(
             &events,
             &PayloadReader::default(),
@@ -450,8 +453,7 @@ mod event_poll_tests {
                 "payloads": [{"type": "IMPORT_CAPACITY_LIMIT", "values": [5.0]}]
             }]
         }));
-        let mut prev_ids = empty_ids();
-        prev_ids.insert("ev1".to_string()); // already seen
+        let prev_ids = known_ids(&["ev1"]); // already seen
         let prev_capacity = CapacityPicture::default();
         let changes = detect_event_changes(
             &events,
@@ -475,8 +477,7 @@ mod event_poll_tests {
     #[test]
     fn no_changes_emits_nothing() {
         let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
-        let mut prev_ids = empty_ids();
-        prev_ids.insert("ev1".to_string());
+        let prev_ids = known_ids(&["ev1"]);
         // Same event already seen, no capacity limit in payload, same import limit (None)
         let changes = detect_event_changes(
             &events,
@@ -533,12 +534,12 @@ mod event_poll_tests {
         let first = detect_event_changes(
             &[make_event("ev1", "Peak DR", "PRICE", 0.30)],
             &PayloadReader::default(),
-            &empty_ids(),
+            &KnownEvents::default(),
             0,
             &CapacityPicture::default(),
             now,
         );
-        state.retire_obligations_not_in(&first.current_ids).await;
+        state.retire_obligations_not_in(&first.known.ids()).await;
         assert_eq!(
             state.report_obligations().await.len(),
             1,
@@ -549,12 +550,12 @@ mod event_poll_tests {
         let second = detect_event_changes(
             &[],
             &PayloadReader::default(),
-            &first.current_ids,
+            &first.known,
             0,
             &CapacityPicture::default(),
             now,
         );
-        state.retire_obligations_not_in(&second.current_ids).await;
+        state.retire_obligations_not_in(&second.known.ids()).await;
         assert!(
             state.report_obligations().await.is_empty(),
             "obligation retired once its event expired"
@@ -579,7 +580,7 @@ mod event_poll_tests {
         detect_event_changes(
             &acted_on,
             &PayloadReader::default(),
-            &empty_ids(),
+            &KnownEvents::default(),
             0,
             &CapacityPicture::default(),
             ts(),
@@ -652,7 +653,7 @@ mod event_poll_tests {
         let changes = detect_event_changes(
             &events,
             &PayloadReader::default(),
-            &empty_ids(),
+            &KnownEvents::default(),
             0,
             &CapacityPicture::default(),
             ts(),
@@ -671,6 +672,112 @@ mod event_poll_tests {
                 .and_then(|s| s.import_limit_kw),
             Some(4.0),
             "the undeclared limit still applies"
+        );
+    }
+
+    /// GB-63: the VTN keeps an event's id when it edits it in place, and an edit that
+    /// rewrites prices keeps the interval count. The new version has to arrive again.
+    #[test]
+    fn edited_event_arrives_again_with_its_new_version() {
+        let first = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
+        let known = KnownEvents::from_events(&first);
+        let mut edited = make_event("ev1", "Peak DR", "PRICE", 0.55);
+        edited.modification_date_time = Utc.with_ymd_and_hms(2026, 3, 21, 9, 30, 0).unwrap();
+        let changes = detect_event_changes(
+            &[edited],
+            &PayloadReader::default(),
+            &known,
+            1,
+            &CapacityPicture::default(),
+            ts(),
+        );
+        let controller::trace::ControllerEvent::OpenAdrArrived {
+            event_id,
+            modification_date_time,
+            value,
+            ..
+        } = &changes.trace_events[0]
+        else {
+            panic!("expected OpenAdrArrived for the edited event");
+        };
+        assert_eq!(event_id, "ev1");
+        assert_eq!(
+            modification_date_time.as_deref(),
+            Some("2026-03-21T09:30:00+00:00")
+        );
+        assert!((value - 0.55).abs() < 1e-9);
+        assert_eq!(
+            changes.plan_trigger(),
+            Some(entities::asset::PlanTrigger::RateChange)
+        );
+        assert_eq!(changes.event_records.len(), 1, "each version is recorded");
+    }
+
+    #[test]
+    fn unchanged_version_is_not_an_arrival_and_asks_for_no_replan() {
+        let events = vec![make_event("ev1", "Peak DR", "PRICE", 0.30)];
+        let changes = detect_event_changes(
+            &events,
+            &PayloadReader::default(),
+            &KnownEvents::from_events(&events),
+            1,
+            &CapacityPicture::default(),
+            ts(),
+        );
+        assert!(changes.trace_events.is_empty());
+        assert_eq!(changes.plan_trigger(), None);
+        assert!(changes.event_records.is_empty());
+    }
+
+    #[test]
+    fn edited_then_deleted_event_expires() {
+        let mut edited = make_event("ev1", "Peak DR", "PRICE", 0.55);
+        edited.modification_date_time = Utc.with_ymd_and_hms(2026, 3, 21, 9, 30, 0).unwrap();
+        let known = KnownEvents::from_events(&[edited]);
+        let changes = detect_event_changes(
+            &[],
+            &PayloadReader::default(),
+            &known,
+            1,
+            &CapacityPicture::default(),
+            ts(),
+        );
+        assert!(changes.trace_events.iter().any(|e| matches!(
+            e,
+            controller::trace::ControllerEvent::OpenAdrExpired { event_id, .. } if event_id == "ev1"
+        )));
+    }
+
+    /// A limit edited in place was already seen by value; it also arrives now, and the
+    /// capacity trigger still wins over the rate trigger.
+    #[test]
+    fn edited_capacity_limit_arrives_and_replans_as_a_capacity_change() {
+        let first = vec![make_event("cap1", "Limit", "IMPORT_CAPACITY_LIMIT", 5.0)];
+        let capacity = {
+            let schedule = controller::openadr_interface::parse_capacity_schedule(
+                &first,
+                &PayloadReader::default(),
+            );
+            CapacityPicture::at(&schedule, ts())
+        };
+        let known = KnownEvents::from_events(&first);
+        let mut edited = make_event("cap1", "Limit", "IMPORT_CAPACITY_LIMIT", 3.0);
+        edited.modification_date_time = Utc.with_ymd_and_hms(2026, 3, 21, 9, 30, 0).unwrap();
+        let changes = detect_event_changes(
+            &[edited],
+            &PayloadReader::default(),
+            &known,
+            0,
+            &capacity,
+            ts(),
+        );
+        assert!(changes.trace_events.iter().any(|e| matches!(
+            e,
+            controller::trace::ControllerEvent::OpenAdrArrived { event_id, .. } if event_id == "cap1"
+        )));
+        assert_eq!(
+            changes.plan_trigger(),
+            Some(entities::asset::PlanTrigger::CapacityChange)
         );
     }
 }
@@ -707,7 +814,7 @@ mod plan_trigger_tests {
         let first = detect_event_changes(
             before,
             &reader,
-            &std::collections::HashSet::new(),
+            &KnownEvents::default(),
             0,
             &CapacityPicture::default(),
             now(),
@@ -715,7 +822,7 @@ mod plan_trigger_tests {
         detect_event_changes(
             events,
             &reader,
-            &first.current_ids,
+            &first.known,
             first.rates.len(),
             &first.capacity_picture(now()),
             now(),
@@ -733,7 +840,7 @@ mod plan_trigger_tests {
         let first = detect_event_changes(
             events,
             &reader,
-            &std::collections::HashSet::new(),
+            &KnownEvents::default(),
             0,
             &CapacityPicture::default(),
             first_at,
@@ -741,7 +848,7 @@ mod plan_trigger_tests {
         detect_event_changes(
             events,
             &reader,
-            &first.current_ids,
+            &first.known,
             first.rates.len(),
             &first.capacity_picture(first_at),
             second_at,

@@ -345,6 +345,7 @@ An operator changes the price schedule the fleet is told about and wants to see 
 - A repeating series repeats by elapsed time, so across a clock change it no longer follows local midnight; the page says so.
 - Whole-series edits are a table of operators: scale, shift (wrapping inside a repeating pattern), cap, add to a range of hours, and flat / two-tier / three-tier templates. The series can also be shaped on the chart: drag a band's value (snapped to the signal's step) or a row boundary (snapped to its interval grid). A drag on any repetition edits the one pattern, so all repetitions move.
 - After publishing, the page compares the fleet's *planned* import and export from just before the publish with now, per direction (energy and peak), and says how many of the targeted VENs have replanned; until all have, the change is marked not final. It reads the fleet plan feed, so it is the same after a reload.
+- A tariff edited in place (the same event, a new `modificationDateTime`) is a new version: each VEN traces it as an arrival and replans, so the edit reaches the plan within a poll interval (`tests/features/ven_rate_system.feature`)
 
 **Typical Signals:**
 - `PRICE`, `EXPORT_PRICE` (later `GHG` and capacity envelopes use the same workbench)

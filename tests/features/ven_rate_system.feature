@@ -35,6 +35,17 @@ Feature: VEN Rate System — OpenADR Interface (Stage 2)
     Then the VEN /tariffs price that hour at 0.09 before, 0.45 during and 0.09 after the 10-minute window
     And the day-ahead price resumes in its own segment when the 10-minute window ends
 
+  Scenario: A PRICE event edited in place with the same number of intervals reaches the VEN's tariff
+    # GB-63: the VTN keeps an event's id and its interval count when it is edited, so the VEN
+    # used to carry on with the old tariff. An edit is a new version of the event: it arrives
+    # again, and the plan follows.
+    Given I create a rate-system program and save its ID
+    And I create a one-hour PRICE event of 0.31 34 hours from now and save its ID
+    When I wait for the VEN /tariffs endpoint to show 0.31 in the edited hour
+    And I update the saved PRICE event to 0.52 keeping its single interval
+    Then within 60 seconds the VEN /tariffs endpoint shows 0.52 in the edited hour
+    And the VEN trace shows two arrivals of the saved event with different versions
+
   Scenario: IMPORT_CAPACITY_LIMIT event updates the capacity state
     Given I create a rate-system program and save its ID
     And I create an IMPORT_CAPACITY_LIMIT event with limit 5.0 kW for the saved program

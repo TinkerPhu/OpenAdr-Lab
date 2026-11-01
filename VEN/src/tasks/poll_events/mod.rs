@@ -4,6 +4,7 @@
 
 mod capacity_picture;
 mod detect;
+mod known_events;
 
 use chrono::Utc;
 use metrics::counter;
@@ -33,8 +34,8 @@ async fn read_events(
     state: &AppState,
     notifier: &crate::services::notify::Notifier,
     events: &[controller::vtn_port::OadrEvent],
-    (prev_ids, prev_tariff_count, prev_capacity): (
-        &std::collections::HashSet<String>,
+    (prev_known, prev_tariff_count, prev_capacity): (
+        &detect::KnownEvents,
         usize,
         &detect::CapacityPicture,
     ),
@@ -44,7 +45,7 @@ async fn read_events(
     let changes = detect_event_changes(
         events,
         &reader,
-        prev_ids,
+        prev_known,
         prev_tariff_count,
         prev_capacity,
         now,
@@ -71,9 +72,9 @@ pub(crate) fn spawn_event_poll(
             tokio::time::sleep(std::time::Duration::from_secs(startup_delay_s)).await;
         }
         let mut backoff = Backoff::new(secs, secs.saturating_mul(30).min(900), 0);
-        // Track previous event IDs and tariff count for change detection (T034/T035)
-        let mut prev_event_ids: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        // Track the previous events (id and version, GB-63) and tariff count for change
+        // detection (T034/T035)
+        let mut prev_known = detect::KnownEvents::default();
         let mut prev_tariff_count: usize = 0;
         let mut prev_capacity = detect::CapacityPicture::default();
         let mut signal_prevs = super::poll_signals::SignalPrevs::default();
@@ -110,7 +111,7 @@ pub(crate) fn spawn_event_poll(
                         &mut announced_staggered,
                     )
                     .await;
-                    let prevs = (&prev_event_ids, prev_tariff_count, &prev_capacity);
+                    let prevs = (&prev_known, prev_tariff_count, &prev_capacity);
                     let changes = read_events(&state, &notifier, &acted_on, prevs, now).await;
 
                     // Read before the trace_events vec is consumed by the for loop.
@@ -140,7 +141,7 @@ pub(crate) fn spawn_event_poll(
                         state.push_controller_event(evt).await;
                     }
                     prev_capacity = next_capacity;
-                    prev_event_ids = changes.current_ids;
+                    prev_known = changes.known;
                     prev_tariff_count = changes.rates.len();
 
                     state.set_planned_tariffs(changes.rates).await;
@@ -168,7 +169,7 @@ pub(crate) fn spawn_event_poll(
                         &existing_obs,
                     );
                     state.add_obligations(new_obs).await;
-                    state.retire_obligations_not_in(&prev_event_ids).await;
+                    state.retire_obligations_not_in(&prev_known.ids()).await;
 
                     state.set_events(events, 500).await;
 

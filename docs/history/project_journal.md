@@ -16745,3 +16745,30 @@ value-less band in the feed, since the shared ranking only reads numbers.
 
 **Key learning.** A chart that sits beside another reads as its cause. When the thing drawn is derived, derive it
 with the rule the actor uses, not a copy of it.
+
+## An event the VTN edits in place is a new version, and arrives again (fix/replan-on-event-edit, GB-63)
+
+**What.** The event poll remembers each event as `(id, modificationDateTime)` (`tasks/poll_events/known_events.rs`,
+`KnownEvents`). An event whose id is known but whose version differs counts as newly arrived: it is traced as
+`OpenAdrArrived` with the new `modification_date_time`, recorded in `events_received`, named in the replan's
+`trigger_causes`, and asks for a replan through the path every arrival takes. `detect_event_changes` takes the
+previous `KnownEvents` instead of a set of ids.
+
+**Why.** On 2026-10-29 a `PUT` of a `PRICE` event rewrote the whole tariff and the VENs logged nothing: an edit keeps
+the id, and an edit of the same number of intervals keeps the count the rate-change test compared. The fleet
+experiment's tariff edits were therefore acted on only by the next periodic cycle, which adopts a plan only above the
+acceptance threshold.
+
+**Decision.** The backlog row asked whether rate events only or every kind. Capacity limits and alert, SIMPLE and
+dispatch windows were already compared by value; only rates were compared by count. Keying on the version fixes every
+kind at once because the arrival path knows no kind. Rejected: comparing rates by value (tariffs only, no event id for
+the replan's cause, a second detector beside the arrival) and a new `OpenAdrModified` trace variant (generated UI
+types, two Planner renderers and the BFF reader for a field the existing variant already carries).
+
+**Issues.** (1) An edit that changes nothing the VEN acts on (a renamed event) still replans once, like any arrival.
+(2) The report obligations of an edited event keep the old descriptor (GB-67) and the fleet reaction feed names the
+first arrival of an edited event (GB-68); both filed. (3) A scripted test edit rewrote both test modules of
+`detect.rs` because the file holds two; the second one (`plan_trigger_tests`) shares nothing with the first.
+
+**Key learning.** When a peer sends a version for an object, identify the object by id and version. A set of ids
+cannot tell an edit from no change.
