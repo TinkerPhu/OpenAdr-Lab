@@ -476,6 +476,10 @@ scheduled — appeared, moved or lifted, otherwise `PlanTrigger::RateChange`
 (`EventChanges::plan_trigger` in `tasks/poll_events/detect.rs`); alert windows send
 `PlanTrigger::Alert` and SIMPLE windows `PlanTrigger::CapacityChange` (`tasks/poll_signals.rs`).
 Only `RateChange` is held by GB-55 (`ven_milp_planner.md`).
+The poll knows each event as `(id, modificationDateTime)` (`KnownEvents`, `tasks/poll_events/known_events.rs`): an
+event whose id is new or whose version differs from the previous poll arrives (trace `OpenAdrArrived` with that version,
+a record in `events_received`, the id among the replan's causes), so a tariff, limit or signal the VTN edits in place
+reaches the plan within a poll interval (`tests/features/ven_rate_system.feature`, unit tests in `detect.rs`).
 
 ### 2.3 Planning Algorithm
 
