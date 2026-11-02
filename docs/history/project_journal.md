@@ -16784,3 +16784,14 @@ change needed); the history still holds them until it is rewritten, which is a s
 
 **Key learning.** Untracking a file makes `git checkout`/`reset --hard` on a host delete its working copy: back the real
 file up outside the tree before the merge reaches a host, and restore it afterwards.
+
+## The project instructions were cut to what every task needs (docs/claude-md-trim)
+
+**What.** `.claude/CLAUDE.md` went from about 40 KB to about 17 KB. Every rule stays, shortened; the host lock, checkout
+and build mechanics moved to `docs/guidelines/TESTING.md` ("Host locks, checkouts and builds"), and the architecture
+invariant list is read from `python ci/audits/audit_ven_architecture.py`, which prints each rule it checks.
+
+**Why.** The file is loaded into every session; text that matters for one kind of task cost every other task.
+
+**Key learning.** A rule that only lives in the instructions file is lost when it is moved: move the detail to the
+document first, then shorten the instruction to one line and a link.

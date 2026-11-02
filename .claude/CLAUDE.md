@@ -1,466 +1,217 @@
 one-concept-one-function (the rule above all others for code; older code and docs cite it as
-`generic-over-bespoke`): every concept this project
-computes has exactly ONE implementation, and every caller calls it. The recurring root cause of
-this project's bugs is the same logic living in several places, each copy a little different —
-GB-48: "when does interval i of an OpenADR event run" was decided in seven parsers with four
-rules, and "which limit applies at t" in three places. The differences between copies ARE the
-bugs.
-  - Search before you write. Before adding any logic, grep for the concept, not for the name you
-    would give your function: its domain words, the spec field names, the UI label, the unit
-    suffix, the shapes it takes (`interval_start <= now`, `.intervalPeriod`, `.min(`). Read what
-    you find. "I didn't find it" must mean "I searched for it".
-  - Found once: call it. If it doesn't quite fit, change the shared function (with its tests) so
-    both callers use it. Never copy-paste-and-adapt.
-  - Found twice or more, even slightly different: consolidate into one shared function in the
-    same piece of work, delete the copies, and pin the unified behaviour with tests. Never add a
-    third copy "for now".
-  - Generalise the primitive, not the call site: when several call sites solve the same shape
-    with near-identical helpers (e.g. `hasCostData`, `hasCo2Data`, `hasNearForecast`), name the
-    general pattern and push it into the shared component so it applies by construction to every
-    current and future case, instead of a helper each caller must remember to invoke.
-  - Every plan and openspec design names the existing functions it reuses or consolidates (an
-    inventory of where the concept lives today). A design that adds logic without that inventory
-    is incomplete. Copies you find but cannot consolidate in reach go into
-    docs/reference/TECHNICAL_DEBTS.md immediately.
-Small code is the goal: fewer places that know a rule means fewer places that can get it wrong.
+`generic-over-bespoke`): every concept this project computes has exactly ONE implementation, and
+every caller calls it. The recurring root cause of this project's bugs is the same logic living in
+several places, each copy a little different (GB-48: "when does interval i of an OpenADR event run"
+was decided in seven parsers with four rules). The differences between copies ARE the bugs.
+  - Search before you write: grep for the concept (domain words, spec field names, UI label, unit
+    suffix, the shapes it takes), not for the name you would give your function. "I didn't find it"
+    must mean "I searched for it".
+  - Found once: call it; if it does not quite fit, change the shared function (with its tests).
+    Never copy-paste-and-adapt.
+  - Found twice or more: consolidate into one shared function in the same piece of work, delete the
+    copies, pin the unified behaviour with tests. Never add a third copy "for now".
+  - Generalise the primitive, not the call site: when several callers solve one shape with
+    near-identical helpers, push the general pattern into the shared component.
+  - Every plan and openspec design names the existing functions it reuses or consolidates. Copies you
+    cannot consolidate in reach go into docs/reference/TECHNICAL_DEBTS.md immediately.
 
-env: the repo needs no lab host (fresh clone = local docker). This lab sets `OPENADR_LAB_HOST=Node2` (or Node1) and
-CI_HOST=Node3 in the shell; `ci-handoff.sh`/`ci-next.sh` refuse to run without CI_HOST. All CI/CD lives in `ci/` (README there).
+env: the repo needs no lab host (fresh clone = local docker). This lab sets `OPENADR_LAB_HOST=Node2`
+(or Node1) and `CI_HOST=Node3`; `ci/ci-handoff.sh` and `ci/ci-next.sh` refuse to run without CI_HOST.
+All CI/CD lives in `ci/` (ci/README.md). Docker runs on Node1 (primary: VTN, DB, BFF, VTN UI, ven-1..3)
+or Node2 (secondary: ven-4..20 and build/test offload), in /srv/docker/openadr_lab on both. Node3 is
+the CI host. Details, compose service names and build commands: docs/guidelines/TESTING.md.
 
-docker: docker runs on ssh Node1 (primary — VTN, its DB, BFF, VTN UI, and the main VEN
-docker-compose stack) or ssh Node2 (secondary — ven-4 + build/test offload, see
-VEN/scale_out/node2/). Run tasks with docker on the intended host via ssh in
-directory /srv/docker/openadr_lab (same path on both hosts).
+session-start: at the start of every AI session read docs/reference/SESSION_START.md and follow it
+before touching any code.
 
-node1-lock: Node1 is shared between multiple parallel sessions/worktrees. Before ANY
-docker build or test run on Node1, acquire the lease lock and hold it for the
-whole sequence:
-  bash ci/locks/docker_host_lock.sh acquire -m "<branch>: <what you are doing>" [-l MIN]
-  ... all ssh Node1 docker commands ...
-  bash ci/locks/docker_host_lock.sh release
-The acquirer declares its own lease end (-l minutes, default 60) which is stored in
-the lock as UTC time; once that time passes the lock counts as dead and the next
-acquirer steals it. Pick -l honestly for the expected runtime; `refresh [-l MIN]`
-extends from now if a run overshoots. `status` shows holder, task, and lease end.
-`acquire` blocks up to ~9 min then exits 2 — rerun it to keep waiting; report to the
-user if the lock stays held unusually long instead of bypassing it. run_all_tests.sh
-acquires/releases the lock automatically (-l 180) for remote docker suites. Never run
-docker commands on Node1 while another owner holds an unexpired lock.
+hosts-and-locks (full mechanics: docs/guidelines/TESTING.md "Host locks, checkouts and builds"):
+  - Node1, Node2, Node3 and the local WSL are each shared by parallel sessions. Before ANY docker
+    build/test on a host, or any large WSL cargo command, take that machine's lease lock and hold it
+    for the whole sequence: `bash ci/locks/docker_host_lock.sh acquire -m "<branch>: <what>" [-l MIN]`
+    (`LOCK_HOST=Node2` for another host), `bash ci/locks/wsl_lock.sh acquire ...` for WSL; `release`
+    at the end, `refresh` if a run overshoots, `status` to read it. `acquire` blocks ~9 min then exits
+    2: rerun it, and report to the user if a lock stays held unusually long. Never bypass a lock.
+  - one-checkout-per-host: one working tree per host: `run_all_tests.sh` does NOT switch branches. Under the lock, put the
+    host on your branch and verify it (`git fetch && git checkout <b> && git reset --hard origin/<b>
+    && git log -1`). Check the lock is FREE or yours in a separate step before touching a host tree.
+  - test-host-preference: prefer Node2 for build/test and E2E; use Node1 only when Node2 is unavailable or a test needs the
+    production stack. NEVER stop containers that do not belong to this project without asking.
+  - Ask the user before resets, deploys or other changes to a host's checkout that they did not ask for.
 
-node2-lock: Node2 (192.168.1.104) is a second docker host, used to take build/test load
-off Node1. It shares the same lock script and mechanism as Node1 (docker_host_lock.sh isn't
-Node1-specific despite the name — the lock is one fixed path on the target host itself, so
-each machine gets its own independent lock and every SSH alias of a machine reaches the same
-one; the owner is the AI session (CLAUDE_CODE_SESSION_ID), not just the checkout, so two
-sessions in one checkout exclude each other — ci/locks/test_lease_lock.sh pins both). Set
-LOCK_HOST=Node2 to target it
-directly, or run `DOCKER_HOST=Node2 bash run_all_tests.sh ...`, which sets this
-automatically. Node1 and Node2 can be used concurrently by different sessions without
-contention, since each holds its own lock. Same lease semantics and default
-(60min) as Node1. Node2 also has `tests`/`VTN` in its sparse-checkout and openleadr-rs
-submodule initialized, so all four suites (`--rust`, `--e2e`, `--resilience`, and the
-full run_all_tests.sh) run there too, not just `--rust`.
+ci-handoff (skill `ci-handoff`, docs/guidelines/TESTING.md "CI on Node3"): Node3 runs the CI runner,
+which tests branches and is the only thing that merges to main. When work is done and the quick local
+checks are green: commit the journal and KEY_LEARNINGS entries WITH the code, `git push -f origin
+HEAD:<branch>`, `bash ci/ci-handoff.sh`, then start the `bash ci/ci-wait.sh <ticket> --ack` it prints
+as a BACKGROUND command (never poll or sleep) and end the turn. Do not run the full suite yourself and
+do not merge to main. Merged: delete the branch and worktree, return any host checkout to main, report.
+Red/conflict/stale: fix and hand off again. A `--kind check` hand-off of work in progress does not end
+the task. Deploys only when the user asks: `ci-handoff.sh --deploy <host> <stack> "<services>"`.
+If the runner is not running (`ssh Node3 systemctl is-active ci-runner.timer`), merge the old way.
 
-node3: Node3 (192.168.1.106) is a third docker host, same hardware class as Node1/Node2 but
-running nothing else, under evaluation as a dedicated CI host. Same sparse checkout,
-submodule and lock mechanism (LOCK_HOST=Node3, `DOCKER_HOST=Node3 bash run_all_tests.sh ...`).
+no-needless-runs: every build and test run costs minutes to hours on shared hardware. Do not repeat a
+check that passed on the same commit; do not start a run while one is in flight; look for warm caches;
+do not run the Rust or E2E suites for a change they cannot see (docs, wiki, openspec: ci/suites.map
+decides); run the narrowest test that proves the change and leave the full gate to the runner. When a
+run is lost to the environment, find out why before starting it again.
 
-ci-handoff: Node3 also runs the CI runner, which tests branches and is the only thing that merges
-to main. When your work is done and the quick local checks are green (cargo check, the tests you
-touched, the python audits): commit the journal and KEY_LEARNINGS entries WITH the code, push
-(`git push -f origin HEAD:<branch>`), run `bash ci/ci-handoff.sh`, then start the `bash ci/ci-wait.sh <ticket> --ack` it prints as a
-BACKGROUND command (Bash run_in_background; never poll or sleep yourself, the wait costs no tokens)
-and end your turn: the session is woken with the verdict. Do not run the full suite yourself, do
-not merge to main. If the session was closed, the user brings the result with `ci/ci-next.sh`
-(the ticket keeps status and result.md either way): merged means delete the branch and worktree
-and finish the task; red, conflict or stale means fix and hand off again. A run that must not merge (A/B, experiment,
-milestone) goes to Node2 by hand under test-host-preference, not onto the board: a full run holds Node3 for up to an hour and, when no session holds them, Node2 and
-Node1 through the same lock (the runner's lanes). `--kind check` is for when the user wants Node3's verdict. Finish only after the verdict of finished work has been handled: a `--kind check` hand-off of work in progress
-(a milestone tested while the rest is still being built) does not end the task. Keep working on new
-commits; the ticket tests the commit it recorded, so later pushes do not disturb it. Do not hand the
-branch off again while that ticket is in flight, and fold its result into the branch when it comes. Full description: docs/guidelines/TESTING.md "CI on Node3", skill ci-handoff. If the
-runner is not running (`ssh Node3 systemctl is-active ci-runner.timer`), merge the old way.
+local-rust and memory-budget: use WSL for local Rust (native Windows cargo lacks cmake/HiGHS), through a
+login shell and a script file so the real exit code survives:
+`MSYS_NO_PATHCONV=1 wsl bash -l /mnt/c/.../scratchpad/cargo.sh <log> <crate-dir> <cargo args>`. The
+laptop has little RAM: check free memory first (`Get-CimInstance Win32_OperatingSystem`), always pass
+`-j 2`, wait or ask below ~1 GB free, and hold the WSL lock for the whole sequence.
 
-no-needless-runs: every build and test run costs minutes to hours on shared hardware, so start none
-that is not needed. Do not repeat a check that already passed on the same commit; do not start a
-run while one is in flight (wait for it, or ask); look for warm caches and volumes before any
-build that would start cold; do not run the Rust or E2E suites for a change they cannot see (docs,
-wiki, openspec, scripts that no test runs: the runner's suite selection, ci/suites.map, covers those); run the
-narrowest test that proves the change while working and leave the full gate to the runner. When a
-run is lost to the environment (killed shell, restarted WSL), find out why before starting it again.
+workflow:
+  1. Keep docs/history/project_journal.md: for each large step, what you did, why, and the issues
+     and key learnings.
+  2. Write key learnings into docs/reference/KEY_LEARNINGS.md and consider them when deciding.
+  3. No lingering plans. The whole openspec/ folder is change-management scaffolding, not
+     documentation. Once a plan (docs/plans/) or openspec change is implemented and tested, wave its
+     feature into current-state docs (mechanism -> docs/architecture/*.md, user-observable behaviour ->
+     docs/use-cases/*.md, new files only when none fits) and delete the plan/change (no archiving).
+     Point to test files instead of copying SHALL/Scenario prose. Narrative of implementation issues
+     is not carried forward; durable lessons go to KEY_LEARNINGS.md. Partial completion removes only
+     the done part.
+  4. A user-facing use case gets documented in docs/use-cases/*.md AND a BDD scenario in
+     tests/features/ in the same piece of work, not a follow-up.
+  5. After a merge, switch Node1/Node2 checkouts back to main and delete the merged branch and any
+     worktree (`git worktree remove`, `git worktree prune`) right away.
 
-one-checkout-per-host: each docker host has a SINGLE working tree at
-/srv/docker/openadr_lab, and `run_all_tests.sh` does NOT switch it to your branch: it
-only `git pull`s whatever branch the host already has checked out, then builds and tests
-that. So before any remote suite, under the host lock, put the host on your branch yourself
-and verify it:
-  ssh <host> "cd /srv/docker/openadr_lab && git fetch -q origin && git checkout <branch> && git reset --hard origin/<branch> && git log --oneline -1"
-Observed 2026-10-04: a run meant to test a fix branch tested main, and a "main control run"
-tested the fix branch, because the host was still on the previous run's branch; an A/B is
-only an A/B once both sides are verified on the host. Two sessions cannot run a suite on
-the same host at once even when the lock works: the second checkout pulls the tree out
-from under the first one's build, and both E2E runs would also collide on the shared
-compose project name (`openadr-test`) and its container names. The lock is what makes this safe - hold it for
-the whole run, and read `status` before assuming a host is free. Two sessions CAN work
-in parallel by taking different hosts (one on Node1, one on Node2); they cannot share
-one. Observed 2026-10-04: two sessions both believed they held Node2, one testing main
-and the other its own branch, and the checkout ended up on the second branch while the
-first was still building.
+branching and commits: feature branches `NNN-description` (openspec feature id); `refactor/<slug>`;
+`fix/<slug>`; all target main. Rebase and fast-forward merge only (no PRs for this repo, never force
+push main). Commits are signed off (-s); add NO co-author footer to commits or PR descriptions.
+Merge gate (the Node3 runner runs it): cargo fmt, `cargo clippy --all-targets --all-features -- -D
+warnings`, cargo audit, ci/audits (file sizes, duplication ratchet, debt gate, VEN architecture, and
+step definitions when tests/features changed) and E2E. Run `python ci/audits/audit_duplication.py`
+before handing off: a branch must not add or grow a duplicated cluster or a Rust function over 100
+lines; `--update` only after reducing. Run `python ci/audits/audit_step_definitions.py` before any
+change under tests/features (an undefined or ambiguous step aborts the whole E2E run; use `{x:g}`
+for numeric arguments).
 
-test-host-preference: this project now has two build/test-capable docker hosts (Node1,
-Node2) alongside local WSL. Prefer Node2 for build/test runs (`DOCKER_HOST=Node2 bash
-run_all_tests.sh ...`) — Node1 also runs the always-on production VTN/BFF/VEN stack, so
-heavy test builds there compete with and can slow down live services. Use Node1 only when
-Node2 is unavailable/locked, or when a test specifically needs Node1 (e.g. verifying
-something against the real production stack).
+testing (docs/guidelines/TESTING.md): UI unit (`npm test` in VEN/ui and VTN/ui), Rust unit and
+integration, E2E BDD, resilience. Test-first: write the test, run it selectively to see it fail,
+implement until green; at unit level for every new function and at BDD level for every new behaviour.
+Test naming `<function>_<scenario>`, no `test_` prefix. VEN Rust pyramid: Domain, Use-case,
+Adapter-contract, Integration; shared mocks in VEN/src/services/test_support/. Linting: fmt and clippy
+as above before any commit; eslint with zero errors for the UIs; `#[allow]` only with a same-line reason.
 
-local-rust: WSL is installed on this Windows machine. Use WSL for local Rust compilation
-instead of native Windows cargo, which lacks cmake/HiGHS. Always go through a **login**
-shell, because `cargo` lives in `~/.cargo/bin` and only a login shell puts it on PATH:
-  wsl bash -lc "cd /mnt/c/DriveD/Tinker/OpenAdr-Lab/VEN && cargo check --tests -j 2"
-Bare `wsl cargo check` fails with `cargo: command not found` on one line of stderr — which
-hides behind any `| grep` of the compiler output, and `echo $?` then reports grep's status,
-not cargo's. Capture output, check the real exit code, then filter. For a full test run including HiGHS, use the Node1 docker stack.
+test failures: do NOT split "pre-existing" from "new" failures; read the error and fix the code, the
+test or the fixture. A test's purpose may be questioned, but never weaken or delete a failing test
+silently: explain the change and the alternatives to the user.
 
-memory-budget: this laptop has only 8 GB RAM — WSL cargo builds have crashed the host
-(pagefile exhaustion, "Catastrophic failure Wsl/Service/E_UNEXPECTED"). Before starting
-any large-memory task (cargo build/check/test/clippy in WSL, parallel npm builds), check
-free memory first:
-  Get-CimInstance Win32_OperatingSystem | % { "{0:N1} GB free" -f ($_.FreePhysicalMemory/1MB) }
-Rules: always pass `-j 2` to cargo in WSL; if free physical memory is below ~1 GB, wait or
-ask the user to close applications before starting.
+determinism: any code path depending on the current time takes an injectable clock; new modules that
+schedule, timestamp or expire follow the same pattern.
 
-wsl-lock: the WSL instance on this laptop is shared between multiple parallel
-sessions/worktrees, same as Node1. Before ANY `wsl cargo build/check/test/clippy` (or
-other large-memory WSL command), acquire the lease lock and hold it for the whole
-sequence:
-  bash ci/locks/wsl_lock.sh acquire -m "<branch>: <what you are doing>" [-l MIN]
-  ... all wsl cargo commands ...
-  bash ci/locks/wsl_lock.sh release
-Same semantics as node1-lock (self-declared lease stored as UTC epoch, re-entrant per
-owner, dead locks are stolen with a warning): `-l` sets the lease in minutes (default
-20 — override for long test runs), `refresh [-l MIN]` extends from now if a run
-overshoots, `status` shows holder/task/lease end. `acquire` blocks up to ~9 min then
-exits 2 — rerun it to keep waiting; report to the user if the lock stays held unusually
-long instead of bypassing it. Never run a WSL cargo build/test while another owner
-holds an unexpired wsl_lock.
+dependencies: pin new crates to a semver range, npm packages with caret ranges (commit
+package-lock.json, never delete it); run cargo audit and npm audit before a release and file findings
+in docs/BACKLOG.md. Allowed licences: MIT, Apache-2.0, BSD-2/3-Clause, ISC, Unicode-3.0, Zlib,
+CDLA-Permissive-2.0, OpenSSL (aws-lc-sys). Review every new import.
 
-dto: avoid DTO normalization. pass through upstream field names (e.g. OpenADR spec names) across all layers — backend, BFF, UI. one vocabulary everywhere reduces boilerplate and debugging friction.
+dto: no DTO normalisation; pass upstream field names (OpenADR spec names) through all layers.
 
-wire-contracts: an optional field in an external protocol is mandatory in this project. Every
-message we emit declares what its values mean; every message we accept is interpreted from what it
-says, never from an assumption in the reader. The failure this prevents is a number on the wire
-whose quantity, unit or sign lives only in the sender's head — GB-50 (closed): the VEN used to read
-capacity limits as kW and write power as W with no `payloadDescriptors` anywhere, and
-`experiments/kpi.py` compensated with a `* duration` for a payload type the spec defines as energy.
-Today both directions are declared; docs/reference/WIRE_PROFILE.md holds the current contract.
-  - Emit strictly. Never send a value whose quantity, unit, sign convention and reading type are
-    not declared on the wire (OpenADR: program/event `payloadDescriptors`, `reportDescriptors`,
-    report `payloadDescriptors`). "The spec marks it optional" is not a reason to omit it; it is
-    the reason this rule exists.
-  - Accept explicitly. Read the declaration that accompanies a value. A conformant peer may
-    legitimately omit it — then apply the documented profile default *and surface that you did*.
-    A silent assumption is a bug, not a default. Strict in what we send, explicit about what we
-    assume — never reject a peer for omitting what the spec lets it omit.
-  - A request is a guarantee. What a peer asks for (units, readingType, cadence, interval grid) is
-    what we send. If we cannot meet it, fail visibly — never substitute silently.
-  - Protocol fields first. Express the contract in the protocol's own fields. Only what the
-    protocol cannot express goes into a namespaced, versioned extension, and only additively: a
-    spec-only consumer must still be correct without it. Never overload a field peers already
-    interpret (e.g. a private `units` string) — that corrupts the value it describes.
-  - One copy, machine-readable. The contract lives on the wire (seeded descriptors) plus a
-    published profile document the objects themselves point at. Code holds no second copy of that
-    truth — only the seed that writes it and the named fallback that fills a gap.
-  - Make it structural. A constructor that cannot build an undeclared payload, one validator at the
-    boundary, and a test that fails when an object goes out without its contract. A rule that
-    depends on remembering has already failed.
-  Our profile is stricter than the spec, never a variant of it: keep that line explicit so lab
-  convention is never mistaken for protocol behaviour.
+wire-contracts (profile: docs/reference/WIRE_PROFILE.md): an optional field in an external protocol is
+mandatory here. Emit strictly: never send a value whose quantity, unit, sign and reading type are not
+declared on the wire (payloadDescriptors, reportDescriptors). Accept explicitly: read the declaration
+that accompanies a value; if a conformant peer omits it, apply the documented profile default and
+surface that you did; never reject a peer for omitting what the spec lets it omit. A request is a
+guarantee: what a peer asks for is what we send, or we fail visibly. Express the contract in protocol
+fields first; extensions are namespaced, versioned and additive. The contract lives on the wire plus
+the profile document, not in a second copy in code. Make it structural: constructors that cannot build
+an undeclared payload, one validator, a test that fails when an object goes out without its contract.
 
-workflow: 1. always keep a project_journal.md in projects where you write for each large step what you did, why you did it and what issues/key-learnings you had. it shall explain, how the project was implemented. The journal lives at docs/history/project_journal.md.
-2. write key learnings into KEY_LEARNINGS.md (at docs/reference/KEY_LEARNINGS.md) and consider them when making decissions.
-3. no lingering old plans or plan items after implementation. The entire openspec/ folder is
-construction/change-management scaffolding, not a documentation destination — this includes
-openspec/specs/, not just openspec/changes/. Once a plan (docs/plans/) or an openspec change
-(openspec/changes/, including its specs/) has been implemented and successfully tested, wave its
-feature/functionality into the appropriate current-state documentation under docs/ (mechanism-level
-facts into the relevant docs/architecture/*.md; user-observable behavior into the relevant
-docs/use-cases/*.md; new doc files only when no existing one fits, not by default), then delete the
-plan/change (do not archive — the openspec-archive-change skill is removed, replaced by this delete
-workflow). Don't restate what tests already assert with full rigor — point to the test file by
-name instead of hand-copying SHALL/Scenario prose into docs; that duplication rots as the code
-evolves. Implementation-issue narrative is not carried forward once a thing is implemented; if an
-issue holds a durable lesson for future work, put it in KEY_LEARNINGS.md, not in a surviving plan
-file. If only part of a plan/change is done and tested, remove just that part and leave the rest in
-place — do not delete a plan/change wholesale on partial completion.
-Deletion here is git-recoverable (history isn't lost), so this is about keeping the working tree's
-active plans/specs true to what's still outstanding, not about erasing the record.
-4. when a feature enables or improves a user-facing use case, document it in the relevant
-docs/use-cases/*.md (new file only if none fits) and add or extend a BDD scenario in
-tests/features/ that exercises that use case specifically — not just implementation-level unit
-tests. A unit test proves the mechanism works internally; a use-case scenario proves the thing a
-user actually does (set a curve, create a session, get a different plan) works end-to-end. Do
-this as part of the same piece of work, not a deferred follow-up.
-5. no lingering checkouts/worktrees on Node1 or Node2 after a branch is merged to main. Once a
-branch's work is confirmed merged into origin/main, switch that host's checkout back to main
-(`git checkout main && git pull`) and delete the now-merged local branch; if the work was done in
-a `git worktree` (e.g. under worktrees/), remove the worktree (`git worktree remove`, `sudo rm -rf`
-first if build artifacts like VEN/target left root-owned files, then `git worktree prune`) rather
-than leaving it checked out on an old commit. Do this cleanup as soon as a merge is confirmed, not
-as a periodic sweep.
+ui-transparency and no-half-built-features: every backend capability, external feed and piece of
+derived state needs a visible surface in the VEN UI or VTN UI, planned in the same piece of work.
+Never build one side of a producer/consumer pair without the other. When a richer mechanism replaces a
+simpler one, retire the old routes, client and tests in the same change.
 
-NEVER stop docker containers that are not involved in this project without asking. They are productive containers.
+refactoring and issues: check docs/reference/TECHNICAL_DEBTS.md before adding a feature in a listed
+area; Small or Trivial debt is refactored first. Every open issue (R-*, GB-*, BL-*) carries Severity
+(S1-S4), Kind, Cost and Why-open (docs/reference/ISSUE_KINDS.md). Cost under ~1 hour: fix it in the
+branch, do not file it. Cost Small or more: file it with all four fields (Why-open: needs-decision |
+needs-evidence | too-big, naming the first step). Nothing is deleted for age. A branch's final report
+states issues filed, fixed and deferred. `python ci/audits/audit_debt_gate.py` lists open Small/Trivial
+rows whose `Affected files` the branch touched; fix them or add a commit line
+`Debt-deferred: R-NN: <why not now>`.
 
-branching: feature branches use the pattern NNN-whatever-case-description where NNN is the
-openspec feature ID (e.g. 030-my-feature). Refactor branches: refactor/<slug>.
-Fix branches: fix/<slug>. All those branches target main. Never force-push to main. The goal is to rebase and fast forward merge.
-Commits are signed off (-s); do not add co-author footers (see rule above).
-Merge only after all of these pass (the Node3 runner runs them when you hand off a branch; by
-hand otherwise): cargo fmt, cargo clippy --all-targets --all-features -- -D warnings, cargo audit,
-file-size audit (ci/audits/audit_file_sizes.py — tasks/ ≤ 200, VEN/src/ ≤ 500 production
-lines), duplication ratchet (`python ci/audits/audit_duplication.py` — fails when a branch adds or
-grows a duplicated cluster or a Rust function over 100 lines; `--update` only after reducing debt),
-and E2E tests green on Node1.
-Touched anything under tests/features/? Run `python ci/audits/audit_step_definitions.py`
-BEFORE queuing a remote suite. `tests/entrypoint.sh` aborts the whole E2E run if any step
-is undefined or ambiguous, so one sentence/pattern mismatch costs the full ~20-minute
-round trip to discover; this finds it in a second and also catches a new step pattern that
-is ambiguous against an existing one. A step can be defined and still report undefined —
-`{x:f}` is fixed-point and needs a decimal point, so a feature writing `2` does not match
-it. Prefer `{x:g}` for numeric step arguments.
+error-handling (docs/guidelines/ERROR_HANDLING.md): cross-layer failures use the domain-owned
+`DomainError` (VEN/src/entities/error.rs); translate technical errors at the boundary where they occur;
+typed context, terse one-line Display, remediation hints only in the component's own vocabulary.
 
-testing: full guide at docs/guidelines/TESTING.md. Four suites:
-  1. UI unit (local)       — cd VEN/ui && npm test  |  cd VTN/ui && npm test
-  2. Rust unit+integration — wsl bash -lc "cd <VEN> && cargo test -p ven-app"  (local, no HiGHS needed for most)
-  3. E2E BDD (Node1)         — bash run_all_tests.sh --e2e  (behave)
-  4. Resilience (Node1)      — bash run_all_tests.sh --resilience
-Run everything: bash run_all_tests.sh
-VEN Rust pyramid (4 layers, all must stay green after any VEN change):
-  Domain → Use-case → Adapter-contract → Integration
-  Shared mock adapters live in VEN/src/services/test_support/ (test-only,
-  #[cfg(test)]-gated via services/mod.rs).
-  Test naming: <function>_<scenario> (no test_ prefix — redundant inside #[cfg(test)]).
-All suites must pass before merging a PR to main.
+naming: physical quantities carry a unit suffix (`power_kw`, `energy_kwh`, `temperature_c`,
+`tariff_eur_per_kwh`, `soc_pct`); power is kW everywhere. Use the same word for the same concept across
+a module, and reuse the UI label's wording in routes, DTOs and function names so a UI string greps
+straight to its code. Declare per-case behaviour as data where the case is declared; do not branch on
+it in shared code (a single guard clause or one-off decision is still a plain `if`).
 
-test-first: write the test first. Selectively run it to confirm it fails. Implement until it is green.
-This applies at unit level for every new function and at BDD level for every new behaviour.
+file-headers: when you edit a VEN module with no header comment, give it one (what it decides or owns,
+what it reads, what it must never do). Only as files are touched.
 
-session-start: at the start of every AI session read docs/reference/SESSION_START.md
-and follow the checklist before touching any code.
+asset-competence-assurance: interpretation of an asset's state or forecast has exactly one authority:
+the asset itself. Infrastructure may acquire and share raw data, but it flows into the asset as an
+injected parameter. No other module computes its own answer for a live or future value (immutable
+history is the exception). When you find a violation, sweep every other asset kind and the surroundings
+(controller, arbiter, dispatcher, planner inputs, routes, test fixtures; fixtures build assets from the
+real asset, never a hand-built capability). Fix what is in reach, register the rest in TECHNICAL_DEBTS.md.
+See docs/architecture/VEN_ARCHITECTURE.md section 3.0d.
 
-linting: cargo fmt --check and cargo clippy --all-targets --all-features -- -D warnings
-(same command CI runs) must pass before any commit.
-For JS/TS (VEN/ui, VTN/ui): eslint must report zero errors. Suppress clippy lints with
-#[allow(...)] only if justified with a comment on the same line. No enforced coverage floor —
-keep domain and application layer tests meaningful.
+ven-architecture (docs/architecture/VEN_ARCHITECTURE.md, module_dependency_graph.md): VEN/src follows
+Hexagonal + Clean Architecture; inner rings never import outer rings. Adapters (routes/, tasks/),
+Application (services/), Domain (entities/, controller/), Infra (assets/, simulator/, vtn.rs,
+controller/milp_planner/). Reach infra through ports (SimRosterPort/SimReadPort/HeadroomPort via
+SimHandle, SolverPort, VtnPort, AssetMilpContext), profile values are injected as typed parameter
+structs, adapters read the clock once and pass `now` down. Size caps: no VEN/src file over 500
+production lines, tasks/ files under 200 (audit_file_sizes.py, empty allowlist). The complete list of
+checked invariants is `python ci/audits/audit_ven_architecture.py` (run it before any VEN change):
+read its output and its source for the rules, do not rely on memory of them. Key ones: incoming event
+numbers are read only through `lab_core::wire_contract::PayloadReader`; unit conversion only in
+`entities/units.rs`; no asset kind in the planner core; every VTN request through
+`ClientCredentials::send`.
 
-build:
-  local VEN Rust : wsl bash -lc "cd <VEN> && cargo build"  (or cargo check for fast syntax check)
-  local UI       : cd VEN/ui && npm run build  |  cd VTN/ui && npm run build
-  There is NO compose file at the repo root on either host, and no service named `ven`.
-  Each stack has its own file and its own service names, so a build or deploy names both:
-    Node1 VEN stack  : ssh Node1 "cd /srv/docker/openadr_lab/VEN && docker compose build ven-2"
-                       (services: ven-1, ven-2, ven-3, ui — one per deployed VEN)
-    Node1 VTN stack  : ssh Node1 "cd /srv/docker/openadr_lab/VTN && docker compose build vtn"
-                       (services: db, lab-mqtt, vtn, bff, ui)
-    Node2 VEN fleet  : ssh Node2 "cd /srv/docker/openadr_lab/VEN/scale_out/node2 && docker compose build ven-7"
-                       (services: ven-4 .. ven-20)
-    Deploy one VEN   : same directory, `docker compose up -d --build ven-2`
-  Redeploying one VEN restarts only that container; the rest of the fleet keeps running.
-  Always use wsl (via bash -lc) for Rust compilation — native Windows cargo lacks cmake/HiGHS.
-  There is no GitHub CI (.github/workflows/ was removed, it never worked). The merge gate runs on
-  Node3 (ci-handoff above); when it is unavailable every check is a manual pre-merge command.
+Research and external rules:
+  - OpenADR research uses OpenADR 3 sources only; other questions may use any source.
+  - Do not read, search or reference docs/openadr_3_1_specs/pdf/; use the markdown in
+    docs/openadr_3_1_specs/.
+  - Upstream PRs (openleadr-rs) only after everything is tested green and the commits are ready for the
+    upstream CI; after creating one, wait for its CI and investigate any failure properly before
+    concluding anything about main.
 
-determinism: any code path that depends on the current date/time must accept an injectable
-clock (e.g. a Fn() -> DateTime<Utc> parameter or typed wrapper). Applied in the MILP
-planner, simulator, and assets rings (R-24). All new modules that schedule, timestamp,
-or expire must follow the same pattern. Makes tests reproducible without sleep or
-wall-clock coupling.
+NEVER stop docker containers that are not part of this project without asking.
 
-dependencies: pin all new crates to a semver range in Cargo.toml; npm packages use caret
-ranges in package.json — package-lock.json is the pinning mechanism (commit it; never
-delete it to "fix" installs). Run cargo audit and npm audit before each release; add
-findings to docs/BACKLOG.md with severity. Acceptable licences: MIT, Apache-2.0,
-BSD-2-Clause, BSD-3-Clause, ISC, Unicode-3.0, Zlib, CDLA-Permissive-2.0, and the
-OpenSSL licence (aws-lc-sys). Review every new import — AI-generated code frequently
-introduces undeclared dependencies.
+interview: when the user asks to be interviewed ("interview me", "interview me about X", "interview me for
+all open points") follow this protocol without being told how. The goal is that all information has flowed
+in both directions before anything is decided.
+  1. Prepare to the scope of the request. A named topic or the current discussion: stay on it, look up only
+     what bears on it, ask only for confirmation of what you find. A broad request: sweep the open points in
+     docs/plans/, docs/REQUIREMENTS.md, docs/BACKLOG.md and the journal. Unclear scope: the first question
+     is "which topic?" with likely candidates as options. Look up facts before asking; put questions that
+     unlock others first.
+  2. Small batches: at most 4 questions at a time, each self-contained (the user may see only the question),
+     with its context in one or two lines.
+  3. 2-4 distinct options per question, each with pros and cons; the recommended one first, marked
+     "(Recommended)" with a one-line reason. Where a sensible default exists, state it and proceed.
+  4. Side questions are always welcome: answer or discuss them fully first, without steering back early;
+     then say where the interview stands and re-ask the open question of the batch, restated if the
+     discussion changed its premises.
+  5. Re-evaluate: if an answer or side discussion changes later options or recommendations, revise them and
+     say so.
+  6. Record each answer at once in the file the topic belongs to, mark who decided it, and remove the open
+     point once answered.
+  7. A suggestion is never a decision. Only an explicit answer decides; "sounds good" to a side comment
+     leaves the question open. "As recommended" / "go with your recommendations" is an explicit answer: it
+     covers the current batch, or the remaining batches too when stated for the whole interview; mark the
+     decider as "user, as recommended". If a recommendation changed during a side discussion, restate the
+     current one before applying it.
+  8. Close with a summary: what was decided, what is still open, what changed in which file. The user can
+     overrule any decision.
+  Do not ask what you can look up.
 
-ui-transparency: every backend capability, external feed/port, and piece of derived state must
-have a visible surface in the corresponding UI (VEN UI / VTN UI) — no functionality should exist
-only server-side with no way to inspect it. This applies to both the raw received state (e.g. a
-fetched external forecast, a polled upstream value) and any state VEN/VTN constructs from it (e.g.
-a derived forecast, a computed status). When adding a new capability, plan its UI surface (a
-status row, a diagnostics-page entry, a panel) as part of the same piece of work, not a deferred
-follow-up — a route or port with no UI-visible counterpart is an incomplete implementation, not a
-finished one with polish pending. Precedent: the WP-T1..T8 work (docs/history/project_journal.md —
-search "WP-T"; docs/architecture/VEN_ARCHITECTURE.md §4.10) that put VTN connection/plan/task
-status directly on the VEN UI Dashboard and under its Diagnostics menu group.
-
-no-half-built-features: don't build one side of an interface without the other in the same
-piece of work — a backend endpoint with no client calling it, or a client/hook with no UI
-surface using it, is an incomplete implementation, not a finished one with polish pending
-(same principle as `ui-transparency` above, generalized to any producer/consumer pair, not
-just backend→UI visibility). Before adding a new endpoint, identify what will call it in this
-same change; before adding a client method/hook, identify what will render it. If a richer
-mechanism is added to replace a simpler one (e.g. a unified request API superseding a
-per-device CRUD API), retire the superseded side's client, routes, and tests in the same
-piece of work — don't leave the old routes live-and-tested with a UI that quietly moved on,
-even though nothing is technically broken. Precedent: BL-41 (`docs/BACKLOG.md`) — a
-"Device Sessions API" (`/ev-session`, `/heater-target`, `/shiftable-loads`,
-`/baseline-override`) stayed live, mounted, and BDD-tested for an unknown period after the UI
-fully migrated to the richer unified `/user-requests` flow that constructs the same underlying
-domain objects; found only by an unrelated dead-code audit, not by anyone noticing the drift.
-
-refactoring: before adding a feature in an area listed in docs/reference/TECHNICAL_DEBTS.md,
-check that file first. If the relevant debt is Small or Trivial effort, refactor it before
-adding new behaviour. All tests must pass before and after any refactor. Record newly
-discovered debt in TECHNICAL_DEBTS.md immediately — do not let debt accumulate silently.
-issues: every open issue (R-* in TECHNICAL_DEBTS.md, GB-*/BL-* in BACKLOG.md) carries
-Severity (S1-S4), Kind, Cost and Why-open. Kinds and their weights (higher = more important)
-live in docs/reference/ISSUE_KINDS.md; priority is derived from kind weight, then severity,
-never hand-set.
-  - Cost under ~1 hour: fix it in the current branch. Do not file it. Do not ignore it.
-  - Cost Small or more: file it with all four fields. Why-open is one of needs-decision |
-    needs-evidence | too-big; a row without one is rejected, and too-big names its first step.
-  - Nothing is deleted for age. Only a fix, or an explicit decision recorded in the commit
-    message, removes a row.
-  - A branch's final report states issues filed, fixed and deferred, so intake and output
-    stay visible.
-The Small/Trivial rule is a gate, not advice: before merging a branch run
-`python ci/audits/audit_debt_gate.py`. It lists every open Small/Trivial row whose
-`Affected files` this branch touched and fails until each is either fixed (row deleted from
-the register in the branch) or deferred with a commit-message line
-`Debt-deferred: R-NN: <why not now>`. Write `Affected files` as backticked repo-relative
-paths (tokens broader than three path components, e.g. `VEN/src`, match nothing).
-
-When researching about OpenADR reference, only use OpenADR 3 resources. General Questions can be researched from any versions.
-
-Do not add co-authoring footers to commit messages or PR descriptions. they might get rejected.
-
-Only consider upstream PR and commits after the code is tested completely without failure and the commits are ready for the upstream CI acceptance tests.
-After creating upstream PR, wait for the CI to actually run and report before drawing any conclusions about main branch being pre-broken. If anything fails, we investigate it properly rather than writing it off.
-
-test failures: Do NOT distinguish between "pre-existing" and "new" failures — that distinction is an excuse to not fix things. When a test fails, read the error and focus on what can be done: fix the code, fix the test, or fix the fixture. If a fixture has stale data (e.g. CRLF line endings, outdated snapshot), update it. If a test exercises a real invariant, make the code satisfy it. Passing tests are the goal, not categorizing blame.
-
-It is also legitimate to question whether a test's purpose or form is still correct — requirements change, and a test's expectations can become wrong. It is also valid to ask whether a test could be done more cleanly in a different setup. However, this is NOT a free pass to delete or weaken a failing test. Any change to test purpose, form, or expectations must be explained to the user with the reasoning and the alternatives considered. Never silently change test expectations to make failures go away.
-
-docs/openadr_3_1_specs/pdf/: do not read, search, or reference any files under this directory. Use the markdown versions in docs/openadr_3_1_specs/ instead.
-
-error-handling: all cross-layer failures use the domain-owned DomainError enum
-(VEN/src/entities/error.rs); translate technical errors to a domain variant at the
-boundary where they occur; carry structured context (typed fields, not pre-flattened
-Strings); terse one-line Display; remediation hints only in the component's own
-vocabulary — deployment/config advice belongs at the presentation boundary. Full
-rules: docs/guidelines/ERROR_HANDLING.md.
-
-naming: variables and function names for physical quantities must include the unit as suffix (e.g. `power_kw`, `energy_kwh`, `temperature_c`, `tariff_eur_per_kwh`, `soc_pct`). When adding new code, check nearby code or nearby source files for existing suffixes to stay consistent.
-
-naming-transparency: naming is a transparency tool beyond just units — (a) use the same
-word for the same concept across a function family or module, don't let one file say
-`plan` while a sibling says `schedule` for the same thing; (b) when a concept is shown
-in the UI, reuse that UI label's wording in the backing code (routes, DTOs,
-function/variable names) so a reader can grep from a UI string straight to its
-implementation. When adding new code, check nearby code/sibling modules and the
-corresponding UI for existing wording before inventing a new term.
-
-file-headers: when you edit a VEN module that has no header comment, give it one: what the module
-decides or owns, what it reads, and what it must never do, in a few lines. Only as files are
-touched; no sweep, and no register row for the ones still missing.
-
-asset-competence-assurance: infrastructure/data-acquisition (MQTT reception, weather APIs, a
-heuristics-learning store) may live outside an asset's own module, and may be shared across
-assets. But interpretation — "what is this asset's current state" or "what is this asset's
-forecast" — must have exactly one authority: the asset itself. No other module may
-independently compute or assume its own answer to that question for a live or future value.
-Raw external data flows into the asset as an injected parameter; everything downstream of
-receiving it is the asset's own business. The one exception is immutable history: an
-external recorder collecting the (unchangeable) past isn't a competing authority, since
-there's no divergence risk once a value can no longer change. See
-docs/architecture/VEN_ARCHITECTURE.md §3.0d and the "Asset Competence Assurance" entries in
-docs/history/project_journal.md for the remediated violations (PV, base load, battery, heater, EV).
-Sweep rule: whenever you find one violation, do not fix just that spot. Check every other
-asset kind for the same shape, and check the surroundings (controller, arbiter, dispatcher,
-planner inputs, routes, test fixtures) for code that reads raw asset values (`snap.val("soc")`,
-temperatures, `plugged`, targets) and decides on its own what the asset can or will do, instead
-of asking the asset (capability, flexibility floor, forced power, forecast). Fix the ones in
-reach in the same piece of work; record the rest in docs/reference/TECHNICAL_DEBTS.md. Test
-fixtures that hand-build an asset's capability are the same violation: build them from the real
-asset.
-
-declare-dont-branch: when a component handles N structurally-similar cases (one per series,
-one per asset, one per event type), don't dispatch between them with a chain of `if`/`switch`
-conditions written separately from where each case is defined. Declare each case's behavior
-(visibility, formatting, styling) as data, at the point the case itself is declared, and have
-the shared code look it up — not branch on it. This does not mean eliminating conditionals
-generally: a single guard clause or a genuinely irreducible one-off decision (not a member of
-a repeating family) is still best expressed as a plain `if`. The target is repeated per-case
-branching, not conditionals as such.
-
-ven-architecture: VEN/src/ follows Hexagonal + Clean Architecture. Dependency rule: inner rings NEVER import outer rings.
-
-  Ring map (outer → inner):
-    Adapters   : routes/, tasks/
-    Application: services/
-    Domain     : entities/, controller/
-    Infra      : assets/, simulator/, vtn.rs, controller/milp_planner/
-
-  Port obligations — use traits, never bypass with concrete types:
-    SimRosterPort / SimReadPort / HeadroomPort : services/routes → simulator, via simulator::SimHandle
-                       (only tasks/ hold the SimState lock; the tick and history sampler read SimState::to_sim_snapshot)
-    SolverPort       : services → controller/milp_planner (solve)
-    VtnPort          : services → vtn.rs (fetch programs/events/obligations)
-    AssetMilpContext : milp_planner accepts Vec<Box<dyn AssetMilpContext>> — NEVER import A_BAT/A_EV/A_HTR directly
-
-  Profile rule: no `use crate::profile` in entities/, controller/, or routes/. Profile values are
-  injected as typed parameter structs (e.g. BatteryParams) constructed in the application/infra layer.
-
-  File size: no VEN/src/ file > 500 production lines; tasks/ files must stay < 200
-  production lines. "Production lines" = non-blank lines excluding #[cfg(test)] blocks
-  and whole test-only files/directories (e.g. controller/milp_planner/tests/) — this is
-  exactly what ci/audits/audit_file_sizes.py measures; run it to check compliance.
-  The script's ALLOWLIST is empty and should stay that way. It once held
-  assets/mod.rs pending the enum→trait refactor; that refactor landed (AssetConfig
-  is gone) and the file is now 192/500 production lines, so the exception was
-  removed. Add an entry only for genuinely cohesive code a split would make worse,
-  and justify it in docs/plans/refactoring_backlog.md at the same time.
-
-  Verifiable invariants — run `python ci/audits/audit_ven_architecture.py` before any
-  VEN PR. It applies these rules to production code only (comments and
-  #[cfg(test)] stripped), which the raw greps below cannot do:
-    no `use crate::profile` in entities/, controller/, routes/
-    no `use crate::assets::` in controller/milp_planner/
-    no `use crate::assets::` in entities/
-    no `serde_json::Value` on vtn.rs's pub surface
-    no `crate::assets` or `crate::simulator` anywhere in controller/
-    no `SimState`, `ctx.sim` or roster-reading computation in services/ or routes/ (they use
-    `SimRosterPort`, `SimReadPort`, `HeadroomPort` via `simulator::SimHandle`)
-    no `Utc::now()` in entities/, controller/, services/, assets/, simulator/, state/ (the
-    adapters — routes/, tasks/, boot/ — read the clock once and pass `now` down)
-    no `.val("...")` string-key read of an asset's `state_values()` outside assets/ (declare a
-    typed `Asset` method, carried on `AssetSnapshot`)
-    no `crate::services` in assets/ or simulator/ (infra implements what the domain defines)
-    no `crate::vtn` or `crate::simulator` in entities/, services/ or state/ (infra types stay out;
-    a non-2xx VTN answer is `DomainError::VtnRejected`, sensor types live in `entities/sensor.rs`)
-    no `crate::vtn` in routes/ or tasks/ (the adapters reach the VTN through `VtnPort`, held as
-    `app_ctx::Vtn`, so a handler can be driven with `MockVtn`)
-    no request authenticated by hand (`bearer_auth(`, `basic_auth(`, `AUTHORIZATION`, `"Bearer `)
-    in the VEN, the BFF or `lab-core` outside `lab-core/src/vtn_auth.rs` — every VTN request goes
-    through `ClientCredentials::send`, which attaches the token and re-authenticates once
-    no inline unit conversion (seconds/Duration -> hours, kW x step -> kWh, frac -> %)
-    outside `entities/units.rs`, and no identifier ending `_w`: power is kW everywhere, the
-    simulated site meter included, so there is no watt quantity to name or convert
-    no handler taking the whole `AppCtx` (`State<AppCtx>`) in routes/ — extract the parts it uses,
-    each has an `impl FromRef<AppCtx>` in `app_ctx.rs`
-    no raw read of an incoming event value's number (`.numeric()`, `numeric_value(`,
-    `PayloadValue::Number`) — read it through `lab_core::wire_contract::PayloadReader`, which
-    applies what the event and its program declare
-    no asset kind in the planner core (`controller/milp_planner/`, `milp_interactions.rs`) or the
-    plan's wire types (`entities/plan.rs`): no `AssetKind`, `ids::ASSET_*`, per-kind pool slot or
-    `bat_`/`ev_`/`heat_`/`heater_` name — the planner reads only what each asset declares
-    (`AssetMilpContext`, `DeclaredAsset`), and the plan keys each asset's part by its id
-    an `AssetSolutionDetail` variant is matched only in its own `assets/<kind>_declared.rs`
-    no string literal with a run of 6+ spaces between words in production code: a lost `\`
-    line continuation (an edit script through a shell heredoc drops the backslash)
-
-  Reference: docs/architecture/VEN_ARCHITECTURE.md and
-  docs/architecture/module_dependency_graph.md
+explain: when the user asks for an explanation ("explain ...", "what does ... do", "why is ...", "how does
+... work"), including a side question inside an interview, follow this protocol without being told how.
+  1. Assume the user does not know the code: start from what the thing is for, then how it works.
+  2. Always give 1-2 examples from this project (a real file, value or situation from the current
+     discussion), not a textbook example. If the context has no fitting case, say so and build the closest
+     realistic one from it.
+  3. Explain every code element you mention (function, module, class, variable, flag, config key, file,
+     command) at first mention: its purpose, and its semantics (what it takes, returns or changes, what its
+     values mean). Never leave a name unexplained because it looks self-explanatory.
+  4. Stay on the question, at the depth asked; offer to go deeper instead of adding background.
+  5. Say what is inferred and not verified in the code; never present a guess as fact.

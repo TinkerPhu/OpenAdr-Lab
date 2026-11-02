@@ -379,6 +379,68 @@ Every build and test run costs minutes to hours on shared hardware, so start non
 - A run lost to the environment (killed shell, restarted WSL, a lock held elsewhere) is understood
   before it is started again.
 
+### Host locks, checkouts and builds
+
+Node1, Node2, Node3 and the local WSL instance are shared between parallel sessions and worktrees.
+`ci/locks/docker_host_lock.sh` (docker hosts) and `ci/locks/wsl_lock.sh` (WSL) arbitrate.
+
+- **Lease lock.** Before any docker build or test run on a host, or any large WSL cargo command:
+  `bash ci/locks/docker_host_lock.sh acquire -m "<branch>: <what>" [-l MIN]` and hold it for the whole
+  sequence; `release` at the end. `-l` is the acquirer's own lease in minutes (default 60 for a host, 20
+  for WSL), stored in the lock as a UTC time; once it passes the lock counts as dead and the next
+  acquirer steals it. Pick it honestly. `refresh [-l MIN]` extends from now; `status` shows holder,
+  task and lease end. `acquire` blocks about 9 minutes and then exits 2: rerun it to keep waiting, and
+  tell the user if a lock stays held unusually long instead of bypassing it. `run_all_tests.sh` takes
+  and releases the host lock itself (`-l 180`) for remote docker suites.
+- **One lock per machine.** The lock is one fixed path on the target host, so every SSH alias of a
+  machine reaches the same one; the owner is checkout path plus `CLAUDE_CODE_SESSION_ID`. Target another
+  host with `LOCK_HOST=Node2` or `DOCKER_HOST=Node2 bash run_all_tests.sh ...`. `ci/locks/test_lease_lock.sh`
+  pins the behaviour. The WSL lock lives in WSL's `/tmp`: an idle shutdown of the WSL VM erases it.
+- **One checkout per host.** Each docker host has a single working tree at `/srv/docker/openadr_lab`
+  and `run_all_tests.sh` does NOT switch it to your branch: it tests whatever is checked out there and
+  never pulls. Under the lock, put the host on your branch and verify it:
+  `ssh <host> "cd /srv/docker/openadr_lab && git fetch -q origin && git checkout <branch> && git reset --hard origin/<branch> && git log --oneline -1"`.
+  Read the lock status in a separate step before touching a host's tree: never check out or reset a
+  tree unless the lock is free or yours. A run once tested main instead of the fix branch, and a "main
+  control run" tested the fix branch, because the host was left on the previous run's branch. After a
+  merge, return the host to main (`git checkout main && git pull`) and delete the merged branch.
+- **Parallelism.** Two sessions can work in parallel by taking different hosts; they cannot share one
+  (the second checkout pulls the tree out from under the first build, and both E2E runs would collide
+  on the compose project `openadr-test`). Prefer Node2 for build, test and E2E runs; Node1 also runs
+  the always-on VTN, BFF and VEN stack, so heavy builds there slow live services. Use Node1 only when
+  Node2 is unavailable or a test needs the production stack. Node2 and Node3 have the `tests`/`VTN`
+  sparse checkout and the openleadr-rs submodule, so all four suites run there.
+- **After a test run** the E2E runner container can outlive an aborted compose run and keep holding the
+  network: remove it by name and check that no test containers remain before releasing the lock.
+
+#### Build and deploy commands
+
+There is no compose file at the repository root and no service named `ven`; each stack has its own
+file and service names.
+
+| Stack | Directory (under `/srv/docker/openadr_lab`) | Services |
+|---|---|---|
+| Node1 VEN | `VEN` | `ven-1`, `ven-2`, `ven-3`, `ui` |
+| Node1 VTN | `VTN` | `db`, `lab-mqtt`, `vtn`, `bff`, `ui` |
+| Node2 VEN fleet | `VEN/scale_out/node2` | `ven-4` .. `ven-20` |
+
+`ssh <host> "cd /srv/docker/openadr_lab/<dir> && docker compose build <service>"`, and
+`docker compose up -d --build <service>` to deploy one VEN; redeploying one VEN restarts only that
+container. The runner's `ci-handoff.sh --deploy` (below) is the normal way to deploy.
+
+#### Local Rust through WSL
+
+Native Windows cargo lacks cmake and HiGHS, so local Rust goes through WSL. `cargo` lives in
+`~/.cargo/bin` and only a login shell puts it on `PATH`, and `echo $?` after a `| grep` reports grep's
+status, so run cargo from a script file and read its exit code, for example
+`MSYS_NO_PATHCONV=1 wsl bash -l /mnt/c/<path>/cargo.sh <log> <crate-dir> check --tests -j 2`
+where the script runs `cargo "$@" > "$log" 2>&1` and prints `EXIT=$?`. Always pass `-j 2`. A full run with
+HiGHS belongs on a docker host. A laptop with little RAM crashed under WSL cargo builds (pagefile
+exhaustion), so check free memory first
+(`Get-CimInstance Win32_OperatingSystem | % { "{0:N1} GB free" -f ($_.FreePhysicalMemory/1MB) }`) and
+wait or ask below about 1 GB. Take `bash ci/locks/wsl_lock.sh acquire -m "<branch>: <what>" -l N` for the
+whole sequence.
+
 ### On the host, by hand
 
 `run_all_tests.sh` runs on the docker host itself with `OPENADR_LAB_HOST=localhost` (or
