@@ -18,6 +18,7 @@ docs/*                          -
 wiki/*                          -
 openspec/*                      -
 .claude/*                       -
+.specify/*                      -
 experiments/*                   -
 .gitignore                      -
 jobs.json                       -

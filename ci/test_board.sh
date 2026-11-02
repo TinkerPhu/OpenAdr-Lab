@@ -114,6 +114,7 @@ check "a top-level non-md file runs everything"   "$ALL" "$(suites 'Makefile
 check "the repo's own tooling files run nothing"     ""     "$(suites '.gitignore
 jobs.json
 scripts/jobs.py
+.specify/memory/constitution.md
 ')"
 check "no changed file selects nothing"           ""  "$(suites '')"
 check "the reason lists path and rule"            "VEN/ui/a.tsx -> e2e" "$(printf 'VEN/ui/a.tsx
