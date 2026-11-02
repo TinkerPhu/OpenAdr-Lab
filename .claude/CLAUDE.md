@@ -1,3 +1,12 @@
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the active plan under
+docs/plans/ — entry point: docs/plans/strategic_roadmap.md (phase plans in
+docs/plans/roadmap/). The documentation content rule (current state + future
+visions only, with its exempt list) is recorded in
+docs/reference/DOCUMENTATION_STYLE.md.
+<!-- SPECKIT END -->
+
 one-concept-one-function (the rule above all others for code; older code and docs cite it as
 `generic-over-bespoke`): every concept this project computes has exactly ONE implementation, and
 every caller calls it. The recurring root cause of this project's bugs is the same logic living in
