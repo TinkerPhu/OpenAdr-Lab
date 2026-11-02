@@ -223,7 +223,7 @@ constitution.
 be cleared before Phase 0 research begins, and re-checked after Phase 1 design.
 Violations require an entry in the plan's Complexity Tracking table.
 
-Runtime development guidance is available in `.claude/CLAUDE.md` and
+Runtime development guidance is available in `CLAUDE.md` (project root) and
 `docs/reference/KEY_LEARNINGS.md`.
 
 **Version**: 1.1.0 | **Ratified**: 2026-03-13 | **Last Amended**: 2026-05-09
