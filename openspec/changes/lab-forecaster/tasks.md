@@ -1,7 +1,7 @@
 ## 1. Separate the code from VEN types into crate `lab-forecast` (every existing test unchanged and green after each step)
-- [ ] 1.1 Create crate `lab-forecast` (pinned semver deps, licence check); add to the workspace and the VEN
+- [ ] 1.1 Create crate `lab-forecast` beside `lab-core` (pinned semver deps, licence check); the VEN depends on it by path; add it to `VEN/Dockerfile` (COPY beside `lab-core`), the BFF/test compose contexts that copy `lab-core`, and `ci/runner.sh` / `ci/suites.map` so a change there runs the Rust suites
 - [ ] 1.2 Test first: `TickSource` trait (only `query_ticks`); the VEN's history store implements it; the learner's existing tests run against a mock `TickSource`
-- [ ] 1.3 Move the weather parse, `PvArrayGeometry`/`PvForecastParams`/`PvSnowParams`, `solar.rs`, `pv_snow.rs` (drop `ts_rs` from the moved code; keep the generated UI types in the VEN as thin wrappers)
+- [ ] 1.3 Move the weather parse, `PvArrayGeometry`/`PvForecastParams`/`PvSnowParams`, `solar.rs`, `pv_snow.rs`. The moved types keep their `ts_rs` derive (a proc-macro, no runtime cost) and stay listed in `VEN/src/ui_types.rs`, so no wrapper types are needed
 - [ ] 1.4 Move the learner and a plain `LearnedProfile` parameter struct; the VEN keeps the `AssetHeuristics` adapter
 - [ ] 1.5 Run `audit_ven_architecture.py`, `audit_duplication.py`, VEN unit tests and clippy; register any copy left over in `TECHNICAL_DEBTS.md`
 
