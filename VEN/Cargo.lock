@@ -1168,6 +1168,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-forecast"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2807,6 +2816,7 @@ dependencies = [
  "chrono",
  "good_lp",
  "lab-core",
+ "lab-forecast",
  "libc",
  "metrics",
  "metrics-exporter-prometheus",

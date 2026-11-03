@@ -12,6 +12,9 @@ edition = "2021"
 # series. Extracted so two services cannot answer the same question two ways
 # (D-06) -- the failure GB-48 records.
 lab-core = { path = "../lab-core" }
+# The exogenous forecasts (PV from weather, base load from history) and their MQTT payload, shared
+# with the lab-forecaster container (openspec/changes/lab-forecaster).
+lab-forecast = { path = "../lab-forecast" }
 openleadr-wire = { git = "https://github.com/TinkerPhu/openleadr-rs.git", rev = "da565b445cab8eb0e04e8476c756e2a3e009d312" }
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
@@ -80,4 +83,7 @@ codegen-units = 256
 opt-level = 3
 
 [profile.ci.package.lab-core]
+opt-level = 1
+
+[profile.ci.package.lab-forecast]
 opt-level = 1

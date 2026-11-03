@@ -44,6 +44,7 @@ tests/*ven-coverage*            cargo
 # Rust code the stack runs: the cargo tier, the stack builds, the restart tests
 VEN/*                           cargo,e2e,resilience
 lab-core/*                      cargo,e2e,resilience
+lab-forecast/*                  cargo,e2e,resilience
 VTN/bff/*                       cargo,e2e,resilience
 VTN/*                           e2e,resilience
 

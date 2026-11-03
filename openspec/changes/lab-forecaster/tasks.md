@@ -1,5 +1,5 @@
 ## 1. Separate the code from VEN types into crate `lab-forecast` (every existing test unchanged and green after each step)
-- [ ] 1.1 Create crate `lab-forecast` beside `lab-core` (pinned semver deps, licence check); the VEN depends on it by path; add it to `VEN/Dockerfile` (COPY beside `lab-core`), the BFF/test compose contexts that copy `lab-core`, and `ci/runner.sh` / `ci/suites.map` so a change there runs the Rust suites
+- [x] 1.1 Create crate `lab-forecast` beside `lab-core` (pinned semver deps, licence check); the VEN depends on it by path; add it to `VEN/Dockerfile` (COPY beside `lab-core`), the BFF/test compose contexts that copy `lab-core`, and `ci/runner.sh` / `ci/suites.map` so a change there runs the Rust suites
 - [ ] 1.2 Test first: `TickSource` trait (only `query_ticks`); the VEN's history store implements it; the learner's existing tests run against a mock `TickSource`
 - [ ] 1.3 Move the weather parse, `PvArrayGeometry`/`PvForecastParams`/`PvSnowParams`, `solar.rs`, `pv_snow.rs`. The moved types keep their `ts_rs` derive (a proc-macro, no runtime cost) and stay listed in `VEN/src/ui_types.rs`, so no wrapper types are needed
 - [ ] 1.4 Move the learner and a plain `LearnedProfile` parameter struct; the VEN keeps the `AssetHeuristics` adapter
@@ -28,4 +28,5 @@
 - [ ] 5.2 Use-case doc; update `forecasting_model.md` and `weather_forecast.md`
 - [ ] 5.3 Journal and KEY_LEARNINGS; `openspec validate lab-forecaster`
 - [ ] 5.4 Report to the coordination session: new card for the digest to read these topics and retire its VEN-REST read; the sign and unit mapping to the catalogue
-- [ ] 5.5 Wave into current-state docs and delete this change after the merge
+- [ ] 5.5 Before the first host run: `git sparse-checkout add lab-forecast` (and `forecaster`) on the Node hosts, with the user's go (the pre-flight in `run_all_tests.sh` aborts otherwise)
+- [ ] 5.6 Wave into current-state docs and delete this change after the merge

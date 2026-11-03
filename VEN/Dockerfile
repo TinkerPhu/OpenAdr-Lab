@@ -29,6 +29,8 @@ ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 COPY VEN/Cargo.toml VEN/Cargo.lock ./
 COPY lab-core/Cargo.toml /repo/lab-core/Cargo.toml
 COPY lab-core/src /repo/lab-core/src
+COPY lab-forecast/Cargo.toml /repo/lab-forecast/Cargo.toml
+COPY lab-forecast/src /repo/lab-forecast/src
 COPY VEN/src ./src
 COPY VEN/profiles ./profiles
 
@@ -48,7 +50,7 @@ ARG CARGO_PROFILE=release
 RUN --mount=type=cache,id=ven-cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=ven-cargo-git,target=/usr/local/cargo/git \
     --mount=type=cache,id=ven-target,target=/repo/VEN/target,sharing=locked \
-    find src /repo/lab-core/src -name '*.rs' -exec touch {} + \
+    find src /repo/lab-core/src /repo/lab-forecast/src -name '*.rs' -exec touch {} + \
     && cargo build --profile "$CARGO_PROFILE" && cp "target/$CARGO_PROFILE/ven-app" /ven-app
 
 FROM debian:bookworm-slim

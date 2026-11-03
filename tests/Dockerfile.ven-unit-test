@@ -51,6 +51,7 @@ WORKDIR /app
 # mounted at `/app/target` keeps its paths.
 COPY VEN/ ./
 COPY lab-core/ /lab-core/
+COPY lab-forecast/ /lab-forecast/
 
 # Keep parallelism low to avoid OOM linker failures on Node1
 # (linking HiGHS + aws-lc-rs simultaneously exceeds 1500 MiB).
@@ -62,6 +63,6 @@ ENV RUST_BACKTRACE=1
 # older than its artifacts and cargo reuses them (the CI runner checked a branch against main's
 # lab-core). Stamping them when the container starts makes every run compile what it was given;
 # a RUN step would not help, the layer cache replays it with the old times.
-ENTRYPOINT ["sh", "-c", "find /app/src /app/tests /app/benches /lab-core -name '*.rs' -exec touch {} + 2>/dev/null; exec \"$@\"", "--"]
+ENTRYPOINT ["sh", "-c", "find /app/src /app/tests /app/benches /lab-core /lab-forecast -name '*.rs' -exec touch {} + 2>/dev/null; exec \"$@\"", "--"]
 
 CMD ["cargo", "test", "--jobs", "2"]
