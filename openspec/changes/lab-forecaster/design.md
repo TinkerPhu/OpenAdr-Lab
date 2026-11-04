@@ -92,6 +92,16 @@ live status from another producer for the same site is retained and fresh; it lo
 declaration (unit, sign, quantity) or a non-numeric value (via `PayloadReader`), keeps its fallback, and
 records the rejection reason where its UI shows the source.
 
+**D14 First slice (R-81, user, 2026-11-04; build approach: user).** Before the full forecaster, the container
+publishes the PV forecast only: the series the VEN's REST plan serves today, per array plus the site total, with
+the final payload contract and the status topic, retained. It is built on the shared code (the PV part of
+`lab-forecast`: weather parse, `solar.rs`, `pv_snow.rs`, the payload constructor and validator), so the slice is
+already the final producer and nothing is retired later. The base-load learner, the VEN consumption with
+fallback, the UI surface and the accuracy scoring follow in the later slices. The advisor reads the topics over
+MQTT only (their best-time step), and the digest's read of the VEN REST plan is then removed on their side.
+Rejected: a publisher inside the VEN (a temporary second producer that would have to be retired, and it would
+publish the VEN's forecast rather than the container's).
+
 ## Risks / Trade-offs
 
 - Separating the code from VEN types touches many call sites: step 1 of the tasks keeps every existing test

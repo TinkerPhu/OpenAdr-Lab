@@ -1,3 +1,7 @@
+## Order (D14)
+Slice 1 (R-81): 1.3, 2.1, 3.1, 3.2 (PV and weather input only), 3.3, 3.5, 3.6, then a BDD scenario for the retained PV topics and the
+PV rows of 5.2. Slice 2: 1.2, 1.4, 3.4, base load. Slice 3: section 4 (VEN consumption). Each slice is handed to CI on its own.
+
 ## 1. Separate the code from VEN types into crate `lab-forecast` (every existing test unchanged and green after each step)
 - [x] 1.1 Create crate `lab-forecast` beside `lab-core` (pinned semver deps, licence check); the VEN depends on it by path; add it to `VEN/Dockerfile` (COPY beside `lab-core`), the BFF/test compose contexts that copy `lab-core`, and `ci/runner.sh` / `ci/suites.map` so a change there runs the Rust suites
 - [ ] 1.2 Test first: `TickSource` trait (only `query_ticks`); the VEN's history store implements it; the learner's existing tests run against a mock `TickSource`
