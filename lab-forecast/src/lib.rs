@@ -5,3 +5,9 @@
 //! (`openspec/changes/lab-forecaster`). Reads: nothing itself; callers inject weather, measurements
 //! and a `TickSource`. Must never: touch a clock, a socket or a file, or import a VEN type. The VEN
 //! asset and the forecaster container both call these functions; neither keeps a copy.
+
+pub mod pv_params;
+pub mod pv_snow;
+pub mod solar;
+pub mod weather;
+pub mod weather_wire;

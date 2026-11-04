@@ -1,0 +1,846 @@
+//! Solar position + PV transposition physics — see
+//! `docs/architecture/weather_forecast.md` ("The transposition problem")
+//! for the full derivation. Pure math, no I/O, no `crate::profile` import.
+//!
+//! `fresh_weather_pv_series` (below) is the one staleness gate on weather PV: the
+//! sim tick hands its series to the live `PvInverter` (`tasks::sim_tick::feeds`), which is
+//! the PV's own forecast and so the planner's (R-50, W3). `weather_pv_forecast_series` is
+//! the one translation of a `WeatherForecast` into PV output, shared with `GET /weather`.
+
+use chrono::{DateTime, Datelike, Timelike, Utc};
+use ts_rs::TS;
+
+use crate::pv_params::{PvArrayGeometry, PvForecastParams};
+use crate::pv_snow::{snow_coverage_trajectory, PvSnowState};
+use crate::weather::{GeoPosition, WeatherForecast, WeatherForecastSample};
+
+/// Sun position at a given instant and location.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SolarPosition {
+    pub elevation_deg: f64,
+    pub azimuth_deg: f64,
+}
+
+fn julian_date(t: DateTime<Utc>) -> f64 {
+    // Standard low-precision solar-position formula (accurate to a fraction
+    // of a degree — plenty for hourly PV forecasting).
+    let year = t.year() as f64;
+    let month = t.month() as f64;
+    let day = t.day() as f64
+        + t.hour() as f64 / 24.0
+        + t.minute() as f64 / 1440.0
+        + t.second() as f64 / 86400.0;
+    let (y, m) = if month <= 2.0 {
+        (year - 1.0, month + 12.0)
+    } else {
+        (year, month)
+    };
+    let a = (y / 100.0).floor();
+    let b = 2.0 - a + (a / 4.0).floor();
+    (365.25 * (y + 4716.0)).floor() + (30.6001 * (m + 1.0)).floor() + day + b - 1524.5
+}
+
+/// Solar elevation/azimuth at time `t` for a given geo position.
+///
+/// The elevation path is ported to TypeScript in `lab-ui/src/solarPosition.ts` so the
+/// VTN Fleet charts can shade night. Accepted as a second copy (decision 2026-10-06); a
+/// change to the maths here must be mirrored there, and both are pinned to the same
+/// closed-form geometry by their tests.
+pub fn solar_position(pos: &GeoPosition, t: DateTime<Utc>) -> SolarPosition {
+    let n = julian_date(t) - 2451545.0;
+    let l = 280.460 + 0.9856474 * n;
+    let g = (357.528 + 0.9856003 * n).to_radians();
+    let lambda_sun = l + 1.915 * g.sin() + 0.020 * (2.0 * g).sin();
+    let epsilon = (23.439 - 0.0000004 * n).to_radians();
+    let lambda_rad = lambda_sun.to_radians();
+    let lat_rad = pos.latitude_deg.to_radians();
+
+    let alpha = (epsilon.cos() * lambda_rad.sin()).atan2(lambda_rad.cos());
+    let delta = (epsilon.sin() * lambda_rad.sin()).asin();
+    let theta = ((280.46061837 + 360.98564736629 * n + pos.longitude_deg) % 360.0).to_radians();
+    let h_angle = theta - alpha;
+
+    let elevation = (lat_rad.sin() * delta.sin() + lat_rad.cos() * delta.cos() * h_angle.cos())
+        .asin()
+        .to_degrees();
+    let azimuth_raw =
+        (-h_angle.sin()).atan2(delta.tan() * lat_rad.cos() - lat_rad.sin() * h_angle.cos());
+    let azimuth = azimuth_raw.to_degrees();
+    let azimuth = if azimuth < 0.0 {
+        azimuth + 360.0
+    } else {
+        azimuth
+    };
+
+    SolarPosition {
+        elevation_deg: elevation,
+        azimuth_deg: azimuth,
+    }
+}
+
+fn unit_vector(elevation_deg: f64, azimuth_deg: f64) -> (f64, f64, f64) {
+    let e = elevation_deg.to_radians();
+    let a = azimuth_deg.to_radians();
+    (e.cos() * a.cos(), e.cos() * a.sin(), e.sin())
+}
+
+/// Kasten-Young air mass from solar elevation (dimensionless; large near
+/// the horizon, ~1.0 at zenith). Returns `f64::INFINITY`-like large value
+/// when the sun is below the horizon — callers must gate on elevation > 0.
+fn air_mass(elevation_deg: f64) -> f64 {
+    1.0 / (elevation_deg.to_radians().sin() + 0.50572 * (6.07995 + elevation_deg).powf(-1.6364))
+}
+
+/// Empirical diffuse-fraction curve (0..~0.27), from zenith angle.
+fn diffuse_fraction(elevation_deg: f64) -> f64 {
+    let zenith_deg = 90.0 - elevation_deg;
+    0.271 - 0.294 * (-0.036 * zenith_deg).exp()
+}
+
+/// Clear-sky irradiance model, run once per plane (horizontal or panel):
+/// direct-beam transmittance projected through the incidence-angle cosine,
+/// plus an isotropic-on-zenith diffuse term. Returns 0.0 when the sun is at
+/// or below the horizon, or when the incidence angle exceeds 90° for the
+/// direct term (diffuse still applies).
+fn clear_sky_irradiance_w_m2(
+    sun: &SolarPosition,
+    plane_elevation_deg: f64,
+    plane_azimuth_deg: f64,
+) -> f64 {
+    if sun.elevation_deg <= 0.0 {
+        return 0.0;
+    }
+    const I0_W_M2: f64 = 1361.0; // extraterrestrial solar constant
+    const K: f64 = 0.21; // atmospheric attenuation coefficient
+
+    let sun_vec = unit_vector(sun.elevation_deg, sun.azimuth_deg);
+    let plane_vec = unit_vector(plane_elevation_deg, plane_azimuth_deg);
+    let incidence_cos = sun_vec.0 * plane_vec.0 + sun_vec.1 * plane_vec.1 + sun_vec.2 * plane_vec.2;
+
+    let am = air_mass(sun.elevation_deg);
+    let kn = (-K * am).exp();
+    let kd = diffuse_fraction(sun.elevation_deg);
+
+    let direct = if incidence_cos > 0.0 {
+        I0_W_M2 * kn * incidence_cos
+    } else {
+        0.0
+    };
+    let diffuse = I0_W_M2 * kd * sun.elevation_deg.to_radians().sin();
+    direct + diffuse
+}
+
+/// Panel-normal orientation as (elevation, azimuth) of its normal vector,
+/// matching the convention used throughout the design doc: a flat/horizontal
+/// panel has a normal pointing straight up (elevation 90°); tilt reduces it.
+fn panel_normal(panel: &PvArrayGeometry) -> (f64, f64) {
+    (90.0 - panel.tilt_deg, panel.azimuth_deg)
+}
+
+/// Transpose a supplier's Global Horizontal Irradiance forecast onto the
+/// panel's actual tilted plane via the clear-sky-index method: run the
+/// clear-sky model for both horizontal and panel planes at the same instant,
+/// take the forecast-to-clear-sky ratio on the horizontal plane, and apply
+/// that ratio to the panel-plane clear-sky value.
+pub fn poa_irradiance_w_m2(ghi_w_m2: f64, sun: &SolarPosition, panel: &PvArrayGeometry) -> f64 {
+    if sun.elevation_deg <= 0.0 {
+        return 0.0;
+    }
+    let ghi_clearsky = clear_sky_irradiance_w_m2(sun, 90.0, 0.0); // horizontal: normal points straight up
+    if ghi_clearsky <= 0.0 {
+        return 0.0;
+    }
+    let (panel_elev, panel_az) = panel_normal(panel);
+    let poa_clearsky = clear_sky_irradiance_w_m2(sun, panel_elev, panel_az);
+    let clear_sky_index = (ghi_w_m2 / ghi_clearsky).clamp(0.0, 1.5);
+    (clear_sky_index * poa_clearsky).max(0.0)
+}
+
+/// NOCT (Nominal Operating Cell Temperature) model: estimates PV cell
+/// temperature from ambient air temperature and plane-of-array irradiance.
+pub fn cell_temperature_c(air_temp_c: f64, poa_w_m2: f64, noct_c: f64) -> f64 {
+    air_temp_c + (noct_c - 20.0) / 800.0 * poa_w_m2
+}
+
+/// Compose the full weather-sourced PV forecast for one sample: transposition
+/// → DC power → cell-temperature derate → performance ratio → AC clamp →
+/// snow-cover override (applied last, per the design doc).
+pub fn forecast_ac_kw(
+    params: &PvForecastParams,
+    sample: &WeatherForecastSample,
+    t: DateTime<Utc>,
+    snow_state: PvSnowState,
+) -> f64 {
+    let sun = solar_position(&params.geometry.location, t);
+    let poa = poa_irradiance_w_m2(sample.ghi_w_m2, &sun, &params.geometry);
+
+    let dc_kw = (poa / 1000.0) * params.rated_kwp;
+
+    let cell_temp = cell_temperature_c(sample.temperature_c, poa, params.noct_c);
+    let temp_derate = 1.0 + params.temp_coeff_pct_per_c / 100.0 * (cell_temp - 25.0);
+    let derated_kw = (dc_kw * temp_derate.max(0.0)).max(0.0);
+
+    let ac_kw = derated_kw * params.performance_ratio;
+    let clamped_kw = params
+        .ac_limit_kw
+        .map(|limit| ac_kw.min(limit))
+        .unwrap_or(ac_kw);
+
+    if snow_state.covered {
+        clamped_kw * params.snow.covered_output_fraction
+    } else {
+        clamped_kw
+    }
+}
+
+/// One hour of the weather-sourced PV forecast — `forecast_ac_kw`'s output
+/// plus the snow-cover flag that produced it, tied to the forecast sample's
+/// own timestamp.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, TS)]
+pub struct WeatherPvForecastSlot {
+    pub valid_at: DateTime<Utc>,
+    pub forecast_ac_kw: f64,
+    pub snow_covered: bool,
+    /// What the weather predicts for this hour with no snow on the panel: the reference the
+    /// panel's real output is compared with to see whether it is covered (R-55).
+    pub snow_free_ac_kw: f64,
+    /// Whether the air this hour is cold enough for snow to lie: below `clear_threshold_c`, the exact
+    /// complement of the melt condition in `PvSnowState::step`.
+    pub snow_possible: bool,
+}
+
+/// Compute the full weather-sourced PV forecast series over a
+/// `WeatherForecast`'s own horizon: one `WeatherPvForecastSlot` per sample.
+/// The snow-cover trajectory folds forward through `forecast.samples` from
+/// `initial_snow`: the PV asset's own observed state (`PvSnowState::observed`,
+/// R-55), or `PvSnowState::default()` when there is no measurement to observe.
+/// The forecast's first sample (normally `age_h=0`, the "fact" hour) can still
+/// start coverage if it snowed within that hour.
+///
+/// This is the single source of truth for "how a `WeatherForecast` becomes a
+/// PV forecast" — `GET /weather` (read-only diagnostic) and the live PV's weather input (via
+/// `fresh_weather_pv_series`, R-50) call this same function rather than re-deriving the
+/// transposition/snow-override loop.
+pub fn weather_pv_forecast_series(
+    params: &PvForecastParams,
+    forecast: &WeatherForecast,
+    initial_snow: PvSnowState,
+) -> Vec<WeatherPvForecastSlot> {
+    let snow_states = snow_coverage_trajectory(initial_snow, &params.snow, &forecast.samples);
+    forecast
+        .samples
+        .iter()
+        .zip(snow_states)
+        .map(|(sample, snow_state)| WeatherPvForecastSlot {
+            valid_at: sample.valid_at,
+            forecast_ac_kw: forecast_ac_kw(params, sample, sample.valid_at, snow_state),
+            snow_covered: snow_state.covered,
+            snow_free_ac_kw: forecast_ac_kw(
+                params,
+                sample,
+                sample.valid_at,
+                PvSnowState::default(),
+            ),
+            snow_possible: sample.temperature_c < params.snow.clear_threshold_c,
+        })
+        .collect()
+}
+
+/// The full "should the PV trust this weather feed right now" decision, R-50's staleness
+/// gate — `None` (the PV falls back to its own irradiance model) unless a `PvForecastParams`
+/// config exists, a forecast has actually been received, AND that forecast is still fresh;
+/// otherwise the `weather_pv_forecast_series`. Pure — the only I/O (fetching `latest()` from
+/// `WeatherForecastPort`) happens in the caller, so this three-way decision is unit-testable
+/// without a live port.
+pub fn fresh_weather_pv_series(
+    params: Option<&PvForecastParams>,
+    forecast: Option<&WeatherForecast>,
+    now: DateTime<Utc>,
+    staleness_threshold: chrono::Duration,
+    initial_snow: PvSnowState,
+) -> Option<Vec<WeatherPvForecastSlot>> {
+    let params = params?;
+    let forecast = forecast?;
+    if !forecast.is_fresh(now, staleness_threshold) {
+        return None;
+    }
+    Some(weather_pv_forecast_series(params, forecast, initial_snow))
+}
+
+/// Align a `weather_pv_forecast_series` (hourly) onto an arbitrary plan slot
+/// grid (which may be finer-grained near-term): each `slot_start` is linearly
+/// interpolated between the two bracketing series entries by `valid_at` (a
+/// continuous blend, not a step at whichever hourly sample happens to be
+/// nearest). Times before the first sample or after the last clamp to that
+/// sample's value — no extrapolation. Used by the planner's own PV input
+/// (R-50) — the same series that feeds `GET /weather`, just resampled onto
+/// the solver's slot boundaries instead of the raw forecast's own hourly
+/// ones. Returns an all-zero vec if `series` is empty.
+pub fn weather_pv_kw_for_slots(
+    series: &[WeatherPvForecastSlot],
+    slot_starts: &[DateTime<Utc>],
+) -> Vec<f64> {
+    if series.is_empty() {
+        return vec![0.0; slot_starts.len()];
+    }
+    let mut sorted: Vec<&WeatherPvForecastSlot> = series.iter().collect();
+    sorted.sort_by_key(|s| s.valid_at); // defensive — don't assume publisher order
+    slot_starts
+        .iter()
+        .map(|t| interpolate_kw(&sorted, *t, |s| s.forecast_ac_kw))
+        .collect()
+}
+
+/// What the weather says about the panel at `t`, for `PvSnowState::observed`: the snow-free
+/// output interpolated like the forecast itself, and whether the hour containing `t` is cold
+/// enough for snow. `None` for an empty series.
+pub fn weather_snow_reference_at(
+    series: &[WeatherPvForecastSlot],
+    t: DateTime<Utc>,
+) -> Option<(f64, bool)> {
+    let mut sorted: Vec<&WeatherPvForecastSlot> = series.iter().collect();
+    sorted.sort_by_key(|s| s.valid_at);
+    let first = sorted.first()?;
+    let at = sorted
+        .partition_point(|s| s.valid_at <= t)
+        .saturating_sub(1);
+    let possible = sorted.get(at).unwrap_or(first).snow_possible;
+    Some((interpolate_kw(&sorted, t, |s| s.snow_free_ac_kw), possible))
+}
+
+/// Linearly interpolate the `value` of the two `sorted` entries bracketing `t`. `sorted` must be
+/// non-empty and ascending by `valid_at`. Clamps to the first/last value outside the series'
+/// range. One interpolation for every per-slot quantity (the forecast, its snow-free twin).
+fn interpolate_kw(
+    sorted: &[&WeatherPvForecastSlot],
+    t: DateTime<Utc>,
+    value: impl Fn(&WeatherPvForecastSlot) -> f64,
+) -> f64 {
+    if t <= sorted[0].valid_at {
+        return value(sorted[0]);
+    }
+    let last = sorted.len() - 1;
+    if t >= sorted[last].valid_at {
+        return value(sorted[last]);
+    }
+    let idx = sorted.partition_point(|s| s.valid_at <= t);
+    let (a, b) = (sorted[idx - 1], sorted[idx]);
+    let span_s = (b.valid_at - a.valid_at).num_seconds() as f64;
+    let frac = (t - a.valid_at).num_seconds() as f64 / span_s;
+    value(a) + (value(b) - value(a)) * frac
+}
+
+// ── PV generation ceiling: one definition, every consumer ────────────────────
+
+/// Natural sin-model irradiance [0,1] at `ts`, with no user offset applied.
+/// Domain-owned single copy — `assets::PvInverter` (infra) and
+/// `controller::milp_planner::inputs` (application) previously each kept
+/// their own mirrored implementation of this identical formula.
+pub fn natural_irradiance_at(ts: DateTime<Utc>) -> f64 {
+    let hour = ts.hour() as f64 + ts.minute() as f64 / 60.0;
+    if (6.0..=18.0).contains(&hour) {
+        let angle = std::f64::consts::PI * (hour - 6.0) / 12.0;
+        angle.sin().max(0.0)
+    } else {
+        0.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pv_params::PvSnowParams;
+    use chrono::TimeZone;
+
+    // Zunzgen, the site used throughout the design doc.
+    const ZUNZGEN: GeoPosition = GeoPosition {
+        latitude_deg: 47.4491,
+        longitude_deg: 7.8081,
+    };
+
+    fn south_facing_tilted() -> PvArrayGeometry {
+        PvArrayGeometry {
+            location: ZUNZGEN,
+            tilt_deg: 30.0,
+            azimuth_deg: 180.0, // south
+        }
+    }
+
+    fn horizontal() -> PvArrayGeometry {
+        PvArrayGeometry {
+            location: ZUNZGEN,
+            tilt_deg: 0.0,
+            azimuth_deg: 0.0,
+        }
+    }
+
+    #[test]
+    fn solar_position_summer_solstice_noon_elevation_near_expected() {
+        // 2026-06-21 ~11:41 UTC ≈ solar noon at this longitude.
+        let t = Utc.with_ymd_and_hms(2026, 6, 21, 11, 41, 0).unwrap();
+        let pos = solar_position(&ZUNZGEN, t);
+        // At 47.45°N on the summer solstice, solar noon elevation ≈ 90 - lat + 23.44 ≈ 66°.
+        assert!(
+            (pos.elevation_deg - 66.0).abs() < 3.0,
+            "expected ~66°, got {}",
+            pos.elevation_deg
+        );
+    }
+
+    #[test]
+    fn solar_position_winter_solstice_noon_elevation_near_expected() {
+        let t = Utc.with_ymd_and_hms(2026, 12, 21, 11, 41, 0).unwrap();
+        let pos = solar_position(&ZUNZGEN, t);
+        // ≈ 90 - lat - 23.44 ≈ 19°.
+        assert!(
+            (pos.elevation_deg - 19.0).abs() < 3.0,
+            "expected ~19°, got {}",
+            pos.elevation_deg
+        );
+    }
+
+    #[test]
+    fn solar_position_midnight_is_below_horizon() {
+        let t = Utc.with_ymd_and_hms(2026, 6, 21, 23, 0, 0).unwrap();
+        let pos = solar_position(&ZUNZGEN, t);
+        assert!(pos.elevation_deg < 0.0);
+    }
+
+    #[test]
+    fn tilted_south_panel_exceeds_horizontal_near_solstice_noon() {
+        let t = Utc.with_ymd_and_hms(2026, 6, 21, 11, 41, 0).unwrap();
+        let sun = solar_position(&ZUNZGEN, t);
+        let tilted = poa_irradiance_w_m2(600.0, &sun, &south_facing_tilted());
+        let flat = poa_irradiance_w_m2(600.0, &sun, &horizontal());
+        assert!(
+            tilted > flat,
+            "tilted={tilted} should exceed flat={flat} near solstice noon"
+        );
+    }
+
+    #[test]
+    fn panel_facing_away_from_sun_gets_only_diffuse() {
+        // Sun roughly south at midday; a panel with normal pointing straight
+        // down toward the sun's *anti*-direction (north-facing, steep tilt)
+        // should have an incidence angle > 90° and therefore zero direct term
+        // — but poa_irradiance_w_m2 (via the clear-sky-index) can't isolate
+        // the direct component in isolation, so assert on the lower-level
+        // clear_sky_irradiance_w_m2 building block instead.
+        let t = Utc.with_ymd_and_hms(2026, 6, 21, 11, 41, 0).unwrap();
+        let sun = solar_position(&ZUNZGEN, t);
+        let north_facing_steep = PvArrayGeometry {
+            location: ZUNZGEN,
+            tilt_deg: 90.0,
+            azimuth_deg: 0.0, // north
+        };
+        let (elev, az) = panel_normal(&north_facing_steep);
+        let sun_vec = unit_vector(sun.elevation_deg, sun.azimuth_deg);
+        let panel_vec = unit_vector(elev, az);
+        let incidence_cos =
+            sun_vec.0 * panel_vec.0 + sun_vec.1 * panel_vec.1 + sun_vec.2 * panel_vec.2;
+        assert!(incidence_cos < 0.0, "expected incidence angle > 90°");
+    }
+
+    #[test]
+    fn poa_irradiance_zero_at_night() {
+        let t = Utc.with_ymd_and_hms(2026, 6, 21, 23, 0, 0).unwrap();
+        let sun = solar_position(&ZUNZGEN, t);
+        assert_eq!(poa_irradiance_w_m2(0.0, &sun, &south_facing_tilted()), 0.0);
+    }
+
+    #[test]
+    fn cell_temperature_equals_air_temp_at_zero_irradiance() {
+        assert_eq!(cell_temperature_c(10.0, 0.0, 45.0), 10.0);
+    }
+
+    #[test]
+    fn cell_temperature_equals_noct_at_noct_reference_conditions() {
+        // NOCT is defined at 800 W/m² POA, 20°C air temperature.
+        let t = cell_temperature_c(20.0, 800.0, 45.0);
+        assert!((t - 45.0).abs() < 1e-9);
+    }
+
+    fn default_forecast_params() -> crate::pv_params::PvForecastParams {
+        crate::pv_params::PvForecastParams {
+            rated_kwp: 10.0,
+            geometry: south_facing_tilted(),
+            performance_ratio: 0.87,
+            temp_coeff_pct_per_c: -0.35,
+            noct_c: 45.0,
+            ac_limit_kw: None,
+            snow: PvSnowParams::default(),
+        }
+    }
+
+    fn sample_at(
+        ghi_w_m2: f64,
+        temperature_c: f64,
+        valid_at: DateTime<Utc>,
+    ) -> WeatherForecastSample {
+        WeatherForecastSample {
+            valid_at,
+            age_h: 1,
+            temperature_c,
+            ghi_w_m2,
+            wind_speed_kmh: None,
+            rain_prob_pct: None,
+            new_snowfall_cm: None,
+            sky_condition: None,
+            irradiance_variability: None,
+        }
+    }
+
+    #[test]
+    fn forecast_ac_kw_zero_at_night() {
+        let t = Utc.with_ymd_and_hms(2026, 6, 21, 23, 0, 0).unwrap();
+        let s = sample_at(0.0, 15.0, t);
+        let kw = forecast_ac_kw(&default_forecast_params(), &s, t, PvSnowState::default());
+        assert_eq!(kw, 0.0);
+    }
+
+    #[test]
+    fn forecast_ac_kw_non_decreasing_in_ghi() {
+        let t = Utc.with_ymd_and_hms(2026, 6, 21, 11, 41, 0).unwrap();
+        let params = default_forecast_params();
+        let low = forecast_ac_kw(
+            &params,
+            &sample_at(200.0, 20.0, t),
+            t,
+            PvSnowState::default(),
+        );
+        let high = forecast_ac_kw(
+            &params,
+            &sample_at(800.0, 20.0, t),
+            t,
+            PvSnowState::default(),
+        );
+        assert!(high >= low, "high={high} should be >= low={low}");
+    }
+
+    #[test]
+    fn forecast_ac_kw_clamps_to_ac_limit() {
+        let t = Utc.with_ymd_and_hms(2026, 6, 21, 11, 41, 0).unwrap();
+        let mut params = default_forecast_params();
+        params.ac_limit_kw = Some(1.0);
+        let s = sample_at(900.0, 20.0, t);
+        let kw = forecast_ac_kw(&params, &s, t, PvSnowState::default());
+        assert!(kw <= 1.0 + 1e-9);
+    }
+
+    #[test]
+    fn forecast_ac_kw_performance_ratio_is_linear_multiplier() {
+        let t = Utc.with_ymd_and_hms(2026, 6, 21, 11, 41, 0).unwrap();
+        let mut params = default_forecast_params();
+        params.performance_ratio = 0.80;
+        let s = sample_at(500.0, 20.0, t);
+        let full = forecast_ac_kw(&params, &s, t, PvSnowState::default());
+        params.performance_ratio = 0.40;
+        let half = forecast_ac_kw(&params, &s, t, PvSnowState::default());
+        assert!((full - 2.0 * half).abs() < 1e-9, "full={full} half={half}");
+    }
+
+    #[test]
+    fn forecast_ac_kw_snow_covered_overrides_high_irradiance() {
+        let t = Utc.with_ymd_and_hms(2026, 6, 21, 11, 41, 0).unwrap();
+        let params = default_forecast_params();
+        let s = sample_at(900.0, 20.0, t);
+        let covered = PvSnowState { covered: true };
+        let kw = forecast_ac_kw(&params, &s, t, covered);
+        let uncovered_kw = forecast_ac_kw(&params, &s, t, PvSnowState::default());
+        assert!(kw < uncovered_kw);
+        assert!((kw - uncovered_kw * params.snow.covered_output_fraction).abs() < 1e-9);
+    }
+
+    // ── weather_pv_forecast_series ───────────────────────────────────────────
+
+    fn make_forecast(samples: Vec<WeatherForecastSample>) -> WeatherForecast {
+        let fetched_at = samples[0].valid_at;
+        WeatherForecast {
+            source_id: "test".into(),
+            location: ZUNZGEN,
+            fetched_at,
+            samples,
+        }
+    }
+
+    #[test]
+    fn weather_pv_forecast_series_length_matches_samples() {
+        let params = default_forecast_params();
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 6, 0, 0).unwrap();
+        let samples = vec![
+            sample_at(200.0, 15.0, t0),
+            sample_at(400.0, 17.0, t0 + chrono::Duration::hours(1)),
+            sample_at(600.0, 19.0, t0 + chrono::Duration::hours(2)),
+        ];
+        let forecast = make_forecast(samples.clone());
+        let series = weather_pv_forecast_series(&params, &forecast, PvSnowState::default());
+        assert_eq!(series.len(), samples.len());
+        for (slot, sample) in series.iter().zip(&samples) {
+            assert_eq!(slot.valid_at, sample.valid_at);
+        }
+    }
+
+    #[test]
+    fn weather_pv_forecast_series_snow_covered_matches_direct_trajectory() {
+        let params = default_forecast_params();
+        let t0 = Utc.with_ymd_and_hms(2026, 1, 1, 6, 0, 0).unwrap();
+        let mut snowy = sample_at(300.0, -3.0, t0);
+        snowy.new_snowfall_cm = Some(2.0); // above the default trigger
+        let cold = sample_at(300.0, -2.0, t0 + chrono::Duration::hours(1));
+        let samples = vec![snowy, cold];
+        let forecast = make_forecast(samples.clone());
+
+        let series = weather_pv_forecast_series(&params, &forecast, PvSnowState::default());
+        let expected_states = crate::pv_snow::snow_coverage_trajectory(
+            PvSnowState::default(),
+            &params.snow,
+            &samples,
+        );
+        for (slot, expected) in series.iter().zip(&expected_states) {
+            assert_eq!(slot.snow_covered, expected.covered);
+        }
+        assert!(series[0].snow_covered, "fresh snowfall should cover slot 0");
+    }
+
+    #[test]
+    fn weather_pv_forecast_series_kw_matches_direct_forecast_ac_kw_call() {
+        let params = default_forecast_params();
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 11, 0, 0).unwrap();
+        let samples = vec![sample_at(500.0, 20.0, t0)];
+        let forecast = make_forecast(samples.clone());
+
+        let series = weather_pv_forecast_series(&params, &forecast, PvSnowState::default());
+        let direct = forecast_ac_kw(&params, &samples[0], t0, PvSnowState::default());
+        assert!((series[0].forecast_ac_kw - direct).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_panel_observed_covered_stays_covered_through_a_sunny_cold_forecast() {
+        // R-55: no snowfall in the forecast, but the panel is covered NOW (observed), and the air
+        // stays below the melt threshold: the forecast must not promise sun the panel cannot use.
+        let params = default_forecast_params();
+        let t0 = Utc.with_ymd_and_hms(2026, 1, 15, 9, 0, 0).unwrap();
+        let samples: Vec<_> = (0..3)
+            .map(|h| sample_at(500.0, -3.0, t0 + chrono::Duration::hours(h)))
+            .collect();
+        let forecast = make_forecast(samples);
+
+        let guessed = weather_pv_forecast_series(&params, &forecast, PvSnowState::default());
+        let observed =
+            weather_pv_forecast_series(&params, &forecast, PvSnowState { covered: true });
+        assert!(guessed
+            .iter()
+            .all(|s| !s.snow_covered && s.forecast_ac_kw > 0.0));
+        assert!(observed.iter().all(|s| s.snow_covered));
+        assert!(observed.iter().all(|s| s.forecast_ac_kw < 1e-9));
+        // the snow-free reference is untouched by the snow state
+        for (a, b) in guessed.iter().zip(&observed) {
+            assert!((a.snow_free_ac_kw - b.snow_free_ac_kw).abs() < 1e-12);
+            assert!(a.snow_free_ac_kw > 0.0);
+        }
+    }
+
+    #[test]
+    fn an_observed_covered_panel_still_clears_when_the_forecast_warms_up() {
+        let params = default_forecast_params();
+        let t0 = Utc.with_ymd_and_hms(2026, 1, 15, 9, 0, 0).unwrap();
+        let samples = vec![
+            sample_at(500.0, -3.0, t0),
+            sample_at(500.0, 3.0, t0 + chrono::Duration::hours(1)), // above the 1.5 degC melt
+        ];
+        let series = weather_pv_forecast_series(
+            &params,
+            &make_forecast(samples),
+            PvSnowState { covered: true },
+        );
+        assert!(series[0].snow_covered);
+        assert!(!series[1].snow_covered);
+        assert!(series[1].forecast_ac_kw > 0.0);
+    }
+
+    #[test]
+    fn weather_snow_reference_interpolates_snow_free_power_and_reads_the_hours_temperature() {
+        let t0 = Utc.with_ymd_and_hms(2026, 1, 15, 9, 0, 0).unwrap();
+        let slot = |h: i64, kw: f64, possible: bool| WeatherPvForecastSlot {
+            valid_at: t0 + chrono::Duration::hours(h),
+            forecast_ac_kw: 0.0,
+            snow_covered: true,
+            snow_free_ac_kw: kw,
+            snow_possible: possible,
+        };
+        let series = vec![slot(0, 1.0, true), slot(1, 3.0, false)];
+        let (kw, possible) =
+            weather_snow_reference_at(&series, t0 + chrono::Duration::minutes(30)).unwrap();
+        assert!((kw - 2.0).abs() < 1e-9);
+        assert!(
+            possible,
+            "the hour containing t is the one that started at t0"
+        );
+        assert_eq!(weather_snow_reference_at(&[], t0), None);
+    }
+
+    // ── weather_pv_kw_for_slots ───────────────────────────────────────────────
+
+    fn two_sample_series(t0: DateTime<Utc>) -> Vec<WeatherPvForecastSlot> {
+        vec![
+            WeatherPvForecastSlot {
+                valid_at: t0,
+                forecast_ac_kw: 1.0,
+                snow_covered: false,
+                snow_free_ac_kw: 1.0,
+                snow_possible: false,
+            },
+            WeatherPvForecastSlot {
+                valid_at: t0 + chrono::Duration::hours(1),
+                forecast_ac_kw: 2.0,
+                snow_covered: false,
+                snow_free_ac_kw: 2.0,
+                snow_possible: false,
+            },
+        ]
+    }
+
+    #[test]
+    fn weather_pv_kw_for_slots_exact_sample_returns_exact_value() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 6, 0, 0).unwrap();
+        let series = two_sample_series(t0);
+        let kw = weather_pv_kw_for_slots(&series, &[t0, t0 + chrono::Duration::hours(1)]);
+        assert_eq!(kw, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn weather_pv_kw_for_slots_interpolates_linearly_between_samples() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 6, 0, 0).unwrap();
+        let series = two_sample_series(t0);
+        // A finer-grained slot grid within the same hour: 15-min steps.
+        let slot_starts: Vec<_> = (0..5)
+            .map(|i| t0 + chrono::Duration::minutes(15 * i))
+            .collect();
+        let kw = weather_pv_kw_for_slots(&series, &slot_starts);
+        assert_eq!(kw.len(), 5);
+        assert!((kw[0] - 1.0).abs() < 1e-9, "at t0: {}", kw[0]);
+        assert!(
+            (kw[1] - 1.25).abs() < 1e-9,
+            "at t0+15min (1/4 of the way): {}",
+            kw[1]
+        );
+        assert!(
+            (kw[2] - 1.5).abs() < 1e-9,
+            "at the midpoint, expected the arithmetic mean: {}",
+            kw[2]
+        );
+        assert!(
+            (kw[3] - 1.75).abs() < 1e-9,
+            "at t0+45min (3/4 of the way): {}",
+            kw[3]
+        );
+        assert!((kw[4] - 2.0).abs() < 1e-9, "at t0+1h: {}", kw[4]);
+    }
+
+    #[test]
+    fn weather_pv_kw_for_slots_clamps_outside_series_range() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 6, 0, 0).unwrap();
+        let series = two_sample_series(t0);
+        let before = t0 - chrono::Duration::hours(1);
+        let after = t0 + chrono::Duration::hours(5);
+        let kw = weather_pv_kw_for_slots(&series, &[before, after]);
+        assert_eq!(kw, vec![1.0, 2.0], "must clamp, not extrapolate");
+    }
+
+    #[test]
+    fn weather_pv_kw_for_slots_single_sample_series_is_constant() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 6, 0, 0).unwrap();
+        let series = vec![WeatherPvForecastSlot {
+            valid_at: t0,
+            forecast_ac_kw: 3.0,
+            snow_covered: false,
+            snow_free_ac_kw: 3.0,
+            snow_possible: false,
+        }];
+        let kw = weather_pv_kw_for_slots(
+            &series,
+            &[
+                t0 - chrono::Duration::hours(1),
+                t0,
+                t0 + chrono::Duration::hours(1),
+            ],
+        );
+        assert_eq!(kw, vec![3.0, 3.0, 3.0]);
+    }
+
+    #[test]
+    fn weather_pv_kw_for_slots_empty_series_returns_all_zero() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 6, 0, 0).unwrap();
+        let kw = weather_pv_kw_for_slots(&[], &[t0, t0 + chrono::Duration::hours(1)]);
+        assert_eq!(kw, vec![0.0, 0.0]);
+    }
+
+    // ── fresh_weather_pv_series — the R-50 staleness-gate cases ──────────────
+
+    #[test]
+    fn fresh_weather_pv_series_fresh_forecast_and_config_is_used() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 11, 0, 0).unwrap();
+        let params = default_forecast_params();
+        let forecast = make_forecast(vec![sample_at(500.0, 20.0, t0)]);
+        let now = t0; // fetched_at == now → fresh
+        let result = fresh_weather_pv_series(
+            Some(&params),
+            Some(&forecast),
+            now,
+            chrono::Duration::hours(2),
+            PvSnowState::default(),
+        );
+        assert!(result.is_some(), "fresh forecast + config must be used");
+        assert!(weather_pv_kw_for_slots(&result.unwrap(), &[t0])[0] > 0.0);
+    }
+
+    #[test]
+    fn fresh_weather_pv_series_stale_forecast_falls_back() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 11, 0, 0).unwrap();
+        let params = default_forecast_params();
+        let forecast = make_forecast(vec![sample_at(500.0, 20.0, t0)]);
+        let now = t0 + chrono::Duration::hours(3); // 3h old, past the 2h threshold
+        let result = fresh_weather_pv_series(
+            Some(&params),
+            Some(&forecast),
+            now,
+            chrono::Duration::hours(2),
+            PvSnowState::default(),
+        );
+        assert!(result.is_none(), "stale forecast must fall back to None");
+    }
+
+    #[test]
+    fn fresh_weather_pv_series_no_config_falls_back() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 11, 0, 0).unwrap();
+        let forecast = make_forecast(vec![sample_at(500.0, 20.0, t0)]);
+        let result = fresh_weather_pv_series(
+            None,
+            Some(&forecast),
+            t0,
+            chrono::Duration::hours(2),
+            PvSnowState::default(),
+        );
+        assert!(
+            result.is_none(),
+            "no PvForecastParams config must fall back to None"
+        );
+    }
+
+    #[test]
+    fn fresh_weather_pv_series_no_forecast_received_falls_back() {
+        let t0 = Utc.with_ymd_and_hms(2026, 6, 21, 11, 0, 0).unwrap();
+        let params = default_forecast_params();
+        let result = fresh_weather_pv_series(
+            Some(&params),
+            None,
+            t0,
+            chrono::Duration::hours(2),
+            PvSnowState::default(),
+        );
+        assert!(
+            result.is_none(),
+            "no forecast ever received must fall back to None"
+        );
+    }
+}
