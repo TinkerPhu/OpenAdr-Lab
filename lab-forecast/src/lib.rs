@@ -7,6 +7,7 @@
 //! asset and the forecaster container both call these functions; neither keeps a copy.
 
 pub mod forecast_payload;
+pub mod measurement_wire;
 pub mod pv_params;
 pub mod pv_profile;
 pub mod pv_snow;
