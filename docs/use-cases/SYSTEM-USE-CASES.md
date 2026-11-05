@@ -412,6 +412,43 @@ a view of what the fleet expects to draw either way, and a way back.
 
 ---
 
+## 15. Reading the Site's Forecasts From the Broker
+**Description:**
+Something outside the VEN (a digest, an advisor that picks the best hour for a load) wants to know
+what the PV array will produce over the next two days. It should read that from the broker like any
+other feed, without a VEN's REST plan and without a database.
+
+**What the lab does:**
+The `lab-forecaster` container reads the site's weather forecast and PV measurement from the broker
+and the array geometry from the VEN profile, and publishes retained messages under
+`<root>/forecast/<site>/`: `pv/<array_id>/power_kw` for each array, `pv/total/power_kw` for their sum,
+and `status`. A reader that subscribes late gets them at once.
+
+- **What a payload says:** the series (`values`, average kW per `step_s` from `start`), who made it
+  (`producer_id`, `model_version`), when (`generated_at`) and until when it holds (`valid_until`; the
+  freshness limit is `valid_until - generated_at`, 90 minutes). It declares that it is power in kW,
+  positive for generation, natural (uncurtailed) generation, read as the average over each step. The
+  horizon is what the weather feed provides (`coverage_h`), never padded.
+- **Heartbeat:** every recompute republishes, also when nothing changed, so a reader judges freshness by
+  `valid_until`, not by whether the numbers moved.
+- **Health:** the retained `status` carries `state` (`ok`, `cold_start`, `weather_stale`, `degraded`,
+  `offline` by last will), the age of each input and, per array, whether snow cover is observed from a
+  PV measurement. When the weather is stale the forecasts are not refreshed.
+- **One producer per site:** a second forecaster refuses to start while another producer's status is live.
+- **Snow:** with a PV measurement configured, a panel that produces far less than the weather predicts in
+  the cold is forecast covered, the same conclusion the VEN's PV asset reaches.
+
+Contract: `docs/architecture/forecast_publication.md` and `docs/reference/WIRE_PROFILE.md#v4`.
+Base load and the VEN reading these topics are later slices of the same change.
+
+**What to test:**
+- `tests/features/forecast_publication.feature`: a weather forecast becoming a declared retained PV
+  forecast, the status, a stale weather forecast
+- The payload and engine rules at unit level: `lab-forecast/src/forecast_payload.rs`,
+  `forecaster/src/engine.rs`, `forecaster/src/dispatch.rs`
+
+---
+
 ## Notes
 If the system can reliably handle all use cases above, it already matches the majority of real-world OpenADR deployments. More complex scenarios (stacked markets, transactive energy, multi-program arbitration) typically build on these fundamentals.
 

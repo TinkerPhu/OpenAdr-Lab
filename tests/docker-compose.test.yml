@@ -464,6 +464,30 @@ services:
       - test-net
 
   # ---------------------------------------------------------------------------
+  # lab-forecaster -- publishes retained PV forecasts for the weather and measurement topics of site
+  # "ven-1" on the throwaway broker (forecast_publication.feature). Short recompute cadence so a scenario
+  # does not wait long for a heartbeat.
+  # ---------------------------------------------------------------------------
+  test-forecaster:
+    build:
+      context: ..
+      dockerfile: forecaster/Dockerfile
+    environment:
+      FORECASTER_MQTT_HOST: "mosquitto"
+      FORECASTER_SITE_ID: "ven-1"
+      FORECASTER_PROFILE_PATH: "/config/profile.yaml"
+      FORECASTER_PRODUCER_ID: "test-forecaster"
+      FORECASTER_RECOMPUTE_SECONDS: "5"
+      RUST_LOG: "info"
+    volumes:
+      - ../VEN/profiles/test.yaml:/config/profile.yaml:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    networks:
+      - test-net
+
+  # ---------------------------------------------------------------------------
   # Test runner — loads fixtures via psql, then runs behave
   # ---------------------------------------------------------------------------
   test-runner:
@@ -511,6 +535,8 @@ services:
         condition: service_healthy
       mosquitto:
         condition: service_healthy
+      test-forecaster:
+        condition: service_started
     networks:
       - test-net
 

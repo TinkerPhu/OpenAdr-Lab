@@ -193,6 +193,31 @@ services:
     networks:
       - vtn_openadr-net
 
+  # ---------------------------------------------------------------------------
+  # lab-forecaster -- publishes the PV forecast of the Zunzgen site as retained MQTT messages under
+  # openadr-lab/forecast/zunzgen/ (docs/architecture/forecast_publication.md). It reads the same weather
+  # and PV-measurement topics as ven-1, from the same house broker, and the same profile file for the
+  # array geometry. It needs nothing else: no database, no VTN. A fixed producer id keeps a recreate of
+  # this container from being refused by its own retained status.
+  # ---------------------------------------------------------------------------
+  lab-forecaster:
+    build:
+      context: ..
+      dockerfile: forecaster/Dockerfile
+    restart: unless-stopped
+    environment:
+      FORECASTER_MQTT_HOST: "host.docker.internal"
+      FORECASTER_SITE_ID: "zunzgen"
+      FORECASTER_PROFILE_PATH: "/config/profile.yaml"
+      FORECASTER_PRODUCER_ID: "lab-forecaster-zunzgen"
+      RUST_LOG: "info"
+    volumes:
+      - ./profiles/ven-1.yaml:/config/profile.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - vtn_openadr-net
+
 networks:
   vtn_openadr-net:
     external: true
