@@ -10,7 +10,7 @@ PV rows of 5.2. Slice 2: 1.2, 1.4, 3.4, base load. Slice 3: section 4 (VEN consu
 - [ ] 1.5 Run `audit_ven_architecture.py`, `audit_duplication.py`, VEN unit tests and clippy; register any copy left over in `TECHNICAL_DEBTS.md`
 
 ## 2. Contract
-- [ ] 2.1 Test first: forecast payload constructor and validator in `lab-forecast` (cannot build a payload without quantity/unit/sign/reading; sign per kind; `valid_until`; `coverage_h`)
+- [x] 2.1 Test first: forecast payload constructor and validator in `lab-forecast` (cannot build a payload without quantity/unit/sign/reading; sign per kind; `valid_until`; `coverage_h`)
 - [ ] 2.2 `docs/architecture/forecast_publication.md` (topics, payload, freshness, status) and an entry in `docs/reference/WIRE_PROFILE.md`
 
 ## 3. Forecaster service (tests first)
@@ -22,7 +22,7 @@ PV rows of 5.2. Slice 2: 1.2, 1.4, 3.4, base load. Slice 3: section 4 (VEN consu
 - [ ] 3.6 Dockerfile and compose service; runs with the broker alone, no InfluxDB
 
 ## 4. VEN consumption
-- [ ] 4.1 Subscriber adapter (via `PayloadReader` and the payload validator), source preference with fallback, boundary conversion in `entities/units.rs`
+- [ ] 4.1 Subscriber adapter (via the payload validator), source preference with fallback, boundary conversion in `entities/units.rs`
 - [ ] 4.2 Inject the received series into the PV asset and the base-load asset; no other module interprets it
 - [ ] 4.3 VEN UI: source, age, rejection reason
 - [ ] 4.4 Accuracy samples against the received series with `model_version`

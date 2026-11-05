@@ -21,7 +21,7 @@ theirs).
 | Per-slot confidence | `services/forecast.rs::slot_confidence` | Moved with it; published in the payload |
 | Base-load learner | `services/heuristics.rs::learn_asset_heuristics`, `AssetHeuristics::sample_kw` | Moved to `lab-forecast`, reading history through a narrow `TickSource` trait (`query_ticks` only) that the VEN's `HistoryPort` store and the forecaster's cache both implement |
 | Weather payload parse | `VEN/src/weather.rs`, `entities/weather.rs` | One parser in `lab-forecast` |
-| Incoming numbers | `lab_core::wire_contract::PayloadReader` | Used for every incoming payload |
+| Incoming numbers | `lab_core::wire_contract::PayloadReader` reads OpenADR event payloads only | Not applicable to forecast topics; `ForecastPayload::parse` is their one validator |
 | Forecast accuracy | `history_store/forecast_accuracy.rs` (`forecast_accuracy_samples`) | Reused by the VEN against the received series |
 | Measurement topics and translation | `VEN/src/measurement.rs`, `measurement_translation.rs` | The forecaster reuses the translation; no second one |
 
@@ -89,7 +89,7 @@ live status from another producer for the same site is retained and fresh; it lo
 (PV) and 48 h (base load). It is never padded.
 
 **D13 Invalid and unknown.** The VEN rejects a forecast with an unknown major `schema_version`, a missing
-declaration (unit, sign, quantity) or a non-numeric value (via `PayloadReader`), keeps its fallback, and
+declaration (unit, sign, quantity) or a non-numeric value (by the shared validator `ForecastPayload::parse`; `PayloadReader` reads OpenADR event payloads and does not apply), keeps its fallback, and
 records the rejection reason where its UI shows the source.
 
 **D14 First slice (R-81, user, 2026-11-04; build approach: user).** Before the full forecaster, the container

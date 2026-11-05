@@ -121,7 +121,7 @@ is in use, the age of the received forecast and, when a received forecast was re
 
 #### Scenario: Non-numeric value
 - **WHEN** a forecast payload holds a non-numeric value
-- **THEN** it is rejected through the shared payload reader and the VEN keeps its fallback
+- **THEN** it is rejected by the shared payload validator and the VEN keeps its fallback
 
 ### Requirement: Received forecasts are scored
 The VEN SHALL record the received forecast against the measured outcome in `forecast_accuracy_samples`, with the
