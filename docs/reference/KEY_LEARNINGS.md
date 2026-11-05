@@ -3788,3 +3788,23 @@ rewrote every price kept both, so the VEN did not replan and the operator watche
 The VTN stamps `modificationDateTime` on every update precisely so that a reader can tell versions apart. Key the known
 objects on `(id, version)`, trace the new version as an arrival, and let one definition of "new" feed the trace, the
 history and the replan; compare derived values (as capacity already was) only where no version is sent.
+
+## `serde_json` rounds floats on parse unless `float_roundtrip` is on (lab-forecaster, 2026-11-05)
+
+A forecast series serialised and parsed again differed in the last digit of some values. By default `serde_json` parses
+floats with a fast, not always exact algorithm. A payload two programs must agree on to the bit (the forecaster's series and
+the VEN's own computation) needs `serde_json = { features = ["float_roundtrip"] }` in the crate that parses it.
+
+## A background job in a low-memory session can be reaped; check free RAM before it starts (lab-forecaster, 2026-11-04)
+
+The system stopped a background cargo job because the laptop was critically low on memory. The tool said not to restart it on
+its own. Check free memory (`Get-CimInstance Win32_OperatingSystem`), start the build only above about 1 GB, and keep the
+shell command to a few minutes so a reap loses little.
+
+## Run one BDD feature on a host with a small harness, not the whole stack (lab-forecaster, 2026-11-05)
+
+`features/environment.py` waits for the VTN and every VEN, so a focused run of one feature starts the whole stack. For a
+feature that needs only the broker and one container, bring those two services up in their own compose project, copy the
+feature, its steps, the helper steps it reuses and `helpers/` into a temp `features/` tree beside an empty `environment.py`,
+and run behave in a throwaway `python` container on that project's network. The full suite stays the runner's job.
+

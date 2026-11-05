@@ -19,7 +19,7 @@ PV rows of 5.2. Slice 2: 1.2, 1.4, 3.4, base load. Slice 3: section 4 (VEN consu
 - [x] 3.3 Snow-state observation per array and the PV publishers (per array and total)
 - [ ] 3.4 Base-load learner run and publisher; cold start profile with `model_version`
 - [x] 3.5 Status topic with last will, `producer_id` and the single-producer guard
-- [ ] 3.6 Dockerfile and compose service; runs with the broker alone, no InfluxDB
+- [x] 3.6 Dockerfile and compose service; runs with the broker alone, no InfluxDB
 
 ## 4. VEN consumption
 - [ ] 4.1 Subscriber adapter (via the payload validator), source preference with fallback, boundary conversion in `entities/units.rs`

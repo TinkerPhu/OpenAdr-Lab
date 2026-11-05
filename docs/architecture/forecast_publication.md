@@ -39,3 +39,27 @@ container refuses to start while another producer's status is live (`ForecastSta
 `lab-forecast` holds the PV physics (`solar`, `pv_snow`), the weather types and parse
 (`weather`, `weather_wire`), the profile parameters (`pv_params`) and this payload. It reads no
 clock, socket or file. The VEN re-exports these and keeps an in-process fallback.
+
+## Running it
+
+The service `lab-forecaster` (`forecaster/Dockerfile`, compose service in `VEN/docker-compose.yml`; `test-forecaster` in
+`tests/docker-compose.test.yml`) reads its settings from the environment (`forecaster/src/config.rs`):
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `FORECASTER_MQTT_HOST`, `_PORT`, `_USERNAME`, `_PASSWORD` | the broker (plaintext) | host required, port 1883 |
+| `FORECASTER_MQTT_ROOT` | `<root>` of every topic: weather and measurement in, forecast out | `openadr-lab` |
+| `FORECASTER_SITE_ID` | `<site>` of every topic | required |
+| `FORECASTER_PROFILE_PATH` | a VEN profile YAML; its `type: pv` assets with a `weather:` block are the arrays | required |
+| `FORECASTER_PRODUCER_ID` | who publishes; a second container with another id is refused while this one is live | hostname |
+| `FORECASTER_FRESHNESS_MINUTES` | `valid_until - generated_at`, and the oldest weather forecast still used | 90 |
+| `FORECASTER_RECOMPUTE_SECONDS` | heartbeat besides every new weather forecast | 900 |
+| `FORECASTER_MODEL_VERSION` | names the model in each payload | `pv-weather-1` |
+
+It reads `<root>/weather/<site>/forecast` and, when a profile array switches `measurement` on,
+`<root>/measurement/<site>/pv`; it needs nothing else. A `SIGTERM` publishes the retained status `offline`.
+Per hourly weather sample the value is the weather model's PV output at the start of that hour, declared as the average
+over the step; the first sample is the weather feed's already-past hour, so a reader skips slots before now.
+
+Where the code is: `forecaster/src/engine.rs` (the decision), `dispatch.rs` (message routing and the single-producer guard),
+`config.rs`, `runtime.rs` (the broker session). Slice 1 publishes PV only; base load and the VEN reading these topics follow.

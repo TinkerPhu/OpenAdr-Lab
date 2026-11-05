@@ -16795,3 +16795,32 @@ invariant list is read from `python ci/audits/audit_ven_architecture.py`, which 
 
 **Key learning.** A rule that only lives in the instructions file is lost when it is moved: move the detail to the
 document first, then shorten the instruction to one line and a link.
+
+## The PV forecast is published over MQTT by its own container (T-OL-01, slice 1 of lab-forecaster)
+
+**What.** A container, `lab-forecaster`, publishes the site's PV forecast as retained MQTT messages under
+`<root>/forecast/<site>/`: `pv/<array_id>/power_kw` per array, `pv/total/power_kw` and `status` (last will, one producer per
+site), each declaring quantity, unit, sign and reading (`docs/architecture/forecast_publication.md`, wire profile v4). The PV
+physics, snow model, weather parse, profile PV block, measurement parser, confidence and the payload moved into a new crate
+`lab-forecast` that the VEN also depends on; the VEN keeps thin re-exports and its in-process fallback. Slice 1 is verified
+on Node2 (the new BDD feature, 3 scenarios, against the real container and the test broker) and runs on Node1 against the
+house broker.
+
+**Why.** An advisor outside the VEN needs the PV forecast from the broker alone, without the VEN's REST plan (R-81). A
+container on the shared code is the final producer, so nothing is retired later.
+
+**Decisions.** One crate for everything both sides must agree on (`lab-core` stays thin); the engine is pure (weather and
+measurement in, publications out) and the broker session is a thin shell around it; `ForecastPayload::parse` is the one
+validator (the OpenADR `PayloadReader` does not apply to a forecast topic); sign and curtailment follow from the series kind,
+so no constructor can build an undeclared payload.
+
+**Issues.** (1) The first red run never happened: the laptop ran out of memory and the system reaped the background job, so
+the stubs were run only after RAM recovered. (2) `serde_json` parses floats approximately unless `float_roundtrip` is on; a
+series parsed from the wire differed in the last digit from the one serialised, which broke "the VEN and the forecaster
+agree" until the feature was enabled. (3) The duplication audit flagged two constructors with identical parameter lists; a
+`SeriesGrid` type for "start and step" (a real concept) and one private `SeriesKind` removed it. (4) The weather feed's
+first sample is the already-past "fact" hour, so a series starts before now; consumers skip past slots.
+
+**Key learning.** A producer and a consumer of one contract call the same parse function, and the test that proves it
+compares the parsed values with the computed ones bit for bit (that is what exposed the float parsing).
+
