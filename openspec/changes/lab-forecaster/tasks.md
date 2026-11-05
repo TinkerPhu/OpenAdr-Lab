@@ -11,7 +11,7 @@ PV rows of 5.2. Slice 2: 1.2, 1.4, 3.4, base load. Slice 3: section 4 (VEN consu
 
 ## 2. Contract
 - [x] 2.1 Test first: forecast payload constructor and validator in `lab-forecast` (cannot build a payload without quantity/unit/sign/reading; sign per kind; `valid_until`; `coverage_h`)
-- [ ] 2.2 `docs/architecture/forecast_publication.md` (topics, payload, freshness, status) and an entry in `docs/reference/WIRE_PROFILE.md`
+- [x] 2.2 `docs/architecture/forecast_publication.md` (topics, payload, freshness, status) and an entry in `docs/reference/WIRE_PROFILE.md`
 
 ## 3. Forecaster service (tests first)
 - [ ] 3.1 Crate `forecaster/`: config from the VEN profile (arrays, measurement topics, site), injectable clock
