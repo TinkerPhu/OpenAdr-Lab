@@ -644,7 +644,7 @@ mod tests {
 
     // ── build_weather_pv_forecast / slot_confidence (R-50, task 8.4/8.5) ────
 
-    use crate::entities::asset_params::{PvArrayGeometry, PvForecastParams, PvSnowParams};
+    use lab_forecast::pv_params::{PvArrayGeometry, PvForecastParams, PvSnowParams};
     use crate::entities::pv_snow::PvSnowState;
     use crate::entities::weather::{GeoPosition, SkyCondition, WeatherForecastSample};
 

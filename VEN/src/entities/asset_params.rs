@@ -328,7 +328,7 @@ impl PvCurtailmentSource {
 //    sin-model path used by the simulator; this is the real-weather path,
 //    docs/architecture/weather_forecast.md) ─────────────────────────────────
 
-pub use lab_forecast::pv_params::{PvArrayGeometry, PvForecastParams, PvSnowParams};
+pub use lab_forecast::pv_params::PvForecastParams;
 
 /// Each PV array's weather-forecast params, by asset id (W5b): the arrays whose profile entry
 /// has a `weather:` block.

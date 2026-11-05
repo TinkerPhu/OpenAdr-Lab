@@ -219,14 +219,7 @@ impl Profile {
     }
 }
 
-/// An asset's real-measurement switch (`measurement:` in its profile entry). Off by default;
-/// the MQTT transport carries one PV and one base-load topic, so at most one asset of each
-/// kind may switch it on.
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct MeasurementSwitch {
-    #[serde(default)]
-    pub enabled: bool,
-}
+pub use lab_forecast::pv_profile::MeasurementSwitch;
 
 /// WP1.2/WP1.3 (Phase 1, A-1) — persistent history sampling + retention.
 #[derive(Debug, Clone, Deserialize)]

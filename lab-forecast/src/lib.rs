@@ -8,6 +8,7 @@
 
 pub mod forecast_payload;
 pub mod pv_params;
+pub mod pv_profile;
 pub mod pv_snow;
 pub mod solar;
 pub mod weather;

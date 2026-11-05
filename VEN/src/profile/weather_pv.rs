@@ -1,64 +1,7 @@
 //! YAML config for the weather-sourced PV forecast (weather-forecast-visibility)
 //! — split out of `schema.rs` to keep that file under the file-size cap.
 
-use crate::entities::asset_params::{PvArrayGeometry, PvForecastParams, PvSnowParams};
-use crate::entities::weather::GeoPosition;
-use serde::Deserialize;
-
-/// YAML config for the weather-sourced PV forecast
-/// (`entities::solar::forecast_ac_kw` / `weather_pv_forecast_series`).
-/// Geometry/rating fields are required (no sensible universal default for a
-/// specific site); tuning fields default to typical residential values.
-#[derive(Debug, Clone, Deserialize)]
-pub struct WeatherPvConfig {
-    pub latitude_deg: f64,
-    pub longitude_deg: f64,
-    /// 0° = horizontal, 90° = vertical wall.
-    pub tilt_deg: f64,
-    /// Compass bearing the panel faces: 0°=N, 90°=E, 180°=S, 270°=W.
-    pub azimuth_deg: f64,
-    /// DC nameplate rating at STC (1000 W/m², 25°C cell temp).
-    pub rated_kwp: f64,
-    #[serde(default = "super::defaults::default_weather_pv_performance_ratio")]
-    pub performance_ratio: f64,
-    #[serde(default = "super::defaults::default_weather_pv_temp_coeff_pct_per_c")]
-    pub temp_coeff_pct_per_c: f64,
-    #[serde(default = "super::defaults::default_weather_pv_noct_c")]
-    pub noct_c: f64,
-    #[serde(default)]
-    pub ac_limit_kw: Option<f64>,
-    #[serde(default = "super::defaults::default_weather_pv_snowfall_trigger_cm")]
-    pub snowfall_trigger_cm: f64,
-    #[serde(default = "super::defaults::default_weather_pv_clear_threshold_c")]
-    pub clear_threshold_c: f64,
-    #[serde(default)]
-    pub covered_output_fraction: f64,
-}
-
-impl WeatherPvConfig {
-    pub fn to_params(&self) -> PvForecastParams {
-        PvForecastParams {
-            rated_kwp: self.rated_kwp,
-            geometry: PvArrayGeometry {
-                location: GeoPosition {
-                    latitude_deg: self.latitude_deg,
-                    longitude_deg: self.longitude_deg,
-                },
-                tilt_deg: self.tilt_deg,
-                azimuth_deg: self.azimuth_deg,
-            },
-            performance_ratio: self.performance_ratio,
-            temp_coeff_pct_per_c: self.temp_coeff_pct_per_c,
-            noct_c: self.noct_c,
-            ac_limit_kw: self.ac_limit_kw,
-            snow: PvSnowParams {
-                snowfall_trigger_cm: self.snowfall_trigger_cm,
-                clear_threshold_c: self.clear_threshold_c,
-                covered_output_fraction: self.covered_output_fraction,
-            },
-        }
-    }
-}
+pub use lab_forecast::pv_profile::WeatherPvConfig;
 
 #[cfg(test)]
 mod tests {

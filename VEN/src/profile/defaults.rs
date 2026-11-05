@@ -128,23 +128,6 @@ pub(super) fn default_pv_co2_g_kwh() -> f64 {
     crate::entities::asset_params::DEFAULT_PV_CO2_G_KWH
 }
 
-// ── weather_pv (weather-forecast-visibility) ──────────────────────────────────
-pub(super) fn default_weather_pv_performance_ratio() -> f64 {
-    0.87
-}
-pub(super) fn default_weather_pv_temp_coeff_pct_per_c() -> f64 {
-    -0.35
-}
-pub(super) fn default_weather_pv_noct_c() -> f64 {
-    45.0
-}
-pub(super) fn default_weather_pv_snowfall_trigger_cm() -> f64 {
-    0.2
-}
-pub(super) fn default_weather_pv_clear_threshold_c() -> f64 {
-    1.5
-}
-
 pub(super) fn default_asset_id_battery() -> String {
     crate::ids::ASSET_BATTERY.to_string()
 }
