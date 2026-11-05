@@ -14,27 +14,15 @@ impl PvInverter {
         else {
             return;
         };
-        let Some((snow_free_kw, snow_possible)) =
-            crate::entities::solar::weather_snow_reference_at(series, now)
-        else {
-            return;
-        };
-        if !snow_possible {
-            // Warm air melts a covered panel: the forecast's own melt rule, applied to now, so a
-            // state concluded in the cold cannot outlive the cold when the measurement is gone.
-            self.snow_state.covered = false;
-        }
-        let Some(measured_kw) = self.measured_power_kw else {
-            return;
-        };
-        let expected_kw = self
-            .generation_limit_kw
-            .map_or(snow_free_kw, |limit_kw| snow_free_kw.min(limit_kw));
-        let evidence = crate::entities::pv_snow::SnowEvidence {
-            expected_kw,
-            measured_kw,
-            snow_possible,
-        };
-        self.snow_state = self.snow_state.observed(evidence, self.rated_kw);
+        self.snow_state = lab_forecast::pv_snow_observation::observe_snow(
+            self.snow_state,
+            lab_forecast::pv_snow_observation::SnowObservationInput {
+                series,
+                now,
+                measured_kw: self.measured_power_kw,
+                generation_limit_kw: self.generation_limit_kw,
+                rated_kw: self.rated_kw,
+            },
+        );
     }
 }
