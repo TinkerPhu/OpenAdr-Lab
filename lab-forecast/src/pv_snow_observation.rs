@@ -29,17 +29,31 @@ pub struct SnowObservationInput<'a> {
 /// unchanged) when there is nothing to compare: no series, no measurement, or conditions too dim to tell.
 /// Warm air clears a covered panel even without a measurement, the forecast's own melt rule applied to now.
 pub fn observe_snow(state: PvSnowState, input: SnowObservationInput<'_>) -> PvSnowState {
-    let Some((snow_free_kw, snow_possible)) = weather_snow_reference_at(input.series, input.now) else {
+    let Some((snow_free_kw, snow_possible)) = weather_snow_reference_at(input.series, input.now)
+    else {
         return state;
     };
     // Warm air melts a covered panel: the forecast's own melt rule, applied to now, so a state concluded
     // in the cold cannot outlive the cold when the measurement is gone.
-    let state = if snow_possible { state } else { PvSnowState { covered: false } };
+    let state = if snow_possible {
+        state
+    } else {
+        PvSnowState { covered: false }
+    };
     let Some(measured_kw) = input.measured_kw else {
         return state;
     };
-    let expected_kw = input.generation_limit_kw.map_or(snow_free_kw, |limit_kw| snow_free_kw.min(limit_kw));
-    state.observed(SnowEvidence { expected_kw, measured_kw, snow_possible }, input.rated_kw)
+    let expected_kw = input
+        .generation_limit_kw
+        .map_or(snow_free_kw, |limit_kw| snow_free_kw.min(limit_kw));
+    state.observed(
+        SnowEvidence {
+            expected_kw,
+            measured_kw,
+            snow_possible,
+        },
+        input.rated_kw,
+    )
 }
 
 #[cfg(test)]
@@ -62,8 +76,17 @@ mod tests {
         }]
     }
 
-    fn input(series: &[WeatherPvForecastSlot], measured_kw: Option<f64>) -> SnowObservationInput<'_> {
-        SnowObservationInput { series, now: noon(), measured_kw, generation_limit_kw: None, rated_kw: 10.0 }
+    fn input(
+        series: &[WeatherPvForecastSlot],
+        measured_kw: Option<f64>,
+    ) -> SnowObservationInput<'_> {
+        SnowObservationInput {
+            series,
+            now: noon(),
+            measured_kw,
+            generation_limit_kw: None,
+            rated_kw: 10.0,
+        }
     }
 
     const COVERED: PvSnowState = PvSnowState { covered: true };

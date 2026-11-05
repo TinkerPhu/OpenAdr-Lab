@@ -74,6 +74,31 @@ impl std::fmt::Display for PayloadError {
 
 impl std::error::Error for PayloadError {}
 
+/// Where a series starts and how long one value lasts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SeriesGrid {
+    /// Start of the first step.
+    pub start: DateTime<Utc>,
+    pub step_s: u32,
+}
+
+/// What a series is, which fixes what it declares on the wire.
+#[derive(Debug, Clone, Copy)]
+enum SeriesKind {
+    PvNatural,
+    BaseLoad,
+}
+
+impl SeriesKind {
+    /// The sign and the curtailment a series of this kind declares.
+    fn declaration(self) -> (Sign, Option<Curtailment>) {
+        match self {
+            SeriesKind::PvNatural => (Sign::GenerationPositive, Some(Curtailment::Natural)),
+            SeriesKind::BaseLoad => (Sign::ConsumptionPositive, None),
+        }
+    }
+}
+
 /// What every forecast carries besides its values.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PayloadMeta {
@@ -111,41 +136,38 @@ impl ForecastPayload {
     /// A PV series: natural generation, positive for generation. `values_kw` is average kW per step.
     pub fn pv_natural(
         meta: PayloadMeta,
-        start: DateTime<Utc>,
-        step_s: u32,
+        grid: SeriesGrid,
         values_kw: Vec<f64>,
     ) -> Result<Self, PayloadError> {
-        Self::build(meta, start, step_s, values_kw, Sign::GenerationPositive, Some(Curtailment::Natural))
+        Self::build(SeriesKind::PvNatural, meta, grid, values_kw)
     }
 
     /// A base-load series: positive for consumption. `values_kw` is average kW per step.
     pub fn base_load(
         meta: PayloadMeta,
-        start: DateTime<Utc>,
-        step_s: u32,
+        grid: SeriesGrid,
         values_kw: Vec<f64>,
     ) -> Result<Self, PayloadError> {
-        Self::build(meta, start, step_s, values_kw, Sign::ConsumptionPositive, None)
+        Self::build(SeriesKind::BaseLoad, meta, grid, values_kw)
     }
 
     /// The one place a payload is assembled; it validates, so an invalid or undeclared one cannot exist.
     fn build(
+        kind: SeriesKind,
         meta: PayloadMeta,
-        start: DateTime<Utc>,
-        step_s: u32,
+        grid: SeriesGrid,
         values: Vec<f64>,
-        sign: Sign,
-        curtailment: Option<Curtailment>,
     ) -> Result<Self, PayloadError> {
+        let (sign, curtailment) = kind.declaration();
         let payload = Self {
             schema_version: SCHEMA_VERSION.to_string(),
             generated_at: meta.generated_at,
             valid_until: meta.valid_until,
             model_version: meta.model_version,
             producer_id: meta.producer_id,
-            start,
-            step_s,
-            coverage_h: horizon_h(values.len(), step_s),
+            start: grid.start,
+            step_s: grid.step_s,
+            coverage_h: horizon_h(values.len(), grid.step_s),
             values,
             confidence: meta.confidence,
             quantity: Quantity::Power,
@@ -187,16 +209,21 @@ impl ForecastPayload {
                 }
                 Ok(())
             }
-            (Sign::GenerationPositive, None) => invalid("a generation_positive series must declare curtailment natural"),
+            (Sign::GenerationPositive, None) => {
+                invalid("a generation_positive series must declare curtailment natural")
+            }
             (Sign::ConsumptionPositive, None) => Ok(()),
-            (Sign::ConsumptionPositive, Some(_)) => invalid("a consumption_positive series has no curtailment"),
+            (Sign::ConsumptionPositive, Some(_)) => {
+                invalid("a consumption_positive series has no curtailment")
+            }
         }
     }
 
     /// Parse and validate bytes from a topic. Unknown fields are ignored (additive evolution).
     pub fn parse(payload: &[u8]) -> Result<Self, PayloadError> {
         let value = parse_json_checking_major(payload)?;
-        let parsed: Self = serde_json::from_value(value).map_err(|e| PayloadError::Parse(e.to_string()))?;
+        let parsed: Self =
+            serde_json::from_value(value).map_err(|e| PayloadError::Parse(e.to_string()))?;
         parsed.validate()?;
         Ok(parsed)
     }
@@ -220,7 +247,9 @@ fn horizon_h(len: usize, step_s: u32) -> f64 {
 /// Only major version 1 is spoken; an absent version is a parse problem, not a version problem.
 fn check_major(version: &str) -> Result<(), PayloadError> {
     if version.is_empty() {
-        return Err(PayloadError::Parse("missing field `schema_version`".to_string()));
+        return Err(PayloadError::Parse(
+            "missing field `schema_version`".to_string(),
+        ));
     }
     match version.split('.').next() {
         Some("1") => Ok(()),
@@ -231,8 +260,14 @@ fn check_major(version: &str) -> Result<(), PayloadError> {
 /// JSON first, then the version, before any field is read: a future major may have a shape this crate
 /// cannot read, and it must be reported as a version problem.
 fn parse_json_checking_major(payload: &[u8]) -> Result<serde_json::Value, PayloadError> {
-    let value: serde_json::Value = serde_json::from_slice(payload).map_err(|e| PayloadError::Parse(e.to_string()))?;
-    check_major(value.get("schema_version").and_then(|v| v.as_str()).unwrap_or_default())?;
+    let value: serde_json::Value =
+        serde_json::from_slice(payload).map_err(|e| PayloadError::Parse(e.to_string()))?;
+    check_major(
+        value
+            .get("schema_version")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default(),
+    )?;
     Ok(value)
 }
 
@@ -247,20 +282,31 @@ impl ForecastTopics {
     pub fn new(root: &str, site: &str) -> Result<Self, PayloadError> {
         check_topic_part(root, true)?;
         check_topic_part(site, false)?;
-        Ok(Self { root: root.to_string(), site: site.to_string() })
+        Ok(Self {
+            root: root.to_string(),
+            site: site.to_string(),
+        })
     }
 
     /// The topic of one PV array; `total` is reserved for the site sum.
     pub fn pv_array(&self, array_id: &str) -> Result<String, PayloadError> {
         check_topic_part(array_id, false)?;
         if array_id == PV_TOTAL_ID {
-            return Err(PayloadError::Invalid(format!("'{PV_TOTAL_ID}' is the site sum, not an array id")));
+            return Err(PayloadError::Invalid(format!(
+                "'{PV_TOTAL_ID}' is the site sum, not an array id"
+            )));
         }
-        Ok(format!("{}/forecast/{}/pv/{array_id}/power_kw", self.root, self.site))
+        Ok(format!(
+            "{}/forecast/{}/pv/{array_id}/power_kw",
+            self.root, self.site
+        ))
     }
 
     pub fn pv_total(&self) -> String {
-        format!("{}/forecast/{}/pv/{PV_TOTAL_ID}/power_kw", self.root, self.site)
+        format!(
+            "{}/forecast/{}/pv/{PV_TOTAL_ID}/power_kw",
+            self.root, self.site
+        )
     }
 
     pub fn base_load(&self) -> String {
@@ -282,7 +328,9 @@ fn check_topic_part(part: &str, allow_separator: bool) -> Result<(), PayloadErro
         || part.starts_with('/')
         || part.ends_with('/');
     if bad {
-        return Err(PayloadError::Invalid(format!("'{part}' is not usable in a topic name")));
+        return Err(PayloadError::Invalid(format!(
+            "'{part}' is not usable in a topic name"
+        )));
     }
     Ok(())
 }
@@ -361,7 +409,15 @@ mod tests {
     }
 
     fn pv() -> ForecastPayload {
-        ForecastPayload::pv_natural(meta(), t(10, 0), 3600, vec![0.0, 1.5, 3.0, 2.0]).unwrap()
+        ForecastPayload::pv_natural(
+            meta(),
+            SeriesGrid {
+                start: t(10, 0),
+                step_s: 3600,
+            },
+            vec![0.0, 1.5, 3.0, 2.0],
+        )
+        .unwrap()
     }
 
     #[test]
@@ -377,7 +433,15 @@ mod tests {
 
     #[test]
     fn base_load_declares_consumption_positive_without_curtailment() {
-        let p = ForecastPayload::base_load(meta(), t(10, 0), 900, vec![0.4; 8]).unwrap();
+        let p = ForecastPayload::base_load(
+            meta(),
+            SeriesGrid {
+                start: t(10, 0),
+                step_s: 900,
+            },
+            vec![0.4; 8],
+        )
+        .unwrap();
         assert_eq!(p.sign, Sign::ConsumptionPositive);
         assert_eq!(p.curtailment, None);
     }
@@ -386,27 +450,56 @@ mod tests {
     fn coverage_h_is_the_delivered_horizon() {
         let p = pv();
         assert!((p.coverage_h - 4.0).abs() < 1e-9);
-        let q = ForecastPayload::base_load(meta(), t(10, 0), 900, vec![0.4; 8]).unwrap();
+        let q = ForecastPayload::base_load(
+            meta(),
+            SeriesGrid {
+                start: t(10, 0),
+                step_s: 900,
+            },
+            vec![0.4; 8],
+        )
+        .unwrap();
         assert!((q.coverage_h - 2.0).abs() < 1e-9);
     }
 
     #[test]
     fn serialised_payload_names_every_declaration() {
-        let v: serde_json::Value = serde_json::from_slice(&serde_json::to_vec(&pv()).unwrap()).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_slice(&serde_json::to_vec(&pv()).unwrap()).unwrap();
         assert_eq!(v["quantity"], "power");
         assert_eq!(v["unit"], "kW");
         assert_eq!(v["sign"], "generation_positive");
         assert_eq!(v["reading"], "average_over_step");
         assert_eq!(v["curtailment"], "natural");
-        for k in ["schema_version", "generated_at", "valid_until", "model_version", "producer_id", "start", "step_s", "values", "confidence", "coverage_h"] {
+        for k in [
+            "schema_version",
+            "generated_at",
+            "valid_until",
+            "model_version",
+            "producer_id",
+            "start",
+            "step_s",
+            "values",
+            "confidence",
+            "coverage_h",
+        ] {
             assert!(v.get(k).is_some(), "missing {k}");
         }
     }
 
     #[test]
     fn base_load_payload_omits_curtailment() {
-        let p = ForecastPayload::base_load(meta(), t(10, 0), 900, vec![0.4; 4]).unwrap();
-        let v: serde_json::Value = serde_json::from_slice(&serde_json::to_vec(&p).unwrap()).unwrap();
+        let p = ForecastPayload::base_load(
+            meta(),
+            SeriesGrid {
+                start: t(10, 0),
+                step_s: 900,
+            },
+            vec![0.4; 4],
+        )
+        .unwrap();
+        let v: serde_json::Value =
+            serde_json::from_slice(&serde_json::to_vec(&p).unwrap()).unwrap();
         assert!(v.get("curtailment").is_none());
     }
 
@@ -423,7 +516,10 @@ mod tests {
             let mut v: serde_json::Value = serde_json::to_value(pv()).unwrap();
             v.as_object_mut().unwrap().remove(field);
             let err = ForecastPayload::parse(&serde_json::to_vec(&v).unwrap()).unwrap_err();
-            assert!(matches!(&err, PayloadError::Parse(m) if m.contains(field)), "{field}: {err}");
+            assert!(
+                matches!(&err, PayloadError::Parse(m) if m.contains(field)),
+                "{field}: {err}"
+            );
         }
     }
 
@@ -472,8 +568,18 @@ mod tests {
 
     #[test]
     fn parse_rejects_a_base_load_payload_that_claims_curtailment() {
-        let mut v: serde_json::Value =
-            serde_json::to_value(ForecastPayload::base_load(meta(), t(10, 0), 900, vec![0.4; 4]).unwrap()).unwrap();
+        let mut v: serde_json::Value = serde_json::to_value(
+            ForecastPayload::base_load(
+                meta(),
+                SeriesGrid {
+                    start: t(10, 0),
+                    step_s: 900,
+                },
+                vec![0.4; 4],
+            )
+            .unwrap(),
+        )
+        .unwrap();
         v["curtailment"] = "natural".into();
         assert!(matches!(
             ForecastPayload::parse(&serde_json::to_vec(&v).unwrap()),
@@ -484,16 +590,82 @@ mod tests {
     #[test]
     fn constructors_refuse_broken_series() {
         let m = meta();
-        assert!(ForecastPayload::pv_natural(m.clone(), t(10, 0), 0, vec![1.0]).is_err(), "zero step");
-        assert!(ForecastPayload::pv_natural(m.clone(), t(10, 0), 3600, vec![]).is_err(), "empty");
-        assert!(ForecastPayload::pv_natural(m.clone(), t(10, 0), 3600, vec![f64::NAN]).is_err(), "nan");
-        assert!(ForecastPayload::pv_natural(m.clone(), t(10, 0), 3600, vec![-0.5]).is_err(), "negative pv");
+        assert!(
+            ForecastPayload::pv_natural(
+                m.clone(),
+                SeriesGrid {
+                    start: t(10, 0),
+                    step_s: 0
+                },
+                vec![1.0]
+            )
+            .is_err(),
+            "zero step"
+        );
+        assert!(
+            ForecastPayload::pv_natural(
+                m.clone(),
+                SeriesGrid {
+                    start: t(10, 0),
+                    step_s: 3600
+                },
+                vec![]
+            )
+            .is_err(),
+            "empty"
+        );
+        assert!(
+            ForecastPayload::pv_natural(
+                m.clone(),
+                SeriesGrid {
+                    start: t(10, 0),
+                    step_s: 3600
+                },
+                vec![f64::NAN]
+            )
+            .is_err(),
+            "nan"
+        );
+        assert!(
+            ForecastPayload::pv_natural(
+                m.clone(),
+                SeriesGrid {
+                    start: t(10, 0),
+                    step_s: 3600
+                },
+                vec![-0.5]
+            )
+            .is_err(),
+            "negative pv"
+        );
         let mut bad = m.clone();
         bad.valid_until = bad.generated_at;
-        assert!(ForecastPayload::pv_natural(bad, t(10, 0), 3600, vec![1.0]).is_err(), "valid_until not after generated_at");
+        assert!(
+            ForecastPayload::pv_natural(
+                bad,
+                SeriesGrid {
+                    start: t(10, 0),
+                    step_s: 3600
+                },
+                vec![1.0]
+            )
+            .is_err(),
+            "valid_until not after generated_at"
+        );
         let mut bad = m;
         bad.confidence = 1.5;
-        assert!(ForecastPayload::pv_natural(bad, t(10, 0), 3600, vec![1.0]).is_err(), "confidence above 1");
+        assert!(
+            ForecastPayload::pv_natural(
+                bad,
+                SeriesGrid {
+                    start: t(10, 0),
+                    step_s: 3600
+                },
+                vec![1.0]
+            )
+            .is_err(),
+            "confidence above 1"
+        );
     }
 
     #[test]
@@ -521,9 +693,18 @@ mod tests {
     #[test]
     fn topics_follow_the_documented_layout() {
         let tp = ForecastTopics::new("openadr-lab", "zunzgen").unwrap();
-        assert_eq!(tp.pv_array("pv-1").unwrap(), "openadr-lab/forecast/zunzgen/pv/pv-1/power_kw");
-        assert_eq!(tp.pv_total(), "openadr-lab/forecast/zunzgen/pv/total/power_kw");
-        assert_eq!(tp.base_load(), "openadr-lab/forecast/zunzgen/base_load/power_kw");
+        assert_eq!(
+            tp.pv_array("pv-1").unwrap(),
+            "openadr-lab/forecast/zunzgen/pv/pv-1/power_kw"
+        );
+        assert_eq!(
+            tp.pv_total(),
+            "openadr-lab/forecast/zunzgen/pv/total/power_kw"
+        );
+        assert_eq!(
+            tp.base_load(),
+            "openadr-lab/forecast/zunzgen/base_load/power_kw"
+        );
         assert_eq!(tp.status(), "openadr-lab/forecast/zunzgen/status");
     }
 
@@ -534,7 +715,10 @@ mod tests {
         let tp = ForecastTopics::new("openadr-lab", "zunzgen").unwrap();
         assert!(tp.pv_array("total/x").is_err());
         assert!(tp.pv_array("#").is_err());
-        assert!(tp.pv_array("total").is_err(), "total is the site sum, not an array id");
+        assert!(
+            tp.pv_array("total").is_err(),
+            "total is the site sum, not an array id"
+        );
         assert!(tp.pv_array("").is_err());
     }
 

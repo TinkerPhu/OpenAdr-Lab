@@ -245,11 +245,7 @@ pub fn build_weather_pv_forecast(
     // Sign convention: AssetForecast.power_kw is positive = import (see
     // entities/design_vocabulary.rs); PV only exports, so negate.
     let power_kw: Vec<f64> = series.iter().map(|s| -s.forecast_ac_kw).collect();
-    let confidence = if forecast.samples.is_empty() {
-        0.0
-    } else {
-        forecast.samples.iter().map(slot_confidence).sum::<f64>() / forecast.samples.len() as f64
-    };
+    let confidence = lab_forecast::confidence::mean_slot_confidence(&forecast.samples);
     AssetForecast {
         asset_id: asset_id.to_string(),
         updated_at: now,
@@ -259,16 +255,6 @@ pub fn build_weather_pv_forecast(
         soc_frac: None,
         availability_windows: None,
     }
-}
-
-/// `base_confidence(age_h) × (1 − irradiance_variability)` for one sample —
-/// see `build_weather_pv_forecast`'s doc comment for why this starting
-/// formula isn't a measured curve.
-fn slot_confidence(sample: &crate::entities::weather::WeatherForecastSample) -> f64 {
-    const HORIZON_H: f64 = 48.0;
-    const FLOOR: f64 = 0.2;
-    let base_confidence = (1.0 - sample.age_h as f64 / HORIZON_H).clamp(FLOOR, 1.0);
-    base_confidence * (1.0 - sample.irradiance_variability.unwrap_or(1.0))
 }
 
 /// Build one `AssetForecast` per learned heuristic, tagged
@@ -642,11 +628,11 @@ mod tests {
         );
     }
 
-    // ── build_weather_pv_forecast / slot_confidence (R-50, task 8.4/8.5) ────
+    // ── build_weather_pv_forecast (R-50, task 8.4/8.5) ────
 
-    use lab_forecast::pv_params::{PvArrayGeometry, PvForecastParams, PvSnowParams};
     use crate::entities::pv_snow::PvSnowState;
     use crate::entities::weather::{GeoPosition, SkyCondition, WeatherForecastSample};
+    use lab_forecast::pv_params::{PvArrayGeometry, PvForecastParams, PvSnowParams};
 
     fn weather_sample(age_h: u32, irradiance_variability: Option<f64>) -> WeatherForecastSample {
         WeatherForecastSample {
@@ -693,39 +679,6 @@ mod tests {
             ac_limit_kw: None,
             snow: PvSnowParams::default(),
         }
-    }
-
-    #[test]
-    fn slot_confidence_uniform_sky_is_not_reduced() {
-        let sample = weather_sample(1, Some(0.0)); // uniform sky (clear or overcast)
-        let base = (1.0 - 1.0 / 48.0_f64).clamp(0.2, 1.0);
-        assert!((slot_confidence(&sample) - base).abs() < 1e-9);
-    }
-
-    #[test]
-    fn slot_confidence_broken_sky_is_maximally_reduced() {
-        let sample = weather_sample(1, Some(1.0)); // maximally broken sky
-        assert_eq!(slot_confidence(&sample), 0.0);
-    }
-
-    #[test]
-    fn slot_confidence_missing_variability_treated_as_maximal_uncertainty() {
-        let sample = weather_sample(1, None);
-        assert_eq!(
-            slot_confidence(&sample),
-            0.0,
-            "missing irradiance_variability must be treated as maximum uncertainty, not stable"
-        );
-    }
-
-    #[test]
-    fn slot_confidence_decays_with_age_h() {
-        let near = weather_sample(1, Some(0.0));
-        let far = weather_sample(40, Some(0.0));
-        assert!(
-            slot_confidence(&near) > slot_confidence(&far),
-            "a same-quality forecast further out must have lower confidence"
-        );
     }
 
     #[test]

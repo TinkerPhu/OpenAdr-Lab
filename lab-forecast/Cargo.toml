@@ -11,7 +11,8 @@ description = "The exogenous forecasts of a site (PV from weather, base load fro
 # one-concept-one-function rule exists for. Dependencies join as code moves in.
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# float_roundtrip: a series parsed from the wire equals the one that was serialised, bit for bit.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 # The VEN UI's API types are generated from these types (`#[derive(TS)]`); same version and
 # features as the VEN so the trait is one. A proc-macro; nothing runs at runtime. MIT.
 ts-rs = { version = "12.0", features = ["chrono-impl", "uuid-impl", "serde-json-impl"] }

@@ -110,9 +110,9 @@ pub async fn get_weather(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lab_forecast::pv_params::{PvArrayGeometry, PvForecastParams, PvSnowParams};
     use crate::entities::weather::{GeoPosition, WeatherForecastSample};
     use chrono::{TimeZone, Utc};
+    use lab_forecast::pv_params::{PvArrayGeometry, PvForecastParams, PvSnowParams};
 
     fn sample_forecast(fetched_at: chrono::DateTime<chrono::Utc>) -> WeatherForecast {
         WeatherForecast {

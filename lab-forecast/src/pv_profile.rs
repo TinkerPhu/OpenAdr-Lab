@@ -95,10 +95,13 @@ pub struct PvArraySettings {
 /// cannot be forecast from weather and is not listed. A profile that is not YAML, or whose PV `weather:`
 /// block is incomplete, is an error naming the cause.
 pub fn pv_arrays_from_yaml(yaml: &str) -> Result<Vec<PvArraySettings>, String> {
-    let doc: ProfileDoc = serde_yaml::from_str(yaml).map_err(|e| format!("profile is not readable: {e}"))?;
+    let doc: ProfileDoc =
+        serde_yaml::from_str(yaml).map_err(|e| format!("profile is not readable: {e}"))?;
     let mut arrays = Vec::new();
     for asset in doc.assets.into_iter().filter(|a| a.kind == "pv") {
-        let Some(weather) = asset.weather else { continue };
+        let Some(weather) = asset.weather else {
+            continue;
+        };
         let cfg: WeatherPvConfig = serde_yaml::from_value(weather)
             .map_err(|e| format!("pv asset '{}': weather block: {e}", asset.id))?;
         arrays.push(PvArraySettings {
@@ -162,7 +165,10 @@ mod tests {
         assert!(arrays[0].measured);
         assert_eq!(arrays[0].params.rated_kwp, 14.4);
         assert_eq!(arrays[1].id, "roof-2");
-        assert!(!arrays[1].measured, "measurement is off unless the profile switches it on");
+        assert!(
+            !arrays[1].measured,
+            "measurement is off unless the profile switches it on"
+        );
     }
 
     #[test]

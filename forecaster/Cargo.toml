@@ -1,0 +1,20 @@
+[package]
+name = "lab-forecaster"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+description = "Publishes the exogenous forecasts of a site (PV from weather) as retained MQTT messages; the container behind openspec change lab-forecaster."
+
+[lib]
+name = "lab_forecaster"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lab-forecaster"
+path = "src/main.rs"
+
+[dependencies]
+# Every forecast, payload and profile rule comes from this crate, shared with the VEN.
+lab-forecast = { path = "../lab-forecast" }
+chrono = { version = "0.4", features = ["serde"] }
+serde_json = "1"
