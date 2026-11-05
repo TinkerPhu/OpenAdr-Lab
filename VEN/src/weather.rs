@@ -56,11 +56,11 @@ impl WeatherMqttConfig {
     }
 
     fn forecast_topic(&self) -> String {
-        format!("{}/weather/{}/forecast", self.root, self.site_id)
+        lab_forecast::feed_topics::weather_forecast_topic(&self.root, &self.site_id)
     }
 
     fn status_topic(&self) -> String {
-        format!("{}/weather/{}/status", self.root, self.site_id)
+        lab_forecast::feed_topics::weather_status_topic(&self.root, &self.site_id)
     }
 }
 

@@ -52,7 +52,7 @@ impl MeasurementMqttConfig {
             .unwrap_or_else(|_| "openadr-lab".into());
         let site_id = std::env::var(format!("{env_prefix}_MQTT_SITE_ID"))
             .unwrap_or_else(|_| "default".into());
-        let topic = format!("{root}/measurement/{site_id}/{signal}");
+        let topic = lab_forecast::feed_topics::measurement_topic(&root, &site_id, signal);
 
         let ven_name = std::env::var("VEN_NAME").unwrap_or_else(|_| "ven-1".into());
         let client_id = format!("ven-measurement-{ven_name}-{signal}-{site_id}");

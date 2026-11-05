@@ -18,3 +18,10 @@ path = "src/main.rs"
 lab-forecast = { path = "../lab-forecast" }
 chrono = { version = "0.4", features = ["serde"] }
 serde_json = "1"
+# The broker session. Same version and no-TLS choice as the VEN's weather and measurement adapters
+# (default-features off: rumqttc's "use-rustls" pulls a rustls-webpki with open advisories; this lab
+# connects plaintext to its own Mosquitto).
+rumqttc = { version = "0.25", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

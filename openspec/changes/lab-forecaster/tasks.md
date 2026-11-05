@@ -14,11 +14,11 @@ PV rows of 5.2. Slice 2: 1.2, 1.4, 3.4, base load. Slice 3: section 4 (VEN consu
 - [x] 2.2 `docs/architecture/forecast_publication.md` (topics, payload, freshness, status) and an entry in `docs/reference/WIRE_PROFILE.md`
 
 ## 3. Forecaster service (tests first)
-- [ ] 3.1 Crate `forecaster/`: config from the VEN profile (arrays, measurement topics, site), injectable clock
-- [ ] 3.2 MQTT inputs (weather, PV and base-load measurement, via the existing translation) and the SQLite tick cache
-- [ ] 3.3 Snow-state observation per array and the PV publishers (per array and total)
+- [x] 3.1 Crate `forecaster/`: config from the VEN profile (arrays, measurement topics, site), injectable clock
+- [x] 3.2 (slice 1: weather and PV measurement over MQTT through the shared parsers; the SQLite tick cache and the base-load measurement come with slice 2, where the learner needs history) MQTT inputs
+- [x] 3.3 Snow-state observation per array and the PV publishers (per array and total)
 - [ ] 3.4 Base-load learner run and publisher; cold start profile with `model_version`
-- [ ] 3.5 Status topic with last will, `producer_id` and the single-producer guard
+- [x] 3.5 Status topic with last will, `producer_id` and the single-producer guard
 - [ ] 3.6 Dockerfile and compose service; runs with the broker alone, no InfluxDB
 
 ## 4. VEN consumption
