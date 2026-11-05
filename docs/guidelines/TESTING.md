@@ -410,6 +410,9 @@ Node1, Node2, Node3 and the local WSL instance are shared between parallel sessi
   the always-on VTN, BFF and VEN stack, so heavy builds there slow live services. Use Node1 only when
   Node2 is unavailable or a test needs the production stack. Node2 and Node3 have the `tests`/`VTN`
   sparse checkout and the openleadr-rs submodule, so all four suites run there.
+  A new top-level directory that a Dockerfile copies (`lab-forecast`, `forecaster`) must be added with
+  `git sparse-checkout add <dir>` on each docker host and on Node3 (and in `ci/install.sh`) before its first hand-off,
+  or the image build fails on a missing path.
 - **After a test run** the E2E runner container can outlive an aborted compose run and keep holding the
   network: remove it by name and check that no test containers remain before releasing the lock.
 

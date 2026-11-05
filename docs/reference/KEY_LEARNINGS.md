@@ -3808,3 +3808,9 @@ feature that needs only the broker and one container, bring those two services u
 feature, its steps, the helper steps it reuses and `helpers/` into a temp `features/` tree beside an empty `environment.py`,
 and run behave in a throwaway `python` container on that project's network. The full suite stays the runner's job.
 
+## A new top-level directory needs a sparse-checkout add on every host and on Node3 before the first hand-off (lab-forecaster, 2026-11-05)
+
+The first hand-off of the `lab-forecast` crate failed at the unit-test image build: `COPY lab-forecast/` found nothing, because
+Node3's checkout is sparse and did not list it. All audits had passed, so the failure looked like a code problem for a
+minute. When a change adds a top-level directory a Dockerfile copies, run `git sparse-checkout add <dir>` on Node1, Node2 and
+Node3 first (Node3's list is also in `ci/install.sh`).
