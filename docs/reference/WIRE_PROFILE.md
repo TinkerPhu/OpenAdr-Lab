@@ -212,6 +212,22 @@ The VEN UI's Reports page shows each obligation's cadence and marks the ad hoc o
 the `frequency_zero_*` tests in `VEN/src/controller/openadr_interface.rs` and the
 `ad_hoc_forecasts_due_on_adoption` tests in `VEN/src/services/obligation.rs`.
 
+## v4
+
+v4 adds to v3 and changes nothing in it. It covers the MQTT forecast topics, not OpenADR objects.
+
+### A forecast topic declares what its numbers are
+
+Each retained message under `<root>/forecast/<site>/` carries `schema_version`, `quantity`
+(`power`), `unit` (`kW`), `sign` (`generation_positive` for PV, `consumption_positive` for base
+load), `reading` (`average_over_step`), and for PV `curtailment` (`natural`: the uncurtailed
+generation). `generated_at` and `valid_until` state freshness; `valid_until - generated_at` is the
+series' freshness limit (default 90 minutes). `coverage_h` is the horizon actually delivered and is
+never padded. A reader rejects an unknown major `schema_version`, a missing declaration or a
+non-numeric value through `lab_forecast::forecast_payload::ForecastPayload::parse`. The topic layout,
+the status topic and the producer rules are in `docs/architecture/forecast_publication.md`. Pinned by
+the tests in `lab-forecast/src/forecast_payload.rs`.
+
 ## Changing this profile
 
 Add a new version heading and a new `#vN` fragment rather than editing an existing version in
