@@ -211,14 +211,22 @@ pub async fn publish_post_cycle_state(
         }
         _ => None,
     };
-    if let Some(forecast) = fresh.filter(|_| !weather_pv_params.is_empty()) {
-        let snow = state.pv_snow_state().await;
-        for (asset_id, params) in weather_pv_params {
-            if !existing_ids.contains(asset_id) {
-                forecasts.push(build_weather_pv_forecast(
-                    asset_id, &forecast, params, snow, wall_now,
-                ));
-            }
+    // The forecaster's retained series is preferred while usable (the same choice the tick makes); the
+    // VEN's own weather computation otherwise.
+    let received = state.received_forecasts().await;
+    let snow = state.pv_snow_state().await;
+    for (asset_id, params) in weather_pv_params {
+        if existing_ids.contains(asset_id) {
+            continue;
+        }
+        if let Some(payload) =
+            lab_forecast::received_pv::usable_pv(received.pv.get(asset_id), wall_now)
+        {
+            forecasts.push(build_received_pv_forecast(asset_id, payload, wall_now));
+        } else if let Some(forecast) = &fresh {
+            forecasts.push(build_weather_pv_forecast(
+                asset_id, forecast, params, snow, wall_now,
+            ));
         }
     }
     state.set_asset_forecasts(forecasts).await;
@@ -252,6 +260,28 @@ pub fn build_weather_pv_forecast(
         source: ForecastSource::WeatherModel,
         confidence,
         power_kw,
+        soc_frac: None,
+        availability_windows: None,
+    }
+}
+
+/// A PV forecast received from the forecaster, as the `/forecast` API shows it: the same slots the tick plans
+/// on (`pv_slots`), negated like every PV `AssetForecast` (positive = import), with the forecaster's own
+/// confidence.
+fn build_received_pv_forecast(
+    asset_id: &str,
+    payload: &lab_forecast::forecast_payload::ForecastPayload,
+    now: DateTime<Utc>,
+) -> AssetForecast {
+    AssetForecast {
+        asset_id: asset_id.to_string(),
+        updated_at: now,
+        source: ForecastSource::WeatherModel,
+        confidence: payload.confidence,
+        power_kw: lab_forecast::received_pv::pv_slots(payload)
+            .iter()
+            .map(|s| -s.forecast_ac_kw)
+            .collect(),
         soc_frac: None,
         availability_windows: None,
     }

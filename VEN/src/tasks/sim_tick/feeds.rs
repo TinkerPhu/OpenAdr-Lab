@@ -19,6 +19,7 @@ pub(crate) async fn resolve_weather_pv_for_tick(
     weather: &dyn crate::controller::WeatherForecastPort,
     pv_weather: &crate::entities::asset_params::PvWeatherParams,
     initial_snow: crate::entities::pv_snow::PvSnowState,
+    received: &lab_forecast::received_forecasts::ReceivedForecasts,
     now: DateTime<Utc>,
 ) -> (
     HashMap<String, f64>,
@@ -30,13 +31,19 @@ pub(crate) async fn resolve_weather_pv_for_tick(
     }
     let forecast = weather.latest().await;
     for (asset_id, params) in pv_weather {
-        let Some(series) = crate::entities::solar::fresh_weather_pv_series(
-            Some(params),
-            forecast.as_ref(),
-            now,
-            crate::services::planning::WEATHER_STALENESS_THRESHOLD,
-            initial_snow,
-        ) else {
+        // The forecaster's retained series while it is usable, else this VEN's own computation: one choice
+        // (`choose_pv_series`), the physics only run when it falls through.
+        let Some((series, _source)) =
+            lab_forecast::received_pv::choose_pv_series(received.pv.get(asset_id), now, || {
+                crate::entities::solar::fresh_weather_pv_series(
+                    Some(params),
+                    forecast.as_ref(),
+                    now,
+                    crate::services::planning::WEATHER_STALENESS_THRESHOLD,
+                    initial_snow,
+                )
+            })
+        else {
             continue;
         };
         if let Some(&kw) = crate::entities::solar::weather_pv_kw_for_slots(&series, &[now]).first()
@@ -46,6 +53,23 @@ pub(crate) async fn resolve_weather_pv_for_tick(
         series_by_asset.insert(asset_id.clone(), series);
     }
     (kw_now, series_by_asset)
+}
+
+/// The forecaster's base-load series for this tick, keyed by the base-load asset it belongs to (the one whose
+/// measurement the profile switches on, the series the forecaster learns from): empty when there is none or
+/// it is past its `valid_until`.
+pub(crate) fn received_base_load_for_tick(
+    base_load_asset: Option<&str>,
+    received: &lab_forecast::received_forecasts::ReceivedForecasts,
+    now: DateTime<Utc>,
+) -> HashMap<String, lab_forecast::received_pv::ReceivedSeries> {
+    let (Some(asset_id), Some(series)) = (
+        base_load_asset,
+        lab_forecast::received_pv::usable_base_load(received.base_load.as_ref(), now),
+    ) else {
+        return HashMap::new();
+    };
+    HashMap::from([(asset_id.to_string(), series)])
 }
 
 /// Real-measurement MQTT feed value for this exact instant (real-measurement-mqtt), for the

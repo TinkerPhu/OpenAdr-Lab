@@ -941,6 +941,7 @@ mod phase2b_tick_overridable_tests {
             base_load_measured_kw: None,
             base_load_baseline_kw: None,
             base_load_heuristic: None,
+            base_load_received: None,
             ev_plugged_override: None,
             ev_soc_target_override: None,
             ev_departure_time: None,

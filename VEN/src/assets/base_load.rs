@@ -101,6 +101,11 @@ pub struct BaseLoad {
     /// every tick from the live heuristics store regardless.
     #[serde(skip)]
     pub heuristic: Option<crate::entities::design_vocabulary::AssetHeuristics>,
+    /// The forecaster's retained base-load series (openspec `lab-forecaster`), handed in each tick while it
+    /// is usable. It outranks the VEN's own learned heuristic for the points it covers; outside its steps
+    /// the heuristic answers. NOT from YAML, not persisted.
+    #[serde(skip)]
+    pub received_series: Option<lab_forecast::received_pv::ReceivedSeries>,
     /// Mean and peak of the recorded load over the trailing `LOAD_WINDOW_DAYS`, for the
     /// key-features display. Injected by the hourly `tasks::base_load_window` job (the
     /// history store is acquisition; reading it as "what this load typically draws" is
@@ -129,6 +134,7 @@ impl BaseLoad {
                 .collect(),
             measured_load_kw: None,
             heuristic: None,
+            received_series: None,
             observed_window: None,
         }
     }
@@ -258,9 +264,10 @@ impl BaseLoad {
     /// whatever the current tick resolved to flat forever, the exact bug
     /// this method exists to fix).
     pub(crate) fn forecast_kw_at(&self, ts: DateTime<Utc>) -> f64 {
-        self.heuristic
+        self.received_series
             .as_ref()
-            .map(|h| h.sample_kw(ts))
+            .and_then(|series| series.at(ts))
+            .or_else(|| self.heuristic.as_ref().map(|h| h.sample_kw(ts)))
             .unwrap_or(self.baseline_kw_profile)
     }
 }
@@ -434,6 +441,7 @@ impl TickOverridable for BaseLoad {
             self.baseline_kw = baseline_kw;
         }
         self.heuristic = overrides.base_load_heuristic.clone();
+        self.received_series = overrides.base_load_received.clone();
     }
 }
 
@@ -506,6 +514,42 @@ mod tests {
         });
         let monday_8am = Utc.with_ymd_and_hms(2026, 7, 20, 8, 0, 0).unwrap(); // a Monday
         assert_eq!(bl.forecast_kw_at(monday_8am), 4.0);
+    }
+
+    #[test]
+    fn forecast_kw_at_prefers_a_received_series_inside_its_steps_and_the_heuristic_outside() {
+        let mut bl = base_load_with_spikes(vec![]);
+        let mut daytime_profile_kw: [Vec<f64>; 7] = std::array::from_fn(|_| vec![0.0; 24]);
+        daytime_profile_kw[0][8] = 4.0;
+        daytime_profile_kw[0][12] = 5.0;
+        bl.heuristic = Some(crate::entities::design_vocabulary::AssetHeuristics {
+            asset_id: "base_load".to_string(),
+            daytime_profile_kw,
+            seasonal_factor: 1.0,
+            last_updated: None,
+            recent_mean_abs_error_kw: None,
+        });
+        let monday_8am = Utc.with_ymd_and_hms(2026, 7, 20, 8, 0, 0).unwrap();
+        bl.received_series = Some(lab_forecast::received_pv::ReceivedSeries {
+            start: monday_8am,
+            step_s: 3600,
+            values_kw: vec![0.7, 0.9],
+        });
+        assert_eq!(
+            bl.forecast_kw_at(monday_8am),
+            0.7,
+            "inside the received steps"
+        );
+        assert_eq!(
+            bl.forecast_kw_at(monday_8am + chrono::Duration::minutes(90)),
+            0.9
+        );
+        let noon = Utc.with_ymd_and_hms(2026, 7, 20, 12, 0, 0).unwrap();
+        assert_eq!(
+            bl.forecast_kw_at(noon),
+            5.0,
+            "beyond the series the learned heuristic answers"
+        );
     }
 
     #[test]

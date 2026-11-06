@@ -67,6 +67,8 @@ pub struct AssetTickFeeds {
     pub weather_pv_forecast: HashMap<String, Vec<WeatherPvForecastSlot>>,
     pub measured_kw: HashMap<String, f64>,
     pub heuristic: HashMap<String, AssetHeuristics>,
+    /// The forecaster's base-load series by asset id, while usable.
+    pub base_load_received: HashMap<String, lab_forecast::received_pv::ReceivedSeries>,
 }
 
 impl AssetTickFeeds {

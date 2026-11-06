@@ -393,6 +393,7 @@ impl SimState {
             base_load_measured_kw: None,
             base_load_baseline_kw: None,
             base_load_heuristic: None,
+            base_load_received: None,
             ev_plugged_override,
             ev_soc_target_override,
             ev_departure_time: None,
@@ -436,6 +437,7 @@ impl SimState {
             });
             tick_overrides.base_load_measured_kw = measured_kw;
             tick_overrides.base_load_heuristic = feeds.heuristic.get(id).cloned();
+            tick_overrides.base_load_received = feeds.base_load_received.get(id).cloned();
             tick_overrides.base_load_baseline_kw =
                 cfg.as_any().downcast_ref::<BaseLoad>().map(|bl| {
                     let natural_base_kw =

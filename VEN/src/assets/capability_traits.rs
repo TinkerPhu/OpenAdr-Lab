@@ -175,6 +175,8 @@ pub struct TickOverrides {
     pub base_load_baseline_kw: Option<f64>,
     /// See `BaseLoad.heuristic`'s doc comment.
     pub base_load_heuristic: Option<crate::entities::design_vocabulary::AssetHeuristics>,
+    /// See `BaseLoad.received_series`'s doc comment.
+    pub base_load_received: Option<lab_forecast::received_pv::ReceivedSeries>,
 
     // EV
     pub ev_plugged_override: Option<bool>,
