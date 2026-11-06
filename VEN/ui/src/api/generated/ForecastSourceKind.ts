@@ -3,12 +3,4 @@
 /**
  * Which source a consumer plans on for one series.
  */
-export type ForecastSourceKind = 
-/**
- * The forecaster's retained message, while it is before its `valid_until`.
- */
-"forecaster" | 
-/**
- * The consumer's own computation: nothing received, or what was received is past `valid_until`.
- */
-"in_process";
+export type ForecastSourceKind = "forecaster" | "in_process";
