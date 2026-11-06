@@ -8,7 +8,7 @@
 //! `generate_synthetic_backfill` is the test-only counterpart that feeds this module's
 //! tests a "looks like 4 weeks of real history" series.
 
-use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
+use chrono::{DateTime, Duration, Utc};
 
 #[cfg(test)]
 use crate::assets::base_load::BaseLoad;
@@ -17,6 +17,7 @@ use crate::entities::design_vocabulary::AssetHeuristics;
 #[cfg(test)]
 use crate::entities::history::TickSample;
 use crate::entities::DomainError;
+use lab_forecast::base_load_learner::{learn_profile, LearnConfig, LearnedProfile, LoadSample};
 
 /// The assets this pipeline learns a heuristic for. Base load is the site's
 /// whole unmetered-consumption story (see
@@ -53,6 +54,17 @@ pub struct HeuristicsConfig {
     pub min_samples_for_confidence: usize,
 }
 
+impl HeuristicsConfig {
+    fn to_learn_config(self) -> LearnConfig {
+        LearnConfig {
+            rolling_window_days: self.rolling_window_days,
+            ewma_halflife_days: self.ewma_halflife_days,
+            shrinkage_k_days: self.shrinkage_k_days,
+            min_samples_for_confidence: self.min_samples_for_confidence,
+        }
+    }
+}
+
 impl Default for HeuristicsConfig {
     fn default() -> Self {
         Self {
@@ -64,30 +76,11 @@ impl Default for HeuristicsConfig {
     }
 }
 
-/// Continuous blend weight for a bucket/hour cell's own mean vs. the flat
-/// `overall_mean`, given how much data (`effective_days`) that cell has.
-/// `effective_days == 0` -> `0.0` (pure `overall_mean`, the old discrete
-/// fallback's exact boundary case); `effective_days == k_days` -> `0.5`;
-/// `effective_days -> \infty` -> `1.0` (pure cell mean).
-fn shrinkage_blend(effective_days: f64, k_days: f64) -> f64 {
-    effective_days / (effective_days + k_days)
-}
-
-fn ewma_weight(age_days: f64, halflife_days: f64) -> f64 {
-    0.5_f64.powf(age_days / halflife_days)
-}
-
-/// Learn a 2-bucket `daytime_profile_kw` (`[0]`=weekday, `[1]`=weekend) and
-/// `seasonal_factor` for `asset_id` from `rolling_window_days` of history.
-/// `Ok(None)` when fewer than `min_samples_for_confidence` ticks are
-/// available (cold-start).
+/// Learn the `AssetHeuristics` of `asset_id` from `rolling_window_days` of history: the VEN's adapter over
+/// `lab_forecast::base_load_learner::learn_profile`, the one implementation the forecaster also calls.
+/// `Ok(None)` when fewer than `min_samples_for_confidence` ticks are available (cold-start).
 ///
-/// `previous` (R-60): the heuristic that was in effect before this run, if
-/// any — already available to every call site via `AppState::asset_heuristics()`
-/// before it gets overwritten, so no new persistence is needed. Used to
-/// compute `recent_mean_abs_error_kw`: how far off `previous`'s predictions
-/// were from what this window's ticks actually did. `None` on the
-/// first-ever learning run for an asset (nothing to compare against yet).
+/// `previous` (R-60): the heuristic in effect before this run, used for `recent_mean_abs_error_kw`.
 pub fn learn_asset_heuristics(
     history: &dyn HistoryPort,
     asset_id: &str,
@@ -96,103 +89,31 @@ pub fn learn_asset_heuristics(
     previous: Option<&AssetHeuristics>,
 ) -> Result<Option<AssetHeuristics>, DomainError> {
     let from = now - Duration::days(cfg.rolling_window_days as i64);
-    let ticks = history.query_ticks(from, now, Some(asset_id))?;
-    if ticks.len() < cfg.min_samples_for_confidence {
-        return Ok(None);
-    }
-
-    // Index = chrono::Weekday::num_days_from_monday(): [0]=Mon..[6]=Sun.
-    let mut hour_sum = [[0.0_f64; 24]; 7];
-    let mut hour_weight = [[0.0_f64; 24]; 7];
-    let mut overall_sum = 0.0_f64;
-    let mut overall_weight = 0.0_f64;
-
-    for t in &ticks {
-        let age_days = (now - t.ts).num_seconds() as f64 / 86_400.0;
-        let w = ewma_weight(age_days, cfg.ewma_halflife_days);
-        let hour = t.ts.hour() as usize;
-        let bucket = t.ts.weekday().num_days_from_monday() as usize;
-
-        hour_sum[bucket][hour] += t.power_kw * w;
-        hour_weight[bucket][hour] += w;
-        overall_sum += t.power_kw * w;
-        overall_weight += w;
-    }
-
-    let overall_mean = if overall_weight > 0.0 {
-        overall_sum / overall_weight
-    } else {
-        0.0
-    };
-
-    // Self-calibrated from the queried data (ticks per hour of history),
-    // rather than importing tasks::history_sampler's private downsample
-    // constant — avoids coupling this application-ring module to an infra
-    // implementation detail that could change independently.
-    let avg_ticks_per_hour = ticks.len() as f64 / (cfg.rolling_window_days as f64 * 24.0);
-
-    let daytime_profile_kw: [Vec<f64>; 7] = std::array::from_fn(|bucket| {
-        (0..24)
-            .map(|h| {
-                let effective_days = hour_weight[bucket][h] / avg_ticks_per_hour.max(1e-9);
-                let blend = shrinkage_blend(effective_days, cfg.shrinkage_k_days);
-                let cell_mean = if hour_weight[bucket][h] > 0.0 {
-                    hour_sum[bucket][h] / hour_weight[bucket][h]
-                } else {
-                    0.0 // unused: blend == 0 here
-                };
-                blend * cell_mean + (1.0 - blend) * overall_mean
-            })
-            .collect()
+    let samples: Vec<LoadSample> = history
+        .query_ticks(from, now, Some(asset_id))?
+        .iter()
+        .map(|t| LoadSample {
+            ts: t.ts,
+            power_kw: t.power_kw,
+        })
+        .collect();
+    let previous = previous.map(|p| LearnedProfile {
+        daytime_profile_kw: p.daytime_profile_kw.clone(),
+        seasonal_factor: p.seasonal_factor,
+        last_updated: p.last_updated,
+        recent_mean_abs_error_kw: p.recent_mean_abs_error_kw,
     });
-
-    // Rolling 30-day mean vs. the full window's mean — with only 4 weeks of
-    // seeded data this sits near 1.0, an honest limitation of short history.
-    let thirty_days_ago = now - Duration::days(30);
-    let (recent_sum, recent_weight) =
-        ticks
-            .iter()
-            .filter(|t| t.ts >= thirty_days_ago)
-            .fold((0.0_f64, 0.0_f64), |(s, w), t| {
-                let age_days = (now - t.ts).num_seconds() as f64 / 86_400.0;
-                let weight = ewma_weight(age_days, cfg.ewma_halflife_days);
-                (s + t.power_kw * weight, w + weight)
-            });
-    let recent_mean = if recent_weight > 0.0 {
-        recent_sum / recent_weight
-    } else {
-        overall_mean
-    };
-    let seasonal_factor = if overall_mean.abs() > 1e-9 {
-        recent_mean / overall_mean
-    } else {
-        1.0
-    };
-
-    let recent_mean_abs_error_kw = previous.map(|prev| {
-        let mut err_sum = 0.0_f64;
-        let mut err_weight = 0.0_f64;
-        for t in &ticks {
-            let age_days = (now - t.ts).num_seconds() as f64 / 86_400.0;
-            let w = ewma_weight(age_days, cfg.ewma_halflife_days);
-            let predicted = prev.sample_kw(t.ts);
-            err_sum += (t.power_kw - predicted).abs() * w;
-            err_weight += w;
-        }
-        if err_weight > 0.0 {
-            err_sum / err_weight
-        } else {
-            0.0
-        }
-    });
-
-    Ok(Some(AssetHeuristics {
-        asset_id: asset_id.to_string(),
-        daytime_profile_kw,
-        seasonal_factor,
-        last_updated: Some(now),
-        recent_mean_abs_error_kw,
-    }))
+    Ok(
+        learn_profile(&samples, now, &cfg.to_learn_config(), previous.as_ref()).map(|p| {
+            AssetHeuristics {
+                asset_id: asset_id.to_string(),
+                daytime_profile_kw: p.daytime_profile_kw,
+                seasonal_factor: p.seasonal_factor,
+                last_updated: p.last_updated,
+                recent_mean_abs_error_kw: p.recent_mean_abs_error_kw,
+            }
+        }),
+    )
 }
 
 /// Generate synthetic backdated `TickSample`s for `asset_id`, at 1-minute
@@ -625,22 +546,5 @@ mod tests {
             "Wednesday bucket should show its own 20:00 spike, Tuesday shouldn't: \
              {wednesday_at_20} vs {tuesday_at_20}"
         );
-    }
-
-    #[test]
-    fn shrinkage_blend_is_zero_at_zero_effective_days() {
-        // Boundary case: must reduce exactly to the old discrete
-        // fallback's "100% overall_mean" behavior when a cell has no data.
-        assert_eq!(shrinkage_blend(0.0, 2.5), 0.0);
-    }
-
-    #[test]
-    fn shrinkage_blend_is_half_when_effective_days_equals_k() {
-        assert!((shrinkage_blend(2.5, 2.5) - 0.5).abs() < 1e-9);
-    }
-
-    #[test]
-    fn shrinkage_blend_approaches_one_for_large_effective_days() {
-        assert!(shrinkage_blend(1000.0, 2.5) > 0.99);
     }
 }

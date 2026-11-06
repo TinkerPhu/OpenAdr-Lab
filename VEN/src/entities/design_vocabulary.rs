@@ -149,14 +149,11 @@ impl AssetHeuristics {
     /// planner's own solve inputs) so both consumers can never silently
     /// diverge into two different sampling formulas.
     pub fn sample_kw(&self, slot_t: DateTime<Utc>) -> f64 {
-        use chrono::{Datelike, Timelike};
-        let bucket = slot_t.weekday().num_days_from_monday() as usize;
-        let hour = slot_t.hour() as usize;
-        let base = self.daytime_profile_kw[bucket]
-            .get(hour)
-            .copied()
-            .unwrap_or(0.0);
-        base * self.seasonal_factor
+        lab_forecast::base_load_learner::sample_profile_kw(
+            &self.daytime_profile_kw,
+            self.seasonal_factor,
+            slot_t,
+        )
     }
 }
 
