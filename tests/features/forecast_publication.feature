@@ -12,10 +12,10 @@ Feature: Forecast publication — the lab-forecaster publishes retained PV forec
     And the retained site total equals the PV forecast of the array "pv"
 
   @forecast-publication
-  Scenario: The status says the producer is healthy
+  Scenario: The status names its producer and inputs, and says cold start while the base-load history is short
     Given a weather forecast message is published to the test Mosquitto broker for VEN-1
     Then the lab-forecaster has published a retained PV forecast for the array "pv" of VEN-1's site
-    And the lab-forecaster's status is "ok" and names its producer and the age of its inputs
+    And the lab-forecaster's status is "cold_start" and names its producer and the age of its inputs
 
   @forecast-publication
   Scenario: A stale weather forecast is reported and the forecast is not refreshed
