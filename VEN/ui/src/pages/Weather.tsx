@@ -2,6 +2,7 @@ import { Alert, Chip, Stack, Typography } from "@mui/material";
 import { useWeather } from "../api/hooks";
 import { WeatherRawPanel } from "../components/weather/WeatherRawPanel";
 import { WeatherDerivedPanel } from "../components/weather/WeatherDerivedPanel";
+import { ForecastSourcePanel } from "../components/weather/ForecastSourcePanel";
 
 export function WeatherPage() {
   const { data, isLoading } = useWeather();
@@ -21,6 +22,12 @@ export function WeatherPage() {
       </Stack>
 
       {isLoading && <Typography color="text.secondary">Loading…</Typography>}
+
+      {!isLoading && data && Object.keys(data.forecast_sources).length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <ForecastSourcePanel sources={data.forecast_sources} />
+        </div>
+      )}
 
       {!isLoading && (!data || data.status === "no_forecast") && (
         <Alert severity="info" data-testid="weather-no-forecast">

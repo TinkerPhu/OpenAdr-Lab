@@ -65,6 +65,7 @@ describe("WeatherPage", () => {
         raw: null,
         derived: {},
         pv_snow_covered_now: false,
+        forecast_sources: {},
       }),
     );
     renderWeather();
@@ -81,6 +82,7 @@ describe("WeatherPage", () => {
         raw: mockRawForecast,
         derived: { pv: mockDerivedSlots },
         pv_snow_covered_now: false,
+        forecast_sources: {},
       }),
     );
     renderWeather();
@@ -99,6 +101,7 @@ describe("WeatherPage", () => {
         raw: mockRawForecast,
         derived: { pv: [{ ...mockDerivedSlots[0], snow_covered: true, forecast_ac_kw: 0 }] },
         pv_snow_covered_now: true,
+        forecast_sources: {},
       }),
     );
     renderWeather();
@@ -114,6 +117,7 @@ describe("WeatherPage", () => {
         raw: mockRawForecast,
         derived: {},
         pv_snow_covered_now: false,
+        forecast_sources: {},
       }),
     );
     renderWeather();
@@ -130,6 +134,7 @@ describe("WeatherPage", () => {
         raw: mockRawForecast,
         derived: {},
         pv_snow_covered_now: false,
+        forecast_sources: {},
       }),
     );
     renderWeather();
@@ -147,6 +152,7 @@ describe("WeatherPage", () => {
         raw: mockRawForecast,
         derived: { pv: mockDerivedSlots },
         pv_snow_covered_now: false,
+        forecast_sources: {},
       }),
     );
     renderWeather();
@@ -162,9 +168,75 @@ describe("WeatherPage", () => {
         raw: mockRawForecast,
         derived: { pv: mockDerivedSlots },
         pv_snow_covered_now: false,
+        forecast_sources: {},
       }),
     );
     renderWeather();
     expect(screen.getByTestId("weather-source-alive")).toHaveTextContent("Source: Offline");
+  });
+
+  it("shows the forecaster as the source in use, with its model and the age of the newest message", () => {
+    vi.mocked(useWeather).mockReturnValue(
+      weatherResult({
+        status: "ok",
+        is_fresh: true,
+        source_alive: true,
+        raw: mockRawForecast,
+        derived: { pv: mockDerivedSlots },
+        pv_snow_covered_now: false,
+        forecast_sources: {
+          "pv/pv": {
+            source: "forecaster",
+            model_version: "pv-weather-1",
+            age_s: 720,
+            valid_until: "2026-07-19T07:30:00Z",
+            rejected_reason: null,
+            rejected_at: null,
+          },
+          base_load: {
+            source: "in_process",
+            model_version: null,
+            age_s: null,
+            valid_until: null,
+            rejected_reason: null,
+            rejected_at: null,
+          },
+        },
+      }),
+    );
+    renderWeather();
+    expect(screen.getByTestId("forecast-source-kind-pv/pv")).toHaveTextContent("Forecaster");
+    expect(screen.getByTestId("forecast-source-age-pv/pv")).toHaveTextContent("12 min");
+    expect(screen.getByTestId("forecast-source-pv/pv")).toHaveTextContent("pv-weather-1");
+    expect(screen.getByTestId("forecast-source-kind-base_load")).toHaveTextContent("In-process");
+    expect(screen.queryByTestId("forecast-source-rejected-pv/pv")).toBeNull();
+  });
+
+  it("shows why the newest forecaster message was refused and that the VEN computes its own", () => {
+    vi.mocked(useWeather).mockReturnValue(
+      weatherResult({
+        status: "no_forecast",
+        is_fresh: false,
+        source_alive: false,
+        raw: null,
+        derived: {},
+        pv_snow_covered_now: false,
+        forecast_sources: {
+          "pv/pv": {
+            source: "in_process",
+            model_version: null,
+            age_s: null,
+            valid_until: null,
+            rejected_reason: "unsupported schema_version: 2.0.0",
+            rejected_at: "2026-07-19T06:00:00Z",
+          },
+        },
+      }),
+    );
+    renderWeather();
+    expect(screen.getByTestId("forecast-source-kind-pv/pv")).toHaveTextContent("In-process");
+    expect(screen.getByTestId("forecast-source-rejected-pv/pv")).toHaveTextContent(
+      "unsupported schema_version: 2.0.0",
+    );
   });
 });

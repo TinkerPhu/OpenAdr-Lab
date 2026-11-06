@@ -18,6 +18,7 @@ use crate::entities::pv_snow::PvSnowState;
 use crate::entities::solar::{weather_pv_forecast_series, WeatherPvForecastSlot};
 use crate::entities::weather::WeatherForecast;
 use crate::state::AppState;
+use lab_forecast::received_forecasts::{source_views, ForecastSourceView, ReceivedForecasts};
 
 /// Cached forecasts older than this are still shown (never hidden) but
 /// flagged `status: "stale"` — mirrors `WeatherForecast::is_fresh`'s own
@@ -50,6 +51,10 @@ pub struct WeatherResponse {
     /// Whether the PV asset concludes its panels are snow-covered right now (R-55): the state
     /// `derived` starts from, so a covered panel is shown covered until the melt condition.
     pv_snow_covered_now: bool,
+    /// Which source each series is planned on (openspec `lab-forecaster`): the lab-forecaster's retained
+    /// message or this VEN's own computation, how old the newest forecaster message is and why it was
+    /// refused, by series key (`pv/<array_id>`, `base_load`).
+    forecast_sources: std::collections::BTreeMap<String, ForecastSourceView>,
 }
 
 /// Pure response builder — testable without `AppCtx`, same shape as
@@ -60,6 +65,7 @@ fn build_weather_response(
     source_alive: bool,
     now: chrono::DateTime<chrono::Utc>,
     initial_snow: PvSnowState,
+    received: &ReceivedForecasts,
 ) -> WeatherResponse {
     let is_fresh = forecast
         .as_ref()
@@ -88,6 +94,11 @@ fn build_weather_response(
         raw: forecast,
         derived,
         pv_snow_covered_now: initial_snow.covered,
+        forecast_sources: source_views(
+            received,
+            &pv_params.keys().cloned().collect::<Vec<_>>(),
+            now,
+        ),
     }
 }
 
@@ -104,6 +115,7 @@ pub async fn get_weather(
         source_alive,
         chrono::Utc::now(),
         state.pv_snow_state().await,
+        &state.received_forecasts().await,
     ))
 }
 
@@ -168,6 +180,7 @@ mod tests {
             true,
             fetched_at,
             PvSnowState::default(),
+            &ReceivedForecasts::default(),
         );
         let kw = |id: &str, i: usize| resp.derived[id][i].forecast_ac_kw;
         assert!(
@@ -200,6 +213,25 @@ mod tests {
     }
 
     #[test]
+    fn forecast_sources_name_the_source_of_every_array_and_the_base_load() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 19, 6, 5, 0).unwrap();
+        let resp = build_weather_response(
+            None,
+            &arrays(&[("pv", sample_params())]),
+            false,
+            now,
+            PvSnowState::default(),
+            &ReceivedForecasts::default(),
+        );
+        let keys: Vec<&str> = resp.forecast_sources.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["base_load", "pv/pv"]);
+        assert!(resp
+            .forecast_sources
+            .values()
+            .all(|v| v.source == lab_forecast::received_forecasts::ForecastSourceKind::InProcess));
+    }
+
+    #[test]
     fn fresh_forecast_with_config_returns_ok_with_both_raw_and_derived() {
         let now = Utc.with_ymd_and_hms(2026, 7, 19, 6, 5, 0).unwrap();
         let fetched_at = Utc.with_ymd_and_hms(2026, 7, 19, 5, 54, 48).unwrap();
@@ -209,6 +241,7 @@ mod tests {
             true,
             now,
             PvSnowState::default(),
+            &ReceivedForecasts::default(),
         );
         assert_eq!(resp.status, WeatherStatus::Ok);
         assert!(resp.is_fresh);
@@ -228,6 +261,7 @@ mod tests {
             true,
             now,
             PvSnowState { covered: true },
+            &ReceivedForecasts::default(),
         );
         assert!(resp.pv_snow_covered_now);
         assert!(resp.derived["pv"][0].snow_covered);
@@ -243,6 +277,7 @@ mod tests {
             true,
             now,
             PvSnowState::default(),
+            &ReceivedForecasts::default(),
         );
         assert_eq!(resp.status, WeatherStatus::Stale);
         assert!(!resp.is_fresh);
@@ -261,6 +296,7 @@ mod tests {
             false,
             now,
             PvSnowState::default(),
+            &ReceivedForecasts::default(),
         );
         assert_eq!(resp.status, WeatherStatus::NoForecast);
         assert!(resp.raw.is_none());
@@ -277,6 +313,7 @@ mod tests {
             true,
             now,
             PvSnowState::default(),
+            &ReceivedForecasts::default(),
         );
         assert_eq!(resp.status, WeatherStatus::Ok);
         assert!(resp.raw.is_some());
@@ -293,6 +330,7 @@ mod tests {
             false,
             now,
             PvSnowState::default(),
+            &ReceivedForecasts::default(),
         );
         assert_eq!(resp.status, WeatherStatus::Ok);
         assert!(resp.is_fresh);

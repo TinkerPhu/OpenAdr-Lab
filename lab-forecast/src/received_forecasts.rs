@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 
 use crate::forecast_payload::{ForecastPayload, ForecastTopics, PayloadError, Sign};
 use chrono::{DateTime, Utc};
+use serde::Serialize;
+use ts_rs::TS;
 
 /// The key of the base-load series in `rejected`; PV arrays are `pv/<array_id>`.
 pub const BASE_LOAD_KEY: &str = "base_load";
@@ -26,6 +28,67 @@ pub fn subscriptions(topics: &ForecastTopics, pv_array_ids: &[String]) -> Vec<(S
         .chain(std::iter::once((
             topics.base_load(),
             BASE_LOAD_KEY.to_string(),
+        )))
+        .collect()
+}
+
+/// Which source a consumer plans on for one series.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ForecastSourceKind {
+    /// The forecaster's retained message, while it is before its `valid_until`.
+    Forecaster,
+    /// The consumer's own computation: nothing received, or what was received is past `valid_until`.
+    InProcess,
+}
+
+/// What the UI shows for one series: the source in use, how old the newest forecaster message is (also
+/// when it is too old to use), and why the newest message was refused, if it was.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+pub struct ForecastSourceView {
+    pub source: ForecastSourceKind,
+    /// `model_version` of the newest message received, if any.
+    pub model_version: Option<String>,
+    /// Seconds since that message's `generated_at`.
+    pub age_s: Option<u32>,
+    pub valid_until: Option<DateTime<Utc>>,
+    pub rejected_reason: Option<String>,
+    pub rejected_at: Option<DateTime<Utc>>,
+}
+
+/// The views of every series, by key (`pv/<array_id>` for each given array, and `base_load`).
+pub fn source_views(
+    received: &ReceivedForecasts,
+    pv_array_ids: &[String],
+    now: DateTime<Utc>,
+) -> BTreeMap<String, ForecastSourceView> {
+    let view = |key: String, payload: Option<&ForecastPayload>| {
+        let usable = payload.is_some_and(|p| p.is_fresh(now));
+        let rejection = received.rejection(&key);
+        (
+            key,
+            ForecastSourceView {
+                source: if usable {
+                    ForecastSourceKind::Forecaster
+                } else {
+                    ForecastSourceKind::InProcess
+                },
+                model_version: payload.map(|p| p.model_version.clone()),
+                age_s: payload.map(|p| {
+                    u32::try_from((now - p.generated_at).num_seconds().max(0)).unwrap_or(u32::MAX)
+                }),
+                valid_until: payload.map(|p| p.valid_until),
+                rejected_reason: rejection.map(|r| r.reason.clone()),
+                rejected_at: rejection.map(|r| r.at),
+            },
+        )
+    };
+    pv_array_ids
+        .iter()
+        .map(|id| view(pv_key(id), received.pv.get(id)))
+        .chain(std::iter::once(view(
+            BASE_LOAD_KEY.to_string(),
+            received.base_load.as_ref(),
         )))
         .collect()
 }
@@ -128,6 +191,67 @@ mod tests {
         )
         .unwrap();
         serde_json::to_vec(&p).unwrap()
+    }
+
+    fn views(r: &ReceivedForecasts, now: DateTime<Utc>) -> BTreeMap<String, ForecastSourceView> {
+        source_views(r, &["pv".to_string()], now)
+    }
+
+    #[test]
+    fn source_views_say_forecaster_with_model_age_and_validity_while_usable() {
+        let mut r = ReceivedForecasts::default();
+        r.apply(&pv_key("pv"), &pv_bytes(at(10, 0)), at(10, 1));
+        let v = &views(&r, at(10, 20))["pv/pv"];
+        assert_eq!(v.source, ForecastSourceKind::Forecaster);
+        assert_eq!(v.model_version.as_deref(), Some("pv-weather-1"));
+        assert_eq!(v.age_s, Some(20 * 60));
+        assert_eq!(v.valid_until, Some(at(11, 30)));
+        assert_eq!(v.rejected_reason, None);
+    }
+
+    #[test]
+    fn source_views_say_in_process_but_still_give_the_age_once_the_message_is_past_valid_until() {
+        let mut r = ReceivedForecasts::default();
+        r.apply(&pv_key("pv"), &pv_bytes(at(10, 0)), at(10, 1));
+        let v = &views(&r, at(12, 0))["pv/pv"];
+        assert_eq!(v.source, ForecastSourceKind::InProcess);
+        assert_eq!(
+            v.age_s,
+            Some(2 * 3600),
+            "how old the forecaster's last word is"
+        );
+    }
+
+    #[test]
+    fn source_views_say_in_process_with_no_age_when_nothing_was_received() {
+        let v = &views(&ReceivedForecasts::default(), at(10, 0))["pv/pv"];
+        assert_eq!(v.source, ForecastSourceKind::InProcess);
+        assert_eq!(
+            (v.age_s, v.model_version.clone(), v.valid_until),
+            (None, None, None)
+        );
+    }
+
+    #[test]
+    fn source_views_carry_the_rejection_reason_and_time() {
+        let mut r = ReceivedForecasts::default();
+        r.apply(&pv_key("pv"), b"{}", at(10, 5));
+        let v = &views(&r, at(10, 6))["pv/pv"];
+        assert!(v
+            .rejected_reason
+            .as_deref()
+            .unwrap()
+            .contains("parse error"));
+        assert_eq!(v.rejected_at, Some(at(10, 5)));
+        assert_eq!(v.source, ForecastSourceKind::InProcess);
+    }
+
+    #[test]
+    fn source_views_cover_the_base_load_and_every_given_array() {
+        let r = ReceivedForecasts::default();
+        let v = source_views(&r, &["a".to_string(), "b".to_string()], at(10, 0));
+        let keys: Vec<&str> = v.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["base_load", "pv/a", "pv/b"]);
     }
 
     #[test]

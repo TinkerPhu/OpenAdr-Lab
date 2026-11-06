@@ -48,6 +48,8 @@ import type { EventReceived } from "./generated/EventReceived";
 import type { SessionFlexibility } from "./generated/SessionFlexibility";
 import type { ForecastAccuracySample } from "./generated/ForecastAccuracySample";
 import type { ForecastLeadKind } from "./generated/ForecastLeadKind";
+import type { ForecastSourceKind } from "./generated/ForecastSourceKind";
+import type { ForecastSourceView } from "./generated/ForecastSourceView";
 import type { ForecastSource } from "./generated/ForecastSource";
 import type { GeoPosition } from "./generated/GeoPosition";
 import type { GridSample } from "./generated/GridSample";
@@ -172,6 +174,8 @@ export type {
   SessionFlexibility,
   ForecastAccuracySample,
   ForecastLeadKind,
+  ForecastSourceKind,
+  ForecastSourceView,
   ForecastSource,
   GeoPosition,
   GridSample,
