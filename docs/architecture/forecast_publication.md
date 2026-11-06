@@ -72,3 +72,26 @@ consumption for that weekday and hour, times a seasonal factor. Until the histor
 series is flat at the mean of what exists, or 0.4 kW with no history at all, `model_version` is `base-load-cold-start-1`, and the
 status state is `cold_start`; a learned series says `base-load-profile-1`. The base load is published also while the weather is stale.
 Deleting the cache file loses only learned history.
+
+## The VEN reads them
+
+A VEN with `FORECAST_MQTT_HOST` set (ven-1 on Node1; `FORECAST_MQTT_PORT`, `_ROOT`, `_SITE_ID` as for the weather feed)
+subscribes to the topic of each PV array of its profile and to `base_load/power_kw` (`VEN/src/forecast_feed.rs`). Every message
+goes through `ForecastPayload::parse`; the latest valid payload per series is kept in `AppState` (`ReceivedForecasts`,
+`lab-forecast/src/received_forecasts.rs`), a refused message is recorded with its reason and leaves the older payload in place.
+
+- **PV:** each tick, `resolve_weather_pv_for_tick` asks `choose_pv_series` (`lab-forecast/src/received_pv.rs`): the received
+  series while `now <= valid_until` and declared `generation_positive`, else the VEN's own weather computation (the physics run
+  only then). The chosen slots go to the PV asset as before (`TickOverrides.pv_weather_forecast`); the asset stays the only
+  interpreter. A received series carries the forecaster's snow state, so its slots leave the asset's snow observation nothing
+  to add. The `/forecast` API uses the same choice (`build_received_pv_forecast`).
+- **Base load:** the series goes to the base-load asset whose measurement the profile switches on
+  (`TickOverrides.base_load_received`); `BaseLoad::forecast_kw_at` answers from it inside its steps, from the learned heuristic
+  beyond, and from the profile baseline last.
+- **Fallback:** nothing configured, nothing received, a stale or refused series: the VEN computes its own, as before the
+  forecaster existed. Units are kW both ways; the sign is the VEN's own (generation positive inside the asset, negated in
+  `AssetForecast`) and conversion happens only where the payload becomes slots.
+- **Shown:** `GET /weather` carries `forecast_sources` (source in use per series, `model_version`, age of the newest message,
+  refusal reason); the VEN UI's Weather page lists them (`ForecastSourcePanel`).
+- **Scored:** `forecast_accuracy_samples` has a `model_version` column (schema v13); a sample whose series came from the
+  forecaster names its model, one from the VEN's own computation is NULL.

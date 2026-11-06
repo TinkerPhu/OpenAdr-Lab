@@ -16824,3 +16824,30 @@ first sample is the already-past "fact" hour, so a series starts before now; con
 **Key learning.** A producer and a consumer of one contract call the same parse function, and the test that proves it
 compares the parsed values with the computed ones bit for bit (that is what exposed the float parsing).
 
+## The base load is forecast by the container, and the VEN reads both forecasts (T-OL-01, slices 2 and 3 of lab-forecaster)
+
+**What.** Slice 2: the forecaster keeps the measured house load in 10-minute buckets (a JSON-lines cache file in a volume),
+calls the one learner the VEN also uses (`lab_forecast::base_load_learner`; the VEN's `learn_asset_heuristics` became an adapter
+over it) and publishes a retained `base_load/power_kw` (hourly, 48 h; a flat, labelled cold-start series until it has 100
+samples). Slice 3: a VEN with `FORECAST_MQTT_HOST` (ven-1) subscribes to the PV and base-load topics, validates every message with
+`ForecastPayload::parse`, prefers a series before its `valid_until` and computes its own otherwise. The PV asset and the base-load
+asset get the series as an injected parameter; `GET /weather` and the VEN UI show the source per series, the age of the newest
+message and why one was refused; `forecast_accuracy_samples` (schema v13) names the forecaster's `model_version`.
+
+**Why.** The advisor and the VEN should plan on one forecast, produced once; the VEN keeps working when the container is gone.
+
+**Decisions.** The cache is a text file, not SQLite (a few MB of rebuildable data). The received-forecast store and every rule
+about it (which sign a key takes, which source is in use, what the UI shows) live in `lab-forecast`, so they are tested locally and
+used by both sides; the VEN keeps adapters. The received base-load series is addressed to the asset whose measurement is on
+(`base_load_asset`), one answer for the tick and for the accuracy sampler. Only ven-1 consumes: ven-2 and ven-3 share the site but
+model smaller arrays.
+
+**Issues.** (1) The status scenario expected `ok`, but with an empty base-load history the spec says `cold_start`; the scenario was
+wrong, the code right. (2) Moving a query to named columns fixed a duplication-audit regression caused by a long run of `row.get(n)`.
+(3) The generated UI types were written by hand and are checked by `generated_ui_types_are_current` on Node2. (4) No E2E scenario
+for the VEN side: switching the consumer on `test-ven-1` would break the weather scenarios that expect the sin-model fallback, because
+the forecaster's retained series stays valid for 90 minutes; filed as the follow-up in the change's task 5.1.
+
+**Key learning.** A retained message outlives the scenario that caused it: an E2E scenario for "no forecast" breaks as soon as
+a producer's last message is still valid. Test a consumer with its own VEN, not by switching the shared one.
+

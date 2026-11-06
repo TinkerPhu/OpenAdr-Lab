@@ -439,7 +439,7 @@ and `status`. A reader that subscribes late gets them at once.
   the cold is forecast covered, the same conclusion the VEN's PV asset reaches.
 
 Contract: `docs/architecture/forecast_publication.md` and `docs/reference/WIRE_PROFILE.md#v4`.
-`base_load/power_kw` (hourly, 48 h, learned from the base-load measurement, a labelled flat cold-start series until there is history) is published too. The VEN reading these topics is a later slice of the same change.
+`base_load/power_kw` (hourly, 48 h, learned from the base-load measurement, a labelled flat cold-start series until there is history) is published too. A VEN with `FORECAST_MQTT_HOST` set (ven-1) plans on these series while they are fresh and on its own computation otherwise; its Weather page shows, per series, the source in use, the model, the age of the newest message and why one was refused, and its forecast-accuracy samples name the forecaster's `model_version`.
 
 **What to test:**
 - `tests/features/forecast_publication.feature`: a weather forecast becoming a declared retained PV

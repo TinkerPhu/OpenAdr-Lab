@@ -86,6 +86,10 @@ base_load = grid_meter_true − Σ(other real asset measurements)
 
 and fed to the VEN as `base_load`'s own measurement. This matters for what follows.
 
+The base-load profile described here is learned by `lab_forecast::base_load_learner`, shared by the VEN and the lab-forecaster
+container; a VEN configured for it uses the container's retained series before its own heuristic (see
+[forecast_publication.md](forecast_publication.md)).
+
 ## 5. Why there is no separate "site residual" channel
 
 A virtual `site-residual` asset existed until 2026-08 (BL-08 / Phase 5 WP5.1), defined as

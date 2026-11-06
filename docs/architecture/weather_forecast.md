@@ -495,6 +495,12 @@ Example:
 | `.../forecast` | on every successful fetch; ≥5 min apart; skip entirely on fetch failure | yes | 1 | no |
 | `.../status` | on every status change, and unconditionally ≥ every 5 min | yes | 1 | yes, payload `status:"offline"` |
 
+## The PV forecast can also arrive ready-made
+
+The PV series derived from this feed is also published by the lab-forecaster container as a retained MQTT message, and a VEN
+configured for it plans on that series while it is fresh and on its own derivation otherwise; the physics is the same
+function either way. See [forecast_publication.md](forecast_publication.md).
+
 ## VEN-side config
 
 Broker host/port, `<root>` prefix, and `site_id` are env-var-driven

@@ -3814,3 +3814,16 @@ The first hand-off of the `lab-forecast` crate failed at the unit-test image bui
 Node3's checkout is sparse and did not list it. All audits had passed, so the failure looked like a code problem for a
 minute. When a change adds a top-level directory a Dockerfile copies, run `git sparse-checkout add <dir>` on Node1, Node2 and
 Node3 first (Node3's list is also in `ci/install.sh`).
+
+## A retained message makes "nothing was published" scenarios order-dependent (lab-forecaster, 2026-11-06)
+
+A forecast the producer published earlier stays on the broker and stays valid for its whole `valid_until`. A consumer switched on
+in a shared E2E VEN then sees it in scenarios that assume the fallback ("no forecast", "stale forecast"). Give the consumer its
+own test VEN, or clear the retained topic first, instead of adding the consumer to the shared one.
+
+## When a refactor moves a duplicated block out of a cluster, the audit sees the cluster under a new name (2026-11-06)
+
+`audit_duplication.py` keys a cluster by the set of files that share a window. Taking one file out of a four-file cluster makes the
+same windows a three-file cluster, which the baseline counts as growth. If the totals went down, re-record with `--update` and say
+so in the commit message; if not, the change added a copy.
+

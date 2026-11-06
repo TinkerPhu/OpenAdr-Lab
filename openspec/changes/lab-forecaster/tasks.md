@@ -22,15 +22,15 @@ PV rows of 5.2. Slice 2: 1.2, 1.4, 3.4, base load. Slice 3: section 4 (VEN consu
 - [x] 3.6 Dockerfile and compose service; runs with the broker alone, no InfluxDB
 
 ## 4. VEN consumption
-- [ ] 4.1 Subscriber adapter (via the payload validator), source preference with fallback, boundary conversion in `entities/units.rs`
-- [ ] 4.2 Inject the received series into the PV asset and the base-load asset; no other module interprets it
-- [ ] 4.3 VEN UI: source, age, rejection reason
-- [ ] 4.4 Accuracy samples against the received series with `model_version`
+- [x] 4.1 Subscriber adapter (via the payload validator), source preference with fallback, boundary conversion in `entities/units.rs`
+- [x] 4.2 Inject the received series into the PV asset and the base-load asset; no other module interprets it
+- [x] 4.3 VEN UI: source, age, rejection reason (Weather page, `forecast_sources` in `GET /weather`)
+- [x] 4.4 Accuracy samples against the received series with `model_version`
 
 ## 5. Tests and docs
-- [ ] 5.1 BDD scenarios in `tests/features/` plus `audit_step_definitions.py`
-- [ ] 5.2 Use-case doc; update `forecasting_model.md` and `weather_forecast.md`
+- [ ] 5.1 BDD scenarios in `tests/features/` plus `audit_step_definitions.py` (forecast_publication.feature covers the container; the VEN side is covered by unit tests only: enabling the consumer on `test-ven-1` would break the weather scenarios that expect the sin-model fallback, because the forecaster's retained series stays valid for 90 min; a dedicated test VEN is the follow-up)
+- [x] 5.2 Use-case doc; update `forecasting_model.md` and `weather_forecast.md`
 - [ ] 5.3 Journal and KEY_LEARNINGS; `openspec validate lab-forecaster`
-- [ ] 5.4 Report to the coordination session: new card for the digest to read these topics and retire its VEN-REST read; the sign and unit mapping to the catalogue
-- [ ] 5.5 Before the first host run: `git sparse-checkout add lab-forecast` (and `forecaster`) on the Node hosts, with the user's go (the pre-flight in `run_all_tests.sh` aborts otherwise)
+- [x] 5.4 Report to the coordination session: new card for the digest to read these topics and retire its VEN-REST read; the sign and unit mapping to the catalogue
+- [x] 5.5 (done on Node2 and Node3; Node1 has a full tree) Before the first host run: `git sparse-checkout add lab-forecast` (and `forecaster`) on the Node hosts, with the user's go (the pre-flight in `run_all_tests.sh` aborts otherwise)
 - [ ] 5.6 Wave into current-state docs and delete this change after the merge
