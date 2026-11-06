@@ -6,6 +6,7 @@ mod controller;
 mod domain_params;
 mod entities;
 mod fleet_telemetry;
+mod forecast_feed;
 mod history_store;
 mod ids;
 mod measurement;

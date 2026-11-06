@@ -22,6 +22,16 @@ pub fn spawn_all(w: &World, trigger_rx: watch::Receiver<PlanTriggerSignal>) {
     spawn_planning(w, trigger_rx);
     spawn_state_persist(w);
     spawn_history_jobs(w);
+    spawn_forecast_feed(w);
+}
+
+/// The lab-forecaster's retained forecasts, when `FORECAST_MQTT_HOST` names a broker; not supervised: the task
+/// reconnects by itself and a failure of it only means the VEN keeps computing its own forecasts.
+fn spawn_forecast_feed(w: &World) {
+    if let Some(cfg) = crate::forecast_feed::ForecastFeedConfig::from_env() {
+        let pv_array_ids = w.asset_feeds.pv_weather.keys().cloned().collect();
+        crate::forecast_feed::spawn(cfg, pv_array_ids, w.state.clone());
+    }
 }
 
 /// GB-09: poll cadence and startup jitter are resolved once per process, so

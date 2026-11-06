@@ -15,6 +15,8 @@ pub mod pv_params;
 pub mod pv_profile;
 pub mod pv_snow;
 pub mod pv_snow_observation;
+pub mod received_forecasts;
+pub mod received_pv;
 pub mod solar;
 pub mod weather;
 pub mod weather_wire;

@@ -36,6 +36,7 @@ mod obligations;
 mod openadr_objects;
 mod persistence;
 mod pv_snow;
+mod received_forecasts;
 mod report_submissions;
 mod report_windows;
 mod site_headroom_forecast;
@@ -138,6 +139,8 @@ pub struct HemsState {
     /// The PV asset's own snow-cover conclusion, published each tick (R-55): the starting state
     /// of every weather-sourced PV forecast. See `state/pv_snow.rs`.
     pub pv_snow_state: crate::entities::pv_snow::PvSnowState,
+    /// The forecasts received from the lab-forecaster: see `state/received_forecasts.rs`.
+    pub received_forecasts: lab_forecast::received_forecasts::ReceivedForecasts,
     pub arbiter_diagnostics: arbiter::ArbiterDiagnostics,
 }
 
