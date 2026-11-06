@@ -6,4 +6,9 @@ import type { ForecastLeadKind } from "./ForecastLeadKind";
  * it). `actual_kw`/`actual_at` start `None` and are filled in once `history_sampler` flushes a
  * downsampled window covering `target_ts` (`forecast-accuracy-tracking`).
  */
-export type ForecastAccuracySample = { asset_id: string, lead_kind: ForecastLeadKind, target_ts: string, predicted_kw: number, predicted_at: string, actual_kw: number | null, actual_at: string | null, };
+export type ForecastAccuracySample = { asset_id: string, lead_kind: ForecastLeadKind, target_ts: string, predicted_kw: number, predicted_at: string, actual_kw: number | null, actual_at: string | null, 
+/**
+ * The `model_version` of the lab-forecaster's forecast this sample scores; `None` for the VEN's own
+ * computation (and for rows written before schema v13).
+ */
+model_version: string | null, };

@@ -55,21 +55,20 @@ pub(crate) async fn resolve_weather_pv_for_tick(
     (kw_now, series_by_asset)
 }
 
-/// The forecaster's base-load series for this tick, keyed by the base-load asset it belongs to (the one whose
-/// measurement the profile switches on, the series the forecaster learns from): empty when there is none or
-/// it is past its `valid_until`.
+/// The forecaster's base-load series for this tick, keyed by the base-load asset it belongs to
+/// (`ReceivedForecasts::base_load_for`): empty when there is none or it is past its `valid_until`.
 pub(crate) fn received_base_load_for_tick(
-    base_load_asset: Option<&str>,
     received: &lab_forecast::received_forecasts::ReceivedForecasts,
     now: DateTime<Utc>,
 ) -> HashMap<String, lab_forecast::received_pv::ReceivedSeries> {
-    let (Some(asset_id), Some(series)) = (
-        base_load_asset,
-        lab_forecast::received_pv::usable_base_load(received.base_load.as_ref(), now),
-    ) else {
+    let Some(asset_id) = received.base_load_asset.as_deref() else {
         return HashMap::new();
     };
-    HashMap::from([(asset_id.to_string(), series)])
+    received
+        .base_load_for(asset_id, now)
+        .map(|(series, _)| (asset_id.to_string(), series))
+        .into_iter()
+        .collect()
 }
 
 /// Real-measurement MQTT feed value for this exact instant (real-measurement-mqtt), for the

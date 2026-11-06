@@ -22,8 +22,8 @@ pub(super) fn append(
         let mut stmt = tx
             .prepare(
                 "INSERT INTO forecast_accuracy_samples
-                    (asset_id, lead_kind, target_ts, predicted_kw, predicted_at, actual_kw, actual_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    (asset_id, lead_kind, target_ts, predicted_kw, predicted_at, actual_kw, actual_at, model_version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )
             .map_err(|e| DomainError::StorageError(format!("prepare insert: {e}")))?;
         for row in rows {
@@ -35,6 +35,7 @@ pub(super) fn append(
                 to_unix(row.predicted_at),
                 row.actual_kw,
                 row.actual_at.map(to_unix),
+                row.model_version,
             ])
             .map_err(|e| DomainError::StorageError(format!("insert forecast sample: {e}")))?;
         }
@@ -83,6 +84,18 @@ pub(super) fn reconcile(
     Ok(())
 }
 
+/// One `forecast_accuracy_samples` row as stored, before its timestamps and lead kind are parsed.
+struct StoredRow {
+    asset_id: String,
+    lead_kind: String,
+    target_ts: i64,
+    predicted_kw: f64,
+    predicted_at: i64,
+    actual_kw: Option<f64>,
+    actual_at: Option<i64>,
+    model_version: Option<String>,
+}
+
 pub(super) fn query(
     conn: &Connection,
     from: DateTime<Utc>,
@@ -90,11 +103,9 @@ pub(super) fn query(
     asset_id: Option<&str>,
     lead_kind: Option<ForecastLeadKind>,
 ) -> Result<Vec<ForecastAccuracySample>, DomainError> {
-    type Row = (String, String, i64, f64, i64, Option<f64>, Option<i64>);
-
     let mut stmt = conn
         .prepare(
-            "SELECT asset_id, lead_kind, target_ts, predicted_kw, predicted_at, actual_kw, actual_at
+            "SELECT asset_id, lead_kind, target_ts, predicted_kw, predicted_at, actual_kw, actual_at, model_version
              FROM forecast_accuracy_samples
              WHERE target_ts >= ?1 AND target_ts < ?2
                AND (?3 IS NULL OR asset_id = ?3)
@@ -103,19 +114,20 @@ pub(super) fn query(
         )
         .map_err(|e| DomainError::StorageError(format!("prepare query_forecast_accuracy: {e}")))?;
     let lead_kind_str = lead_kind.map(|k| k.to_string());
-    let raw: Vec<Row> = stmt
+    let raw: Vec<StoredRow> = stmt
         .query_map(
             params![to_unix(from), to_unix(to), asset_id, lead_kind_str],
             |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                ))
+                Ok(StoredRow {
+                    asset_id: row.get("asset_id")?,
+                    lead_kind: row.get("lead_kind")?,
+                    target_ts: row.get("target_ts")?,
+                    predicted_kw: row.get("predicted_kw")?,
+                    predicted_at: row.get("predicted_at")?,
+                    actual_kw: row.get("actual_kw")?,
+                    actual_at: row.get("actual_at")?,
+                    model_version: row.get("model_version")?,
+                })
             },
         )
         .map_err(|e| DomainError::StorageError(format!("query_forecast_accuracy: {e}")))?
@@ -125,20 +137,19 @@ pub(super) fn query(
         })?;
 
     raw.into_iter()
-        .map(
-            |(asset_id, lead_kind, target_ts, predicted_kw, predicted_at, actual_kw, actual_at)| {
-                Ok(ForecastAccuracySample {
-                    asset_id,
-                    lead_kind: ForecastLeadKind::from_str(&lead_kind).map_err(|e| {
-                        DomainError::StorageError(format!("invalid stored lead_kind: {e}"))
-                    })?,
-                    target_ts: from_unix(target_ts)?,
-                    predicted_kw,
-                    predicted_at: from_unix(predicted_at)?,
-                    actual_kw,
-                    actual_at: actual_at.map(from_unix).transpose()?,
-                })
-            },
-        )
+        .map(|r| {
+            Ok(ForecastAccuracySample {
+                asset_id: r.asset_id,
+                lead_kind: ForecastLeadKind::from_str(&r.lead_kind).map_err(|e| {
+                    DomainError::StorageError(format!("invalid stored lead_kind: {e}"))
+                })?,
+                target_ts: from_unix(r.target_ts)?,
+                predicted_kw: r.predicted_kw,
+                predicted_at: from_unix(r.predicted_at)?,
+                actual_kw: r.actual_kw,
+                actual_at: r.actual_at.map(from_unix).transpose()?,
+                model_version: r.model_version,
+            })
+        })
         .collect()
 }

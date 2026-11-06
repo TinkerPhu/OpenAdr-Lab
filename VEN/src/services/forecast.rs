@@ -64,7 +64,9 @@ pub async fn finish_plan_cycle(
     // forecast-accuracy-tracking: best-effort write, log-and-continue on failure — same
     // pattern as history_sampler::write_window. Skipped entirely when history is disabled.
     if let Some(history) = history {
-        let samples = record_forecast_accuracy_samples(&cycle.plan, &heuristics, wall_now);
+        let received = state.received_forecasts().await;
+        let samples =
+            record_forecast_accuracy_samples(&cycle.plan, &heuristics, &received, wall_now);
         if !samples.is_empty() {
             let h = history.clone();
             let res =
@@ -126,6 +128,7 @@ fn build_plan_history_sample(plan: &Plan) -> PlanHistorySample {
 pub fn record_forecast_accuracy_samples(
     plan: &Plan,
     heuristics: &HashMap<String, AssetHeuristics>,
+    received: &lab_forecast::received_forecasts::ReceivedForecasts,
     now: DateTime<Utc>,
 ) -> Vec<ForecastAccuracySample> {
     if plan.slots.len() < 2 {
@@ -144,11 +147,20 @@ pub fn record_forecast_accuracy_samples(
         let mut forecast_assets: Vec<_> = slot.forecast_by_asset.iter().collect();
         forecast_assets.sort_by(|a, b| a.0.cmp(b.0));
         for (asset_id, power) in forecast_assets {
-            // A generation forecast is the plan's own; a load's is its learned heuristic.
-            let predicted_kw = if power.generation {
-                Some(power.forecast_kw)
+            // A generation forecast is the plan's own; a load's is the forecaster's received series while
+            // that is what the asset plans on, else its learned heuristic. The forecaster's `model_version`
+            // is named on the sample, so its forecasts can be scored apart from the VEN's own.
+            let (predicted_kw, model_version) = if power.generation {
+                let model = lab_forecast::received_pv::usable_pv(received.pv.get(asset_id), now)
+                    .map(|p| p.model_version.clone());
+                (Some(power.forecast_kw), model)
+            } else if let Some((series, payload)) = received.base_load_for(asset_id, now) {
+                (series.at(slot.start), Some(payload.model_version.clone()))
             } else {
-                heuristics.get(asset_id).map(|h| h.sample_kw(slot.start))
+                (
+                    heuristics.get(asset_id).map(|h| h.sample_kw(slot.start)),
+                    None,
+                )
             };
             if let Some(predicted_kw) = predicted_kw {
                 out.push(ForecastAccuracySample {
@@ -159,6 +171,7 @@ pub fn record_forecast_accuracy_samples(
                     predicted_at: now,
                     actual_kw: None,
                     actual_at: None,
+                    model_version,
                 });
             }
         }
@@ -777,7 +790,8 @@ mod tests {
         let mut heuristics = HashMap::new();
         heuristics.insert("house".to_string(), base_load_heuristic());
 
-        let samples = record_forecast_accuracy_samples(&plan, &heuristics, ts(0));
+        let samples =
+            record_forecast_accuracy_samples(&plan, &heuristics, &Default::default(), ts(0));
 
         let near = |id: &str| {
             samples
@@ -802,6 +816,70 @@ mod tests {
     }
 
     #[test]
+    fn record_forecast_accuracy_samples_name_the_forecasters_model_for_the_series_in_use() {
+        use lab_forecast::forecast_payload::{ForecastPayload, PayloadMeta, SeriesGrid};
+        let meta = |model: &str| PayloadMeta {
+            generated_at: ts(0),
+            valid_until: ts(0) + chrono::Duration::minutes(90),
+            model_version: model.into(),
+            producer_id: "fc".into(),
+            confidence: 0.5,
+        };
+        let grid = SeriesGrid {
+            start: ts(0),
+            step_s: 3600,
+        };
+        let mut received = lab_forecast::received_forecasts::ReceivedForecasts {
+            base_load_asset: Some("house".into()),
+            ..Default::default()
+        };
+        let pv = ForecastPayload::pv_natural(meta("pv-weather-1"), grid, vec![1.0, 1.0]).unwrap();
+        let load =
+            ForecastPayload::base_load(meta("base-load-profile-1"), grid, vec![0.9, 0.9]).unwrap();
+        received.apply("pv/pv", &serde_json::to_vec(&pv).unwrap(), ts(0));
+        received.apply("base_load", &serde_json::to_vec(&load).unwrap(), ts(0));
+        let forecasts = [("pv", -1.0, true), ("house", 0.9, false)];
+        let plan = make_plan_with_slots(vec![
+            slot_with_forecasts(0, &forecasts),
+            slot_with_forecasts(1, &forecasts),
+        ]);
+        let mut heuristics = HashMap::new();
+        heuristics.insert("house".to_string(), base_load_heuristic());
+
+        let samples = record_forecast_accuracy_samples(&plan, &heuristics, &received, ts(0));
+
+        let near = |id: &str| {
+            samples
+                .iter()
+                .find(|s| s.asset_id == id && s.lead_kind == ForecastLeadKind::Near)
+                .unwrap()
+        };
+        assert_eq!(near("pv").model_version.as_deref(), Some("pv-weather-1"));
+        assert_eq!(
+            near("house").model_version.as_deref(),
+            Some("base-load-profile-1")
+        );
+        assert_eq!(
+            near("house").predicted_kw,
+            0.9,
+            "the received value, not the 0.7 heuristic"
+        );
+    }
+
+    #[test]
+    fn record_forecast_accuracy_samples_have_no_model_version_for_the_vens_own_computation() {
+        let plan = make_plan_with_slots(vec![slot_with_pv(0, 1.0), slot_with_pv(1, 2.0)]);
+        let mut heuristics = HashMap::new();
+        heuristics.insert(
+            crate::ids::ASSET_BASE_LOAD.to_string(),
+            base_load_heuristic(),
+        );
+        let samples =
+            record_forecast_accuracy_samples(&plan, &heuristics, &Default::default(), ts(0));
+        assert!(samples.iter().all(|s| s.model_version.is_none()));
+    }
+
+    #[test]
     fn record_forecast_accuracy_samples_two_slot_plan_yields_four_samples() {
         let plan = make_plan_with_slots(vec![slot_with_pv(0, 1.0), slot_with_pv(1, 2.0)]);
         let mut heuristics = HashMap::new();
@@ -810,14 +888,16 @@ mod tests {
             base_load_heuristic(),
         );
 
-        let samples = record_forecast_accuracy_samples(&plan, &heuristics, ts(0));
+        let samples =
+            record_forecast_accuracy_samples(&plan, &heuristics, &Default::default(), ts(0));
         assert_eq!(samples.len(), 4, "2 assets x 2 lead kinds (near, far)");
     }
 
     #[test]
     fn record_forecast_accuracy_samples_single_slot_plan_yields_zero() {
         let plan = make_plan_with_slots(vec![slot_with_pv(0, 1.0)]);
-        let samples = record_forecast_accuracy_samples(&plan, &HashMap::new(), ts(0));
+        let samples =
+            record_forecast_accuracy_samples(&plan, &HashMap::new(), &Default::default(), ts(0));
         assert!(samples.is_empty());
     }
 
@@ -826,7 +906,8 @@ mod tests {
         // slots[0] and slots[1] deliberately carry different pv_forecast_kw — the near
         // sample must come from slots[1], never slots[0].
         let plan = make_plan_with_slots(vec![slot_with_pv(0, 99.0), slot_with_pv(1, 2.0)]);
-        let samples = record_forecast_accuracy_samples(&plan, &HashMap::new(), ts(0));
+        let samples =
+            record_forecast_accuracy_samples(&plan, &HashMap::new(), &Default::default(), ts(0));
         let near_pv = samples
             .iter()
             .find(|s| s.asset_id == crate::ids::ASSET_PV && s.lead_kind == ForecastLeadKind::Near)
@@ -843,7 +924,8 @@ mod tests {
         // No base_load heuristic present — PV must still be sampled.
         let heuristics = HashMap::new();
 
-        let samples = record_forecast_accuracy_samples(&plan, &heuristics, ts(0));
+        let samples =
+            record_forecast_accuracy_samples(&plan, &heuristics, &Default::default(), ts(0));
         // PV (2) only; base_load omitted entirely.
         assert_eq!(samples.len(), 2);
         assert!(samples

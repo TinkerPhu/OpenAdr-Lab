@@ -148,6 +148,10 @@ pub struct ForecastAccuracySample {
     pub predicted_at: DateTime<Utc>,
     pub actual_kw: Option<f64>,
     pub actual_at: Option<DateTime<Utc>>,
+    /// The `model_version` of the lab-forecaster's forecast this sample scores; `None` for the VEN's own
+    /// computation (and for rows written before schema v13).
+    #[serde(default)]
+    pub model_version: Option<String>,
 }
 
 /// GB-25 — one row of plan-quality history: solve time, solver outcome, MIP gap

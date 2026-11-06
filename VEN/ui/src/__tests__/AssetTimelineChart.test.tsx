@@ -68,6 +68,7 @@ function forecastSample(leadKind: "near" | "far", targetTs: number): ForecastAcc
     predicted_at: now,
     actual_kw: null,
     actual_at: null,
+    model_version: null,
   };
 }
 

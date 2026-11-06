@@ -119,11 +119,7 @@ pub(crate) async fn resolve_tick_context(
         weather_pv_forecast,
         measured_kw,
         heuristic: state.asset_heuristics().await,
-        base_load_received: super::feeds::received_base_load_for_tick(
-            asset_feeds.measured_base_load.as_deref(),
-            &received,
-            now,
-        ),
+        base_load_received: super::feeds::received_base_load_for_tick(&received, now),
     };
     let (overlay_enabled, ev_sessions_now) =
         super::arbiter_glue::resolve_overlay_enabled(state, now).await;

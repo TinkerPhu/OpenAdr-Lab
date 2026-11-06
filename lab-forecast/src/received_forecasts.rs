@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 
 use crate::forecast_payload::{ForecastPayload, ForecastTopics, PayloadError, Sign};
+use crate::received_pv::{usable_base_load, ReceivedSeries};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use ts_rs::TS;
@@ -105,6 +106,9 @@ pub struct ReceivedForecasts {
     /// Latest valid PV payload by array id.
     pub pv: BTreeMap<String, ForecastPayload>,
     pub base_load: Option<ForecastPayload>,
+    /// The base-load asset the received series belongs to (the one whose measurement the profile switches
+    /// on, the series the forecaster learns from); set when the subscriber is wired.
+    pub base_load_asset: Option<String>,
     /// The newest refused message by series key; cleared when a valid one for the key arrives.
     pub rejected: BTreeMap<String, Rejection>,
 }
@@ -134,6 +138,20 @@ impl ReceivedForecasts {
                 );
             }
         }
+    }
+
+    /// The received base-load series and its payload for `asset_id`, while usable at `now`: only for the
+    /// asset the series belongs to.
+    pub fn base_load_for(
+        &self,
+        asset_id: &str,
+        now: DateTime<Utc>,
+    ) -> Option<(ReceivedSeries, &ForecastPayload)> {
+        if self.base_load_asset.as_deref() != Some(asset_id) {
+            return None;
+        }
+        let payload = self.base_load.as_ref()?;
+        usable_base_load(Some(payload), now).map(|series| (series, payload))
     }
 
     /// A PV key takes only a series declared as generation, the base-load key only one declared as consumption:
@@ -252,6 +270,52 @@ mod tests {
         let v = source_views(&r, &["a".to_string(), "b".to_string()], at(10, 0));
         let keys: Vec<&str> = v.keys().map(String::as_str).collect();
         assert_eq!(keys, ["base_load", "pv/a", "pv/b"]);
+    }
+
+    fn base_load_bytes(generated: DateTime<Utc>) -> Vec<u8> {
+        let p = ForecastPayload::base_load(
+            PayloadMeta {
+                generated_at: generated,
+                valid_until: generated + chrono::Duration::minutes(90),
+                model_version: "base-load-profile-1".into(),
+                producer_id: "fc".into(),
+                confidence: 0.5,
+            },
+            SeriesGrid {
+                start: generated,
+                step_s: 3600,
+            },
+            vec![0.4, 0.6],
+        )
+        .unwrap();
+        serde_json::to_vec(&p).unwrap()
+    }
+
+    #[test]
+    fn base_load_for_gives_the_series_and_payload_only_to_its_own_asset_while_usable() {
+        let mut r = ReceivedForecasts {
+            base_load_asset: Some("house".into()),
+            ..Default::default()
+        };
+        r.apply(BASE_LOAD_KEY, &base_load_bytes(at(10, 0)), at(10, 1));
+        let (series, payload) = r.base_load_for("house", at(10, 30)).unwrap();
+        assert_eq!(series.at(at(10, 30)), Some(0.4));
+        assert_eq!(payload.model_version, "base-load-profile-1");
+        assert!(
+            r.base_load_for("other", at(10, 30)).is_none(),
+            "not another asset's"
+        );
+        assert!(
+            r.base_load_for("house", at(12, 0)).is_none(),
+            "not past valid_until"
+        );
+    }
+
+    #[test]
+    fn base_load_for_is_none_when_no_asset_is_named() {
+        let mut r = ReceivedForecasts::default();
+        r.apply(BASE_LOAD_KEY, &base_load_bytes(at(10, 0)), at(10, 1));
+        assert!(r.base_load_for("house", at(10, 30)).is_none());
     }
 
     #[test]

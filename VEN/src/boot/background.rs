@@ -30,7 +30,12 @@ pub fn spawn_all(w: &World, trigger_rx: watch::Receiver<PlanTriggerSignal>) {
 fn spawn_forecast_feed(w: &World) {
     if let Some(cfg) = crate::forecast_feed::ForecastFeedConfig::from_env() {
         let pv_array_ids = w.asset_feeds.pv_weather.keys().cloned().collect();
-        crate::forecast_feed::spawn(cfg, pv_array_ids, w.state.clone());
+        crate::forecast_feed::spawn(
+            cfg,
+            pv_array_ids,
+            w.asset_feeds.measured_base_load.clone(),
+            w.state.clone(),
+        );
     }
 }
 

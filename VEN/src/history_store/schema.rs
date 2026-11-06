@@ -1,7 +1,7 @@
 //! Versioned DDL for the history SQLite store, applied stepwise via
 //! `PRAGMA user_version` in `history_store::migrate`.
 
-pub(super) const SCHEMA_VERSION: i64 = 12;
+pub(super) const SCHEMA_VERSION: i64 = 13;
 
 pub(super) const SCHEMA_V1: &str = "
 CREATE TABLE tick_samples (
@@ -202,4 +202,10 @@ ALTER TABLE tick_samples ADD COLUMN curtailment_source REAL;
 UPDATE tick_samples SET curtailment_source = CASE curtailment_source_name
     WHEN 'plan' THEN 1.0 WHEN 'capacity' THEN 2.0 END;
 ALTER TABLE tick_samples DROP COLUMN curtailment_source_name;
+";
+
+/// Which model made a scored forecast (openspec `lab-forecaster`, task 4.4): the forecaster's
+/// `model_version`, NULL for the VEN's own computation and for older rows.
+pub(super) const SCHEMA_V13: &str = "
+ALTER TABLE forecast_accuracy_samples ADD COLUMN model_version TEXT;
 ";

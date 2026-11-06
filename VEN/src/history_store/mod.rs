@@ -29,8 +29,8 @@ use crate::entities::history::{
 };
 use crate::entities::DomainError;
 use schema::{
-    SCHEMA_V1, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5,
-    SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_VERSION,
+    SCHEMA_V1, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4,
+    SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_VERSION,
 };
 
 type GridSampleRow = (
@@ -133,6 +133,10 @@ impl SqliteHistoryStore {
         if version < 12 {
             conn.execute_batch(SCHEMA_V12)
                 .map_err(|e| DomainError::StorageError(format!("apply schema v12: {e}")))?;
+        }
+        if version < 13 {
+            conn.execute_batch(SCHEMA_V13)
+                .map_err(|e| DomainError::StorageError(format!("apply schema v13: {e}")))?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| DomainError::StorageError(format!("set user_version: {e}")))?;
@@ -740,7 +744,27 @@ mod tests {
             predicted_at: ts(0),
             actual_kw: None,
             actual_at: None,
+            model_version: None,
         }
+    }
+
+    #[test]
+    fn test_forecast_sample_model_version_round_trips_and_older_rows_read_as_none() {
+        let store = SqliteHistoryStore::in_memory().unwrap();
+        store
+            .append_forecast_samples(&[
+                ForecastAccuracySample {
+                    model_version: Some("pv-weather-1".into()),
+                    ..forecast_sample("pv", ts(100))
+                },
+                forecast_sample("pv", ts(200)),
+            ])
+            .unwrap();
+        let rows = store
+            .query_forecast_accuracy(ts(0), ts(300), None, None)
+            .unwrap();
+        assert_eq!(rows[0].model_version.as_deref(), Some("pv-weather-1"));
+        assert_eq!(rows[1].model_version, None);
     }
 
     #[test]

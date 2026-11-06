@@ -41,7 +41,12 @@ impl ForecastFeedConfig {
 }
 
 /// Spawn the subscription task: one topic per PV array plus the base load.
-pub fn spawn(config: ForecastFeedConfig, pv_array_ids: Vec<String>, state: AppState) {
+pub fn spawn(
+    config: ForecastFeedConfig,
+    pv_array_ids: Vec<String>,
+    base_load_asset: Option<String>,
+    state: AppState,
+) {
     let topics = match ForecastTopics::new(&config.root, &config.site_id) {
         Ok(t) => t,
         Err(e) => {
@@ -68,6 +73,7 @@ pub fn spawn(config: ForecastFeedConfig, pv_array_ids: Vec<String>, state: AppSt
         "forecast feed: MQTT subscriber configured"
     );
     tokio::spawn(async move {
+        state.set_received_base_load_asset(base_load_asset).await;
         loop {
             match eventloop.poll().await {
                 // Clean session: the broker forgets the subscriptions on every disconnect, so subscribe on

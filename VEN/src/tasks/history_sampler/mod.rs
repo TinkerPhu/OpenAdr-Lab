@@ -358,6 +358,7 @@ mod tests {
                 predicted_at: ts(0),
                 actual_kw: None,
                 actual_at: None,
+                model_version: None,
             }])
             .unwrap();
         let state = AppState::new();

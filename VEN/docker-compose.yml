@@ -65,6 +65,11 @@ services:
       PV_MEASUREMENT_MQTT_SITE_ID: "zunzgen"
       BASE_LOAD_MEASUREMENT_MQTT_HOST: "host.docker.internal"
       BASE_LOAD_MEASUREMENT_MQTT_SITE_ID: "zunzgen"
+      # The lab-forecaster's retained PV and base-load forecasts (docs/architecture/forecast_publication.md),
+      # preferred while fresh; the VEN's own computation otherwise. ven-1 only: the forecaster is built from
+      # ven-1's profile (14.4 kWp), while ven-2 and ven-3 model smaller arrays at the same site.
+      FORECAST_MQTT_HOST: "host.docker.internal"
+      FORECAST_MQTT_SITE_ID: "zunzgen"
     volumes:
       - ./data/ven-1:/data
       - ./profiles/ven-1.yaml:/config/profile.yaml:ro
