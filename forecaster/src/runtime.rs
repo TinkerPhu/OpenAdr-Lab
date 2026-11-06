@@ -9,10 +9,11 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use lab_forecast::forecast_payload::{ForecastStatus, ForecastTopics};
-use lab_forecast::pv_profile::pv_arrays_from_yaml;
+use lab_forecast::pv_profile::{base_load_measured_from_yaml, pv_arrays_from_yaml};
 use rumqttc::{AsyncClient, Event, EventLoop, LastWill, MqttOptions, Packet, QoS};
 use tracing::{info, warn};
 
+use crate::cache;
 use crate::config::Config;
 use crate::dispatch::{check_single_producer, handle_message, handle_tick, FeedTopics};
 use crate::engine::{Engine, EngineSettings, Publication};
@@ -31,10 +32,12 @@ const MAX_PACKET_BYTES: usize = 256 * 1024;
 pub async fn run(config: Config, profile_yaml: &str, clock: Clock) -> Result<(), String> {
     let arrays = pv_arrays_from_yaml(profile_yaml)?;
     let topics = ForecastTopics::new(&config.root, &config.site).map_err(|e| e.to_string())?;
+    let base_load_enabled = base_load_measured_from_yaml(profile_yaml)?;
     let feeds = FeedTopics::new(
         &config.root,
         &config.site,
         arrays.iter().any(|a| a.measured),
+        base_load_enabled,
     );
     info!(
         arrays = arrays.len(),
@@ -48,7 +51,9 @@ pub async fn run(config: Config, profile_yaml: &str, clock: Clock) -> Result<(),
         producer_id: config.producer_id.clone(),
         model_version: config.model_version.clone(),
         freshness: config.freshness,
+        base_load_enabled,
     });
+    load_cache(&mut engine, config.cache_path.as_deref());
 
     let (client, mut eventloop) = AsyncClient::new(mqtt_options(&config, &topics, clock()), 64);
     guard_single_producer(&client, &mut eventloop, &topics, &config, &clock).await?;
@@ -78,9 +83,11 @@ pub async fn run(config: Config, profile_yaml: &str, clock: Clock) -> Result<(),
             _ = tick.tick() => {
                 publish_all(&client, handle_tick(&mut engine, clock()));
                 log_problem(&engine);
+                save_cache(&engine, config.cache_path.as_deref());
             }
             _ = shutdown_signal() => {
                 info!("shutting down: publishing offline");
+                save_cache(&engine, config.cache_path.as_deref());
                 say_goodbye(&client, &mut eventloop, &topics, &config, clock()).await;
                 return Ok(());
             }
@@ -161,7 +168,9 @@ async fn guard_single_producer(
 }
 
 async fn subscribe_feeds(client: &AsyncClient, feeds: &FeedTopics) {
-    let wanted = std::iter::once(&feeds.weather_forecast).chain(feeds.pv_measurement.as_ref());
+    let wanted = std::iter::once(&feeds.weather_forecast)
+        .chain(feeds.pv_measurement.as_ref())
+        .chain(feeds.base_load_measurement.as_ref());
     for topic in wanted {
         if let Err(e) = client.subscribe(topic, QoS::AtLeastOnce).await {
             warn!(error = %e, topic = %topic, "subscribe failed");
@@ -176,6 +185,40 @@ fn publish_all(client: &AsyncClient, publications: Vec<Publication>) {
         if let Err(e) = client.try_publish(&p.topic, QoS::AtLeastOnce, true, p.payload) {
             warn!(error = %e, topic = %p.topic, "publish dropped");
         }
+    }
+}
+
+/// Put the saved base-load history back. A missing or damaged file costs only learned history.
+fn load_cache(engine: &mut Engine, path: Option<&str>) {
+    let Some(path) = path else { return };
+    match std::fs::read_to_string(path) {
+        Ok(text) => {
+            let (samples, skipped) = cache::decode(&text);
+            info!(
+                samples = samples.len(),
+                skipped, path, "base-load history restored"
+            );
+            engine.restore_base_load_history(&samples);
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            info!(path, "no base-load cache yet: starting from cold");
+        }
+        Err(e) => warn!(error = %e, path, "base-load cache unreadable: starting from cold"),
+    }
+}
+
+/// Write the history next to the cache file and rename it over, so a crash never leaves half a file.
+fn save_cache(engine: &Engine, path: Option<&str>) {
+    let Some(path) = path else { return };
+    let history = engine.base_load_history();
+    if history.is_empty() {
+        return;
+    }
+    let tmp = format!("{path}.tmp");
+    let written =
+        std::fs::write(&tmp, cache::encode(&history)).and_then(|()| std::fs::rename(&tmp, path));
+    if let Err(e) = written {
+        warn!(error = %e, path, "base-load cache not saved");
     }
 }
 

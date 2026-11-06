@@ -9,7 +9,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from behave import then
+from behave import given, then
 
 from features.helpers.wait import poll_until
 
@@ -133,3 +133,45 @@ def step_forecast_not_refreshed(context, array_id):
     time.sleep(12)  # more than two recompute cadences (5 s) of the test container
     after = _retained(_array_topic(array_id))["generated_at"]
     assert after == before, f"the forecast was refreshed on stale weather: {before} -> {after}"
+
+
+BASE_LOAD_TOPIC = f"{ROOT}/forecast/{SITE}/base_load/power_kw"
+
+
+@given("a base-load measurement of {kw:g} kW is published to the test Mosquitto broker for VEN-1")
+def step_publish_base_load_measurement(context, kw):
+    import paho.mqtt.publish as publish
+
+    publish.single(
+        f"{ROOT}/measurement/{SITE}/base_load",
+        payload=json.dumps({"power_kw": kw, "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}),
+        hostname="mosquitto",
+        port=1883,
+        qos=1,
+        retain=False,
+    )
+
+
+@then("the lab-forecaster has published a retained base-load forecast for VEN-1's site")
+def step_base_load_published(context):
+    context.base_load_forecast = _wait_for(
+        lambda: _retained(BASE_LOAD_TOPIC), f"a retained base-load forecast on {BASE_LOAD_TOPIC}"
+    )
+
+
+@then("that base-load forecast declares power in kW, positive for consumption, with no curtailment")
+def step_base_load_declares_contract(context):
+    body = context.base_load_forecast
+    assert body["quantity"] == "power" and body["unit"] == "kW", body
+    assert body["sign"] == "consumption_positive", body
+    assert body["reading"] == "average_over_step", body
+    assert "curtailment" not in body, body
+    assert all(isinstance(v, (int, float)) and v >= 0 for v in body["values"]), body["values"]
+
+
+@then("that base-load forecast covers {hours:g} hours in 1-hour steps and names its model")
+def step_base_load_coverage(context, hours):
+    body = context.base_load_forecast
+    assert body["coverage_h"] == hours and body["step_s"] == 3600, body
+    assert len(body["values"]) == hours, len(body["values"])
+    assert body["model_version"].startswith("base-load-"), body["model_version"]

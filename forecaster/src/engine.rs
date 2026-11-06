@@ -8,11 +8,13 @@
 
 use std::collections::BTreeMap;
 
+use crate::base_load::BaseLoadModel;
 use chrono::{DateTime, Duration, Utc};
+use lab_forecast::base_load_learner::{LearnConfig, LoadSample};
 use lab_forecast::confidence::mean_slot_confidence;
 use lab_forecast::forecast_payload::{
-    ForecastPayload, ForecastState, ForecastStatus, ForecastTopics, PayloadMeta, SeriesGrid,
-    SnowState, SCHEMA_VERSION,
+    ForecastPayload, ForecastState, ForecastStatus, ForecastTopics, PayloadError, PayloadMeta,
+    SeriesGrid, SnowState, SCHEMA_VERSION,
 };
 use lab_forecast::measurement_wire::{
     resolve_measured_kw, MeasurementReading, MEASUREMENT_STALENESS_THRESHOLD,
@@ -33,6 +35,8 @@ pub struct EngineSettings {
     pub model_version: String,
     /// `valid_until - generated_at` of every series, and how old a weather forecast may be.
     pub freshness: Duration,
+    /// Whether the profile switches the base-load measurement on: then `base_load/power_kw` is published.
+    pub base_load_enabled: bool,
 }
 
 /// One retained message to publish.
@@ -49,11 +53,16 @@ pub struct Engine {
     snow: BTreeMap<String, PvSnowState>,
     state: ForecastState,
     last_problem: Option<String>,
+    base_load: Option<BaseLoadModel>,
 }
 
 impl Engine {
     pub fn new(settings: EngineSettings) -> Self {
+        let base_load = settings
+            .base_load_enabled
+            .then(|| BaseLoadModel::new(LearnConfig::default()));
         Self {
+            base_load,
             settings,
             weather: None,
             pv_measurement: None,
@@ -73,29 +82,94 @@ impl Engine {
         self.pv_measurement = Some(reading);
     }
 
-    /// Recompute at `now`: the messages to publish (every PV array and the total, republished even when
-    /// unchanged so `generated_at` is a heartbeat), or none when there is no usable weather. Sets the state
-    /// that `status` reports.
+    /// The latest base-load measurement joins the learner's history.
+    pub fn on_base_load_measurement(&mut self, reading: MeasurementReading) {
+        if let Some(model) = self.base_load.as_mut() {
+            model.record(reading);
+        }
+    }
+
+    /// The learner's history as samples, for the cache file.
+    pub fn base_load_history(&self) -> Vec<LoadSample> {
+        self.base_load
+            .as_ref()
+            .map(BaseLoadModel::history)
+            .unwrap_or_default()
+    }
+
+    /// Put cached samples back after a restart.
+    pub fn restore_base_load_history(&mut self, samples: &[LoadSample]) {
+        if let Some(model) = self.base_load.as_mut() {
+            model.restore(samples);
+        }
+    }
+
+    /// Recompute at `now`: the messages to publish (every PV array and the total, and the base load when
+    /// the profile measures it; republished even when unchanged so `generated_at` is a heartbeat). The PV
+    /// series need a fresh weather forecast and are skipped without one; the base load does not. Sets the
+    /// state that `status` reports.
     pub fn recompute(&mut self, now: DateTime<Utc>) -> Vec<Publication> {
-        let Some(forecast) = self.weather.clone() else {
-            self.state = ForecastState::ColdStart;
-            return Vec::new();
+        let mut publications = Vec::new();
+        let pv_state = match self.weather.clone() {
+            None => ForecastState::ColdStart,
+            Some(forecast) if !forecast.is_fresh(now, self.settings.freshness) => {
+                ForecastState::WeatherStale
+            }
+            Some(forecast) => match self.publish_pv(&forecast, now) {
+                Ok(pv) => {
+                    publications.extend(pv);
+                    ForecastState::Ok
+                }
+                Err(reason) => {
+                    self.last_problem = Some(reason);
+                    ForecastState::Degraded
+                }
+            },
         };
-        if !forecast.is_fresh(now, self.settings.freshness) {
-            self.state = ForecastState::WeatherStale;
-            return Vec::new();
-        }
-        match self.publish_pv(&forecast, now) {
-            Ok(publications) => {
-                self.state = ForecastState::Ok;
-                publications
+        let base_load_cold = match self.publish_base_load(now) {
+            Ok(Some((publication, cold))) => {
+                publications.push(publication);
+                cold
             }
+            Ok(None) => false,
             Err(reason) => {
-                self.state = ForecastState::Degraded;
                 self.last_problem = Some(reason);
-                Vec::new()
+                false
             }
-        }
+        };
+        self.state = if pv_state == ForecastState::Ok && base_load_cold {
+            ForecastState::ColdStart
+        } else {
+            pv_state
+        };
+        publications
+    }
+
+    /// The base-load series and whether it is a cold-start one; `None` when the profile has no base load.
+    fn publish_base_load(
+        &mut self,
+        now: DateTime<Utc>,
+    ) -> Result<Option<(Publication, bool)>, String> {
+        let Some(model) = self.base_load.as_mut() else {
+            return Ok(None);
+        };
+        let series = model.series(now);
+        let meta = PayloadMeta {
+            generated_at: now,
+            valid_until: now + self.settings.freshness,
+            model_version: series.model_version.to_string(),
+            producer_id: self.settings.producer_id.clone(),
+            confidence: series.confidence,
+        };
+        let grid = SeriesGrid {
+            start: series.start,
+            step_s: 3600,
+        };
+        let publication = build_publication(
+            self.settings.topics.base_load(),
+            ForecastPayload::base_load(meta, grid, series.values_kw),
+        )?;
+        Ok(Some((publication, series.cold_start)))
     }
 
     /// Why the last `recompute` ended `Degraded`, for the log.
@@ -115,6 +189,12 @@ impl Engine {
             input_age_s.insert(
                 "pv_measurement".to_string(),
                 self.pv_measurement.and_then(|(_, at)| age_s(at)),
+            );
+        }
+        if let Some(model) = &self.base_load {
+            input_age_s.insert(
+                "base_load_measurement".to_string(),
+                model.last_reading_at().and_then(age_s),
             );
         }
         let snow_state = self
@@ -184,13 +264,14 @@ impl Engine {
                 .topics
                 .pv_array(&array.id)
                 .map_err(|e| e.to_string())?;
-            publications.push(build_publication(topic, meta.clone(), grid, values)?);
+            publications.push(build_publication(
+                topic,
+                ForecastPayload::pv_natural(meta.clone(), grid, values),
+            )?);
         }
         publications.push(build_publication(
             self.settings.topics.pv_total(),
-            meta,
-            grid,
-            total,
+            ForecastPayload::pv_natural(meta, grid, total),
         )?);
         Ok(publications)
     }
@@ -227,14 +308,12 @@ impl Engine {
     }
 }
 
+/// A payload (built by one of `ForecastPayload`'s constructors, so already validated) as a publication.
 fn build_publication(
     topic: String,
-    meta: PayloadMeta,
-    grid: SeriesGrid,
-    values: Vec<f64>,
+    payload: Result<ForecastPayload, PayloadError>,
 ) -> Result<Publication, String> {
-    let payload =
-        ForecastPayload::pv_natural(meta, grid, values).map_err(|e| format!("{topic}: {e}"))?;
+    let payload = payload.map_err(|e| format!("{topic}: {e}"))?;
     Ok(Publication {
         topic,
         payload: serde_json::to_vec(&payload).expect("a payload always serialises"),
@@ -291,8 +370,27 @@ mod tests {
             producer_id: "forecaster-a".into(),
             model_version: "pv-weather-1".into(),
             freshness: Duration::minutes(90),
+            base_load_enabled: false,
         }
     }
+
+    fn settings_with_base_load(spec: &[(&str, bool)]) -> EngineSettings {
+        EngineSettings {
+            base_load_enabled: true,
+            ..settings(spec)
+        }
+    }
+
+    /// One reading a minute for `days` before `end`, constant `kw`.
+    fn feed_base_load(e: &mut Engine, end: DateTime<Utc>, days: i64, kw: f64) {
+        let mut ts = end - Duration::days(days);
+        while ts < end {
+            e.on_base_load_measurement((kw, ts));
+            ts += Duration::minutes(1);
+        }
+    }
+
+    const BASE_LOAD_TOPIC: &str = "openadr-lab/forecast/zunzgen/base_load/power_kw";
 
     /// `hours` hourly samples from `first`, all with the same temperature and irradiance.
     fn weather(
@@ -557,5 +655,94 @@ mod tests {
         assert_eq!(s.state, ForecastState::ColdStart);
         assert_eq!(s.input_age_s["weather"], None);
         assert_eq!(s.input_age_s["pv_measurement"], None);
+    }
+
+    #[test]
+    fn base_load_is_published_as_cold_start_without_any_history_even_without_weather() {
+        let now = at(2026, 7, 14, 12, 30);
+        let mut e = Engine::new(settings_with_base_load(&[("pv", false)]));
+        let pubs = e.recompute(now);
+        let p = payload_of(&pubs, BASE_LOAD_TOPIC);
+        assert_eq!(p.model_version, "base-load-cold-start-1");
+        assert_eq!(p.values.len(), 48);
+        assert_eq!(p.step_s, 3600);
+        assert_eq!(p.start, at(2026, 7, 14, 12, 0));
+        assert_eq!(
+            p.sign,
+            lab_forecast::forecast_payload::Sign::ConsumptionPositive
+        );
+        assert_eq!(p.curtailment, None);
+        assert_eq!(e.state(), ForecastState::ColdStart);
+    }
+
+    #[test]
+    fn base_load_is_learned_once_the_history_is_enough_and_the_state_is_ok() {
+        let now = at(2026, 7, 14, 12, 30);
+        let mut e = Engine::new(settings_with_base_load(&[("pv", false)]));
+        e.on_weather(summer(now - Duration::minutes(10)));
+        feed_base_load(&mut e, now, 14, 0.6);
+        let pubs = e.recompute(now);
+        let p = payload_of(&pubs, BASE_LOAD_TOPIC);
+        assert_eq!(p.model_version, "base-load-profile-1");
+        assert!(
+            p.values.iter().all(|v| (*v - 0.6).abs() < 0.05),
+            "{:?}",
+            &p.values[..4]
+        );
+        assert_eq!(p.generated_at, now);
+        assert_eq!(p.valid_until, now + Duration::minutes(90));
+        assert_eq!(e.state(), ForecastState::Ok);
+    }
+
+    #[test]
+    fn base_load_is_still_published_when_the_weather_is_stale() {
+        let now = at(2026, 7, 14, 12, 30);
+        let mut e = Engine::new(settings_with_base_load(&[("pv", false)]));
+        e.on_weather(summer(now - Duration::minutes(200)));
+        let pubs = e.recompute(now);
+        assert!(pubs.iter().any(|p| p.topic == BASE_LOAD_TOPIC));
+        assert!(
+            pubs.iter().all(|p| !p.topic.contains("/pv/")),
+            "no PV on stale weather"
+        );
+        assert_eq!(e.state(), ForecastState::WeatherStale);
+    }
+
+    #[test]
+    fn no_base_load_topic_when_the_profile_has_no_base_load_measurement() {
+        let now = at(2026, 7, 14, 12, 30);
+        let mut e = engine_with_summer(&[("pv", false)], now);
+        assert!(e.recompute(now).iter().all(|p| p.topic != BASE_LOAD_TOPIC));
+    }
+
+    #[test]
+    fn status_names_the_age_of_the_base_load_measurement() {
+        let now = at(2026, 7, 14, 12, 30);
+        let mut e = Engine::new(settings_with_base_load(&[("pv", false)]));
+        assert_eq!(
+            ForecastStatus::parse(&e.status(now).payload)
+                .unwrap()
+                .input_age_s["base_load_measurement"],
+            None
+        );
+        e.on_base_load_measurement((0.5, now - Duration::seconds(40)));
+        assert_eq!(
+            ForecastStatus::parse(&e.status(now).payload)
+                .unwrap()
+                .input_age_s["base_load_measurement"],
+            Some(40)
+        );
+    }
+
+    #[test]
+    fn base_load_history_survives_a_restart_through_export_and_import() {
+        let now = at(2026, 7, 14, 12, 30);
+        let mut a = Engine::new(settings_with_base_load(&[("pv", false)]));
+        feed_base_load(&mut a, now, 14, 0.6);
+        let saved = a.base_load_history();
+        let mut b = Engine::new(settings_with_base_load(&[("pv", false)]));
+        b.restore_base_load_history(&saved);
+        let p = payload_of(&b.recompute(now), BASE_LOAD_TOPIC);
+        assert_eq!(p.model_version, "base-load-profile-1");
     }
 }

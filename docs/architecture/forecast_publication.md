@@ -12,7 +12,7 @@ Under `<root>/forecast/<site>/`, all retained, QoS 1:
 |---|---|
 | `pv/<array_id>/power_kw` | natural PV generation of one array (the id of the PV asset in the VEN profile) |
 | `pv/total/power_kw` | the sum of the arrays, slot by slot |
-| `base_load/power_kw` | base-load consumption (a later slice) |
+| `base_load/power_kw` | base-load consumption, hourly steps, 48 h (published when the profile switches the base-load measurement on) |
 | `status` | state, input ages, snow state per array, `producer_id`; last will sets `offline` |
 
 `total` is reserved and is never an array id. Names are built only by
@@ -54,12 +54,21 @@ The service `lab-forecaster` (`forecaster/Dockerfile`, compose service in `VEN/d
 | `FORECASTER_PRODUCER_ID` | who publishes; a second container with another id is refused while this one is live | hostname |
 | `FORECASTER_FRESHNESS_MINUTES` | `valid_until - generated_at`, and the oldest weather forecast still used | 90 |
 | `FORECASTER_RECOMPUTE_SECONDS` | heartbeat besides every new weather forecast | 900 |
-| `FORECASTER_MODEL_VERSION` | names the model in each payload | `pv-weather-1` |
+| `FORECASTER_MODEL_VERSION` | names the PV model in each payload | `pv-weather-1` |
+| `FORECASTER_CACHE_PATH` | file keeping the base-load history across restarts; empty turns it off | `/data/base_load_cache.jsonl` |
 
 It reads `<root>/weather/<site>/forecast` and, when a profile array switches `measurement` on,
-`<root>/measurement/<site>/pv`; it needs nothing else. A `SIGTERM` publishes the retained status `offline`.
+`<root>/measurement/<site>/pv` and, when the base-load asset switches `measurement` on, `<root>/measurement/<site>/base_load`; it needs nothing else. A `SIGTERM` publishes the retained status `offline`.
 Per hourly weather sample the value is the weather model's PV output at the start of that hour, declared as the average
 over the step; the first sample is the weather feed's already-past hour, so a reader skips slots before now.
 
 Where the code is: `forecaster/src/engine.rs` (the decision), `dispatch.rs` (message routing and the single-producer guard),
-`config.rs`, `runtime.rs` (the broker session). Slice 1 publishes PV only; base load and the VEN reading these topics follow.
+`config.rs`, `runtime.rs` (the broker session). `base_load.rs` keeps the measured load in 10-minute buckets and calls the shared learner (`lab-forecast/src/base_load_learner.rs`, the one the VEN uses); `cache.rs` is the cache file text. The VEN reading these topics follows.
+
+## Base load
+
+`base_load/power_kw` is hourly, 48 values, starting at the hour that contains `generated_at`; `values[i]` is the learned typical
+consumption for that weekday and hour, times a seasonal factor. Until the history clears the learner's gate (100 samples) the
+series is flat at the mean of what exists, or 0.4 kW with no history at all, `model_version` is `base-load-cold-start-1`, and the
+status state is `cold_start`; a learned series says `base-load-profile-1`. The base load is published also while the weather is stale.
+Deleting the cache file loses only learned history.

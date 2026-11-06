@@ -219,6 +219,7 @@ dependencies = [
  "chrono",
  "lab-forecast",
  "rumqttc",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

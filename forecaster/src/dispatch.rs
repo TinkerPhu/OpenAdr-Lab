@@ -7,7 +7,7 @@
 use chrono::{DateTime, Duration, Utc};
 use lab_forecast::feed_topics::{measurement_topic, weather_forecast_topic};
 use lab_forecast::forecast_payload::ForecastStatus;
-use lab_forecast::measurement_wire::parse_pv_measurement;
+use lab_forecast::measurement_wire::{parse_base_load_measurement, parse_pv_measurement};
 use lab_forecast::weather_wire::parse_forecast_message;
 
 use crate::engine::{Engine, Publication};
@@ -18,13 +18,17 @@ pub struct FeedTopics {
     pub weather_forecast: String,
     /// Only when some array's measurement is switched on in the profile.
     pub pv_measurement: Option<String>,
+    /// Only when the profile switches the base-load measurement on.
+    pub base_load_measurement: Option<String>,
 }
 
 impl FeedTopics {
-    pub fn new(root: &str, site: &str, any_array_measured: bool) -> Self {
+    pub fn new(root: &str, site: &str, any_array_measured: bool, base_load_enabled: bool) -> Self {
         Self {
             weather_forecast: weather_forecast_topic(root, site),
             pv_measurement: any_array_measured.then(|| measurement_topic(root, site, "pv")),
+            base_load_measurement: base_load_enabled
+                .then(|| measurement_topic(root, site, "base_load")),
         }
     }
 }
@@ -66,6 +70,15 @@ pub fn handle_message(
                 Handled::default()
             }
             Err(reason) => rejected("PV measurement", &reason),
+        };
+    }
+    if feeds.base_load_measurement.as_deref() == Some(topic) {
+        return match parse_base_load_measurement(payload) {
+            Ok(reading) => {
+                engine.on_base_load_measurement(reading);
+                Handled::default()
+            }
+            Err(reason) => rejected("base-load measurement", &reason),
         };
     }
     Handled::default()
@@ -127,11 +140,12 @@ mod tests {
             producer_id: "fc-a".into(),
             model_version: "pv-weather-1".into(),
             freshness: Duration::minutes(90),
+            base_load_enabled: false,
         })
     }
 
     fn feeds() -> FeedTopics {
-        FeedTopics::new("openadr-lab", "zunzgen", true)
+        FeedTopics::new("openadr-lab", "zunzgen", true, false)
     }
 
     fn weather_message(fetched_at: DateTime<Utc>) -> Vec<u8> {
@@ -163,14 +177,15 @@ mod tests {
     #[test]
     fn feed_topics_listen_for_the_pv_measurement_only_when_one_is_configured() {
         assert_eq!(
-            FeedTopics::new("openadr-lab", "zunzgen", true),
+            FeedTopics::new("openadr-lab", "zunzgen", true, false),
             FeedTopics {
                 weather_forecast: "openadr-lab/weather/zunzgen/forecast".into(),
                 pv_measurement: Some("openadr-lab/measurement/zunzgen/pv".into()),
+                base_load_measurement: None,
             }
         );
         assert_eq!(
-            FeedTopics::new("openadr-lab", "zunzgen", false).pv_measurement,
+            FeedTopics::new("openadr-lab", "zunzgen", false, false).pv_measurement,
             None
         );
     }
@@ -230,6 +245,32 @@ mod tests {
         assert_eq!(h.rejected, None);
         let s = ForecastStatus::parse(&e.status(NOW()).payload).unwrap();
         assert_eq!(s.input_age_s["pv_measurement"], Some(20));
+    }
+
+    #[test]
+    fn a_base_load_measurement_is_routed_to_the_learner_only_when_it_is_configured() {
+        let mut e = engine(false);
+        e.recompute(NOW());
+        let topic = "openadr-lab/measurement/zunzgen/base_load";
+        let body = format!(r#"{{"power_kw": 0.5, "ts": "{}"}}"#, NOW().to_rfc3339());
+        let on = FeedTopics::new("openadr-lab", "zunzgen", false, true);
+        assert_eq!(
+            on.base_load_measurement.as_deref(),
+            Some(topic),
+            "the topic is listened to when the profile measures the base load"
+        );
+        assert_eq!(
+            handle_message(&mut e, &on, topic, body.as_bytes(), NOW()),
+            Handled::default()
+        );
+        let off = FeedTopics::new("openadr-lab", "zunzgen", false, false);
+        assert_eq!(off.base_load_measurement, None);
+        assert_eq!(
+            handle_message(&mut e, &off, topic, body.as_bytes(), NOW()),
+            Handled::default()
+        );
+        let bad = handle_message(&mut e, &on, topic, b"{}", NOW());
+        assert!(bad.rejected.unwrap().contains("base-load measurement"));
     }
 
     #[test]

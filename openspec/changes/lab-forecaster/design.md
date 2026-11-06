@@ -52,7 +52,7 @@ physics would be split across two places).
 agree on). `lab-forecast` holds the PV physics, snow observation, learner, forecast payload and its validator;
 the VEN, the forecaster (and later others) depend on it. The VEN-specific types the code touches today
 (`BaseLoad`, `AssetHeuristics`, `HistoryPort`, `TickSample`, `ts_rs` derives) are separated first: the learner
-takes `TickSource` and plain parameter structs, and the VEN keeps thin adapters. This is not a pure move; it
+takes a plain slice of `LoadSample`s (not a trait: the VEN maps its ticks, the forecaster its buckets) and plain parameter structs, and the VEN keeps thin adapters. This is not a pure move; it
 is the first, largest task and sized separately.
 
 **D9 Topics, per array plus a site total.** Under `<root>/forecast/<site>/`:
@@ -73,7 +73,7 @@ home catalogue's signal names is the home project's job.
 consumers judge freshness against `valid_until` (default `generated_at` + 90 minutes, settable). Injectable
 clock throughout. The VEN's freshness limit for using a received forecast is `valid_until` itself.
 
-**D6 Cache and cold start.** SQLite tick cache, rebuilt from the live measurement topics; deleting it loses
+**D6 Cache and cold start.** A cache file of 10-minute base-load buckets (JSON lines; SQLite was dropped as a heavy dependency for a few MB of rebuildable data), rebuilt from the live measurement topics; deleting it loses
 nothing but learned history. A cold start publishes the cold-start profile with `model_version` saying so and
 status `cold_start`, never a silent value.
 

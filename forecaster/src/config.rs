@@ -24,6 +24,8 @@ pub struct Config {
     pub model_version: String,
     /// How often a recompute happens besides every new weather forecast.
     pub recompute_every: Duration,
+    /// Where the base-load history is kept across restarts; `None` keeps it in memory only.
+    pub cache_path: Option<String>,
 }
 
 impl Config {
@@ -62,6 +64,11 @@ impl Config {
             ),
             model_version: get("FORECASTER_MODEL_VERSION").unwrap_or_else(|| "pv-weather-1".into()),
             recompute_every: Duration::from_secs(number("FORECASTER_RECOMPUTE_SECONDS", 900)?),
+            cache_path: match get("FORECASTER_CACHE_PATH") {
+                None => Some("/data/base_load_cache.jsonl".into()),
+                Some(path) if path.is_empty() => None,
+                Some(path) => Some(path),
+            },
         })
     }
 }
@@ -135,6 +142,25 @@ mod tests {
             Config::from_lookup(&lookup(&MINIMAL)).unwrap().producer_id,
             "lab-forecaster"
         );
+    }
+
+    #[test]
+    fn the_cache_path_defaults_to_the_data_volume_and_an_empty_value_turns_it_off() {
+        let c = Config::from_lookup(&lookup(&MINIMAL)).unwrap();
+        assert_eq!(c.cache_path.as_deref(), Some("/data/base_load_cache.jsonl"));
+        let mut env = MINIMAL.to_vec();
+        env.push(("FORECASTER_CACHE_PATH", "/x/c.jsonl"));
+        assert_eq!(
+            Config::from_lookup(&lookup(&env))
+                .unwrap()
+                .cache_path
+                .as_deref(),
+            Some("/x/c.jsonl")
+        );
+        let mut off_env = MINIMAL.to_vec();
+        off_env.push(("FORECASTER_CACHE_PATH", ""));
+        let off = Config::from_lookup(&lookup(&off_env)).unwrap();
+        assert_eq!(off.cache_path, None);
     }
 
     #[test]

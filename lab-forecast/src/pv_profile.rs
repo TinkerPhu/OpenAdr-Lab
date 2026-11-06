@@ -114,6 +114,17 @@ pub fn pv_arrays_from_yaml(yaml: &str) -> Result<Vec<PvArraySettings>, String> {
     Ok(arrays)
 }
 
+/// Whether the profile switches the real base-load measurement on (a `type: base_load` asset with
+/// `measurement: {enabled: true}`); the forecaster then listens for it and publishes `base_load/power_kw`.
+pub fn base_load_measured_from_yaml(yaml: &str) -> Result<bool, String> {
+    let doc: ProfileDoc =
+        serde_yaml::from_str(yaml).map_err(|e| format!("profile is not readable: {e}"))?;
+    Ok(doc
+        .assets
+        .iter()
+        .any(|a| a.kind == "base_load" && a.measurement.enabled))
+}
+
 /// Only the parts of the profile this reader interprets; every other key is ignored.
 #[derive(Deserialize)]
 struct ProfileDoc {
@@ -193,6 +204,32 @@ mod tests {
     #[test]
     fn pv_arrays_from_yaml_rejects_text_that_is_not_yaml() {
         assert!(pv_arrays_from_yaml("assets: [unclosed").is_err());
+    }
+
+    #[test]
+    fn base_load_measured_from_yaml_follows_the_measurement_switch_of_the_base_load_asset() {
+        let on = "assets:
+  - type: base_load
+    id: base_load
+    measurement: {enabled: true}
+";
+        let off = "assets:
+  - type: base_load
+    id: base_load
+";
+        let pv_only = "assets:
+  - type: pv
+    id: pv
+    measurement: {enabled: true}
+";
+        assert_eq!(base_load_measured_from_yaml(on), Ok(true));
+        assert_eq!(base_load_measured_from_yaml(off), Ok(false));
+        assert_eq!(
+            base_load_measured_from_yaml(pv_only),
+            Ok(false),
+            "a PV switch is not a base-load one"
+        );
+        assert!(base_load_measured_from_yaml("assets: [unclosed").is_err());
     }
 
     #[test]

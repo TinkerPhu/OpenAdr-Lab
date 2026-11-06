@@ -41,6 +41,9 @@ WORKDIR /app
 COPY --from=builder --chown=nonroot:nonroot /lab-forecaster /app/lab-forecaster
 RUN chmod 755 /app/lab-forecaster
 
+# The base-load history is kept here between restarts (a volume mounted over it keeps the owner).
+RUN mkdir -p /data && chown nonroot:nonroot /data
+
 # The VEN profile YAML that declares the PV arrays is mounted here, read-only.
 RUN mkdir -p /config && chown nonroot:nonroot /config
 

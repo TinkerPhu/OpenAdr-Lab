@@ -213,10 +213,15 @@ services:
       RUST_LOG: "info"
     volumes:
       - ./profiles/ven-1.yaml:/config/profile.yaml:ro
+      # The learned base-load history; deleting it loses only that history.
+      - lab-forecaster-data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
       - vtn_openadr-net
+
+volumes:
+  lab-forecaster-data:
 
 networks:
   vtn_openadr-net:

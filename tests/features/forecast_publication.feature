@@ -24,3 +24,10 @@ Feature: Forecast publication — the lab-forecaster publishes retained PV forec
     Given a weather forecast message older than the staleness threshold is published to the test Mosquitto broker for VEN-1
     Then the lab-forecaster's status becomes "weather_stale"
     And the retained PV forecast of the array "pv" is not refreshed while the weather stays stale
+
+  @forecast-publication
+  Scenario: The base load is published from the first measurement on, declared as consumption
+    Given a base-load measurement of 0.5 kW is published to the test Mosquitto broker for VEN-1
+    Then the lab-forecaster has published a retained base-load forecast for VEN-1's site
+    And that base-load forecast declares power in kW, positive for consumption, with no curtailment
+    And that base-load forecast covers 48 hours in 1-hour steps and names its model

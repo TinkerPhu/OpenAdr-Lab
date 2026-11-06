@@ -4,6 +4,8 @@
 //! `engine` is the decision (pure: inputs and a `now` in, publications out); everything that touches the
 //! world (broker, files, clock) lives outside it, so the engine is tested without any of them.
 
+pub mod base_load;
+pub mod cache;
 pub mod config;
 pub mod dispatch;
 pub mod engine;

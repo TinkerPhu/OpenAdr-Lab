@@ -13,7 +13,7 @@ and stay inside the VEN.
 ## What Changes
 
 - New container `lab-forecaster`: reads the existing weather and measurement MQTT contracts, keeps its own
-  SQLite tick cache (rebuildable, training data only), and publishes retained 48 h forecasts for PV power and
+  cache file of 10-minute base-load buckets (rebuildable, training data only), and publishes retained 48 h forecasts for PV power and
   base-load power with `schema_version`, `generated_at`, model version, plus a retained status topic.
 - The PV physics (`entities/solar.rs`, `pv_snow.rs`, `PvArrayGeometry`, `PvForecastParams`), the snow-state
   observation and the base-load learner (`services/heuristics.rs`) move into a new crate `lab-forecast`

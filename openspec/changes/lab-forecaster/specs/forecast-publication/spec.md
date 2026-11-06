@@ -58,7 +58,7 @@ The container SHALL publish a retained `<root>/forecast/<site>/status` with its 
 - **THEN** status is `weather_stale` and the PV forecasts are not republished with a newer `generated_at`
 
 #### Scenario: No history yet
-- **WHEN** the tick cache holds fewer samples than the learner needs
+- **WHEN** the base-load history holds fewer samples than the learner needs
 - **THEN** the base-load forecast is published from the cold-start profile, `model_version` names it, and status is `cold_start`
 
 ### Requirement: One producer per site
@@ -69,7 +69,7 @@ The container SHALL refuse to start while a live retained status of another prod
 - **THEN** it logs the conflict and exits with a non-zero code without publishing
 
 ### Requirement: The Lab runs with the container alone
-The forecaster SHALL need only the MQTT broker and its own SQLite cache; it SHALL NOT require InfluxDB or any
+The forecaster SHALL need only the MQTT broker and its own cache file; it SHALL NOT require InfluxDB or any
 other project, and rebuilding the cache SHALL NOT need a backup.
 
 #### Scenario: Cache deleted
