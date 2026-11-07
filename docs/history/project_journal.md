@@ -16851,3 +16851,22 @@ the forecaster's retained series stays valid for 90 minutes; filed as the follow
 **Key learning.** A retained message outlives the scenario that caused it: an E2E scenario for "no forecast" breaks as soon as
 a producer's last message is still valid. Test a consumer with its own VEN, not by switching the shared one.
 
+## The Lab VTN's docker log reached 123 GB: rotation for every Lab service and a quiet report span (T-OL-01 side task, 2026-11-07)
+
+**What.** `vtn-vtn-1` (up since 2026-11-02, docker `json-file` driver with no options) had a 123.7 GB log growing about 34 KB/s. Every Lab
+service in `VTN/docker-compose.yml` and `VEN/docker-compose.yml` now has `logging: json-file, max-size 50m, max-file 3`, and the VTN
+runs with `RUST_LOG=info,openleadr_vtn::api::report=warn,sqlx=warn` (variable `VTN_RUST_LOG`). `vtn` was recreated on Node1 (user
+approved, Node1 lock held, `--no-deps`, back to main afterwards): healthy at once, the log now grows about 0.3 KB/s. **Lost with the
+old container:** its 123.7 GB log (plus 2 MB of the first recreate's), all of it log text. db, bff, ui and lab-mqtt were not recreated
+(logs 1.6 GB, 0.2 GB and small); they get the rotation at their next redeploy.
+
+**Why.** The upstream report handlers (`openleadr_vtn::api::report`, `#[instrument]` without skipping the body) record the whole
+report in their tracing span, so every line logged inside them carries all intervals of the report; 20 VENs report every minute.
+
+**Issues.** The first recreate did not help: the host's untracked `VTN/.env` sets `RUST_LOG=info` for the whole stack and overrode the
+compose default, so the filter uses a new variable name. A `docker logs --since` on a 123 GB log scans the whole file; reading the end
+needs `tail -c` on the log path instead (killed within seconds, no harm seen).
+
+**Key learning.** A default in a compose file is silent when an `.env` of the same stack sets the variable: check `docker inspect`
+for the effective value after a recreate, and measure the effect (log bytes over 30 s), not the exit code.
+

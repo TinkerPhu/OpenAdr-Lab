@@ -3827,3 +3827,9 @@ own test VEN, or clear the retained topic first, instead of adding the consumer 
 same windows a three-file cluster, which the baseline counts as growth. If the totals went down, re-record with `--update` and say
 so in the commit message; if not, the change added a copy.
 
+## Read the end of a huge docker log with `tail -c` on its LogPath, never `docker logs --since` (2026-11-07)
+
+`docker logs --since/--until` scans the whole json-file log; on a 123 GB log that loads the Pi. `docker inspect --format
+'{{.LogPath}}' <c>` then `sudo tail -c 3500 <path>` reads only the end. And give every service log rotation in compose: a
+json-file driver without options keeps one file for the container's life.
+
