@@ -520,3 +520,17 @@ rule for this feature.
 Not supported: if more than one weather feed is ever configured for the same
 site, VEN does not currently pick, prefer-freshest, or blend between them —
 out of scope until a driving use case exists.
+
+## Site id and host configuration
+
+The compose files take the site id from `SITE_ID` (default `hometown`) and the
+profile directory from `PROFILES_DIR` (default `./profiles`). Set both in the
+gitignored `VEN/.env` on the host.
+
+The external weather publisher (data acquisition, outside this repository) must
+publish to `<root>/weather/<site>/forecast` with the same `<site>` as `SITE_ID`.
+On a mismatch the VEN silently falls back to its own forecast.
+
+Deploy rule: before deploying to Node1, check that the host `VEN/.env` sets
+`SITE_ID` to the real id and that `docker compose config` shows it in every
+`*_MQTT_SITE_ID`, `FORECASTER_SITE_ID` and the producer id.
