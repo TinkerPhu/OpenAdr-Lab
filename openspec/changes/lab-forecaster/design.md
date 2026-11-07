@@ -102,6 +102,24 @@ MQTT only (their best-time step), and the digest's read of the VEN REST plan is 
 Rejected: a publisher inside the VEN (a temporary second producer that would have to be retired, and it would
 publish the VEN's forecast rather than the container's).
 
+**D15 MQTT stays the publication channel; a read-only HTTP view is added beside it (user, 2026-11-07).** The
+question was whether decoupling over MQTT was right, against a tighter REST coupling. Kept MQTT because (a) the
+VEN already depends on the broker for weather and measurements, so the feed adds a topic family and no new kind
+of dependency; (b) the house side (digest, coordinator, dashboard) reads the same forecasts, and retained
+messages serve any number of readers without the producer knowing them; (c) `valid_until` and the `status` last
+will give freshness and liveness without per-client polling logic; (d) a forecast request can never hang the
+planner path. Costs accepted: a broker in the path (the VEN keeps its in-process fallback), a contract that
+lives in a document plus a shared crate and is tied together by topic names and the site id (a renamed default
+site id would silently move every topic; hence the host `VEN/.env` check before a deploy), and no way to curl a
+topic. The HTTP view removes the last cost without moving the contract: `GET /forecast/<site>/<same path as the
+topic>` (for example `/forecast/<site>/pv/total/power_kw`, `/forecast/<site>/base_load/power_kw`,
+`/forecast/<site>/status`) returns the exact bytes last published, from the same serialiser, held in memory by the
+publisher. It never computes, never reads MQTT, and never answers with anything the broker did not get. 503 until
+the first publish. Off unless `FORECASTER_HTTP_PORT` is set. The VEN does not consume it (one ingestion path:
+MQTT through `ForecastPayload::parse`); it is for debugging, the UI link and non-MQTT clients. Rejected: REST as
+the only channel (loses the house-side fan-out and the last will); a second payload shape on HTTP (a second
+contract copy).
+
 ## Risks / Trade-offs
 
 - Separating the code from VEN types touches many call sites: step 1 of the tasks keeps every existing test
@@ -113,3 +131,4 @@ publish the VEN's forecast rather than the container's).
 ## Open Questions
 
 - Influx backfill adapter: out of this change; file a card if wanted.
+- HTTP view (D15): which port, and whether the Weather page shows the URL (ui-transparency: every capability needs a surface); decided at task 6.1.
