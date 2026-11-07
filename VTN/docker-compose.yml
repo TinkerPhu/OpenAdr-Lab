@@ -166,7 +166,9 @@ services:
     environment:
       # The report handlers record the whole report body in their tracing span, so at info every line they
       # (or sqlx inside them) log carries it: 30 KB/s of log. Quiet those two targets; everything else stays at info.
-      RUST_LOG: ${RUST_LOG:-info,openleadr_vtn::api::report=warn,sqlx=warn}
+      # A new variable name on purpose: the host's VTN/.env sets RUST_LOG=info for the whole stack, which would
+      # override a default here.
+      RUST_LOG: ${VTN_RUST_LOG:-info,openleadr_vtn::api::report=warn,sqlx=warn}
       DATABASE_URL: postgres://${PG_USER:-openadr}:${PG_PASSWORD:-openadr}@db:5432/${PG_DB:-openadr}
       # OAuth — internal provider (HMAC, auto-generated secret)
       # Set OAUTH_BASE64_SECRET for a fixed key; omit to let VTN generate one
