@@ -23,11 +23,20 @@
 #   docker compose up --force-recreate --build --no-deps vtn
 ###############################################################################
 
+# Every Lab service rotates its docker log: without options the json-file driver keeps one file for the life of
+# the container (the VTN's reached 123 GB in five days). Three files of 50 MB per service.
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   # ---------------------------------------------------------------------------
   # PostgreSQL — VTN persistence
   # ---------------------------------------------------------------------------
   db:
+    logging: *default-logging
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -69,6 +78,7 @@ services:
   # lab convention of secret == client id, as bl-client and ven-N already do.
   # ---------------------------------------------------------------------------
   lab-mqtt:
+    logging: *default-logging
     image: eclipse-mosquitto:2
     restart: unless-stopped
     ports:
@@ -146,6 +156,7 @@ services:
       - openadr-net
 
   vtn:
+    logging: *default-logging
     build:
       context: ../openleadr-rs
       dockerfile: vtn.Dockerfile
@@ -153,7 +164,9 @@ services:
     ports:
       - "${VTN_PORT:-8200}:3000"
     environment:
-      RUST_LOG: ${RUST_LOG:-info}
+      # The report handlers record the whole report body in their tracing span, so at info every line they
+      # (or sqlx inside them) log carries it: 30 KB/s of log. Quiet those two targets; everything else stays at info.
+      RUST_LOG: ${RUST_LOG:-info,openleadr_vtn::api::report=warn,sqlx=warn}
       DATABASE_URL: postgres://${PG_USER:-openadr}:${PG_PASSWORD:-openadr}@db:5432/${PG_DB:-openadr}
       # OAuth — internal provider (HMAC, auto-generated secret)
       # Set OAUTH_BASE64_SECRET for a fixed key; omit to let VTN generate one
@@ -210,6 +223,7 @@ services:
   # BFF — Rust axum proxy between UI and VTN
   # ---------------------------------------------------------------------------
   bff:
+    logging: *default-logging
     build:
       # The repo root, because the BFF takes `lab-core` as a path dependency
       # beside it (D-06) -- a context of ./bff would leave that path pointing
@@ -259,6 +273,7 @@ services:
   # UI — React + nginx operator console
   # ---------------------------------------------------------------------------
   ui:
+    logging: *default-logging
     build:
       # Repo root: this UI is an npm workspace and imports lab-ui/ (D-06's
       # move applied to the UIs).

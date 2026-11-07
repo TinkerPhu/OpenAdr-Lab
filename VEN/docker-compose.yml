@@ -15,8 +15,17 @@
 #   docker compose up -d ven-1 ven-2 ven-3
 ###############################################################################
 
+# Every Lab service rotates its docker log: without options the json-file driver keeps one file for the life of
+# the container (the VTN's reached 123 GB in five days). Three files of 50 MB per service.
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   ven-1:
+    logging: *default-logging
     build:
       context: ..
       dockerfile: VEN/Dockerfile
@@ -85,6 +94,7 @@ services:
       - vtn_openadr-net
 
   ven-2:
+    logging: *default-logging
     build:
       context: ..
       dockerfile: VEN/Dockerfile
@@ -136,6 +146,7 @@ services:
       - vtn_openadr-net
 
   ven-3:
+    logging: *default-logging
     build:
       context: ..
       dockerfile: VEN/Dockerfile
@@ -187,6 +198,7 @@ services:
       - vtn_openadr-net
 
   ui:
+    logging: *default-logging
     build:
       # Repo root: this UI is an npm workspace and imports lab-ui/ (D-06's
       # move applied to the UIs).
@@ -206,6 +218,7 @@ services:
   # this container from being refused by its own retained status.
   # ---------------------------------------------------------------------------
   lab-forecaster:
+    logging: *default-logging
     build:
       context: ..
       dockerfile: forecaster/Dockerfile
