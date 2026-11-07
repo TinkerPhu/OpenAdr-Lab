@@ -16870,3 +16870,6 @@ needs `tail -c` on the log path instead (killed within seconds, no harm seen).
 **Key learning.** A default in a compose file is silent when an `.env` of the same stack sets the variable: check `docker inspect`
 for the effective value after a recreate, and measure the effect (log bytes over 30 s), not the exit code.
 
+
+## 2026-11-07 - CI red twice on the Node2 rust-vtn lane (reboots)
+Ticket 20261107T0422Z went red when Node2 rebooted mid-compile; the re-run (20261107T0834Z) saw a second reboot. Everything else was green. With the user's yes (cap and retry on Node2) the openleadr test image now uses CARGO_BUILD_JOBS=2 and `nice -n 19`. Open: ssh keepalive and per-suite timeout, persistent journal on Node2 (both need the user).

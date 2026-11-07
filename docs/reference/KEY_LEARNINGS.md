@@ -3833,3 +3833,8 @@ so in the commit message; if not, the change added a copy.
 '{{.LogPath}}' <c>` then `sudo tail -c 3500 <path>` reads only the end. And give every service log rotation in compose: a
 json-file driver without options keeps one file for the container's life.
 
+
+The rust-vtn lane (openleadr-rs build and tests) on Node2 coincided with two Node2 reboots (2026-11-07, 06:36 and 10:38 CET), each
+mid-compile. Probable cause, not proven (no persistent journal): a 4-job cargo build next to the Lab fleet starves the Pi past
+systemd's 1-minute hardware watchdog. The test image now builds with `CARGO_BUILD_JOBS=2` and runs niced. A dead ssh session also
+left the runner waiting ~2 h; an ssh keepalive and per-suite timeout in the lane call are still open (shared runner, ask first).
