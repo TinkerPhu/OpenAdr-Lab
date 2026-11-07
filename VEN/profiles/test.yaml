@@ -18,10 +18,10 @@ assets:
     rated_kw: 5.0
     # Weather-sourced PV forecast (weather-forecast-plugin BDD scenarios). Site
     # coordinates and rated_kwp match the "pv" asset above and the BDD test
-    # fixture's sample message location (Zunzgen, 47.4491/7.8081).
+    # fixture's sample message location (Hometown, 46.9480/7.4474).
     weather:
-      latitude_deg: 47.4491
-      longitude_deg: 7.8081
+      latitude_deg: 46.9480
+      longitude_deg: 7.4474
       tilt_deg: 30.0
       azimuth_deg: 180.0
       rated_kwp: 5.0

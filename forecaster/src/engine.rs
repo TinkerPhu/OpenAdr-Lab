@@ -357,7 +357,7 @@ mod tests {
         let mut yaml = String::from("assets:\n");
         for (id, measured) in spec {
             yaml.push_str(&format!(
-                "  - type: pv\n    id: {id}\n    rated_kw: 10.0\n    weather:\n      latitude_deg: 47.4491\n      longitude_deg: 7.8081\n      tilt_deg: 30.0\n      azimuth_deg: 180.0\n      rated_kwp: 10.0\n    measurement: {{enabled: {measured}}}\n"
+                "  - type: pv\n    id: {id}\n    rated_kw: 10.0\n    weather:\n      latitude_deg: 46.9480\n      longitude_deg: 7.4474\n      tilt_deg: 30.0\n      azimuth_deg: 180.0\n      rated_kwp: 10.0\n    measurement: {{enabled: {measured}}}\n"
             ));
         }
         pv_arrays_from_yaml(&yaml).unwrap()
@@ -365,7 +365,7 @@ mod tests {
 
     fn settings(spec: &[(&str, bool)]) -> EngineSettings {
         EngineSettings {
-            topics: ForecastTopics::new("openadr-lab", "zunzgen").unwrap(),
+            topics: ForecastTopics::new("openadr-lab", "hometown").unwrap(),
             arrays: arrays(spec),
             producer_id: "forecaster-a".into(),
             model_version: "pv-weather-1".into(),
@@ -390,7 +390,7 @@ mod tests {
         }
     }
 
-    const BASE_LOAD_TOPIC: &str = "openadr-lab/forecast/zunzgen/base_load/power_kw";
+    const BASE_LOAD_TOPIC: &str = "openadr-lab/forecast/hometown/base_load/power_kw";
 
     /// `hours` hourly samples from `first`, all with the same temperature and irradiance.
     fn weather(
@@ -403,8 +403,8 @@ mod tests {
         WeatherForecast {
             source_id: "test".into(),
             location: GeoPosition {
-                latitude_deg: 47.4491,
-                longitude_deg: 7.8081,
+                latitude_deg: 46.9480,
+                longitude_deg: 7.4474,
             },
             fetched_at,
             samples: (0..hours)
@@ -457,9 +457,9 @@ mod tests {
         assert_eq!(
             topics,
             [
-                "openadr-lab/forecast/zunzgen/pv/pv-1/power_kw",
-                "openadr-lab/forecast/zunzgen/pv/pv-2/power_kw",
-                "openadr-lab/forecast/zunzgen/pv/total/power_kw",
+                "openadr-lab/forecast/hometown/pv/pv-1/power_kw",
+                "openadr-lab/forecast/hometown/pv/pv-2/power_kw",
+                "openadr-lab/forecast/hometown/pv/total/power_kw",
             ]
         );
         assert_eq!(e.state(), ForecastState::Ok);
@@ -476,7 +476,7 @@ mod tests {
                 .iter()
                 .map(|s| s.forecast_ac_kw)
                 .collect();
-        let got = payload_of(&pubs, "openadr-lab/forecast/zunzgen/pv/pv/power_kw");
+        let got = payload_of(&pubs, "openadr-lab/forecast/hometown/pv/pv/power_kw");
         assert_eq!(got.values, expected);
         assert!(
             got.values.iter().any(|v| *v > 1.0),
@@ -490,7 +490,7 @@ mod tests {
         let mut e = engine_with_summer(&[("pv", false)], now);
         let got = payload_of(
             &e.recompute(now),
-            "openadr-lab/forecast/zunzgen/pv/pv/power_kw",
+            "openadr-lab/forecast/hometown/pv/pv/power_kw",
         );
         assert_eq!(got.start, at(2026, 6, 21, 0, 0));
         assert_eq!(got.step_s, 3600);
@@ -514,7 +514,7 @@ mod tests {
         ));
         let got = payload_of(
             &e.recompute(now),
-            "openadr-lab/forecast/zunzgen/pv/pv/power_kw",
+            "openadr-lab/forecast/hometown/pv/pv/power_kw",
         );
         assert_eq!(got.values.len(), 30);
         assert!((got.coverage_h - 30.0).abs() < 1e-9);
@@ -525,9 +525,9 @@ mod tests {
         let now = at(2026, 6, 21, 12, 0);
         let mut e = engine_with_summer(&[("pv-1", false), ("pv-2", false)], now);
         let pubs = e.recompute(now);
-        let a = payload_of(&pubs, "openadr-lab/forecast/zunzgen/pv/pv-1/power_kw");
-        let b = payload_of(&pubs, "openadr-lab/forecast/zunzgen/pv/pv-2/power_kw");
-        let total = payload_of(&pubs, "openadr-lab/forecast/zunzgen/pv/total/power_kw");
+        let a = payload_of(&pubs, "openadr-lab/forecast/hometown/pv/pv-1/power_kw");
+        let b = payload_of(&pubs, "openadr-lab/forecast/hometown/pv/pv-2/power_kw");
+        let total = payload_of(&pubs, "openadr-lab/forecast/hometown/pv/total/power_kw");
         let sum: Vec<f64> = a.values.iter().zip(&b.values).map(|(x, y)| x + y).collect();
         assert_eq!(total.values, sum);
     }
@@ -538,12 +538,12 @@ mod tests {
         let mut e = engine_with_summer(&[("pv", false)], now);
         let first = payload_of(
             &e.recompute(now),
-            "openadr-lab/forecast/zunzgen/pv/pv/power_kw",
+            "openadr-lab/forecast/hometown/pv/pv/power_kw",
         );
         let later = now + Duration::minutes(15);
         let second = payload_of(
             &e.recompute(later),
-            "openadr-lab/forecast/zunzgen/pv/pv/power_kw",
+            "openadr-lab/forecast/hometown/pv/pv/power_kw",
         );
         assert_eq!(second.values, first.values);
         assert_eq!(second.generated_at, later);
@@ -596,7 +596,7 @@ mod tests {
 
     fn noon_value(pubs: &[Publication]) -> f64 {
         // 08:00 + 4 h = 12:00
-        payload_of(pubs, "openadr-lab/forecast/zunzgen/pv/pv/power_kw").values[4]
+        payload_of(pubs, "openadr-lab/forecast/hometown/pv/pv/power_kw").values[4]
     }
 
     #[test]
@@ -639,7 +639,7 @@ mod tests {
         e.on_pv_measurement((2.0, now - Duration::seconds(30)));
         e.recompute(now);
         let s = ForecastStatus::parse(&e.status(now).payload).unwrap();
-        assert_eq!(e.status(now).topic, "openadr-lab/forecast/zunzgen/status");
+        assert_eq!(e.status(now).topic, "openadr-lab/forecast/hometown/status");
         assert_eq!(s.producer_id, "forecaster-a");
         assert_eq!(s.state, ForecastState::Ok);
         assert_eq!(s.generated_at, now);

@@ -19,8 +19,8 @@ assets:
     id: pv
     rated_kw: 5.0
     weather:
-      latitude_deg: 47.4491
-      longitude_deg: 7.8081
+      latitude_deg: 46.9480
+      longitude_deg: 7.4474
       tilt_deg: 30.0
       azimuth_deg: 180.0
       rated_kwp: 5.0

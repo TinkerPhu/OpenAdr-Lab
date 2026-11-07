@@ -130,8 +130,8 @@ mod tests {
         WeatherForecast {
             source_id: "srf_meteo".into(),
             location: GeoPosition {
-                latitude_deg: 47.4491,
-                longitude_deg: 7.8081,
+                latitude_deg: 46.9480,
+                longitude_deg: 7.4474,
             },
             fetched_at,
             samples: vec![WeatherForecastSample {
@@ -198,8 +198,8 @@ mod tests {
             rated_kwp: 10.0,
             geometry: PvArrayGeometry {
                 location: GeoPosition {
-                    latitude_deg: 47.4491,
-                    longitude_deg: 7.8081,
+                    latitude_deg: 46.9480,
+                    longitude_deg: 7.4474,
                 },
                 tilt_deg: 30.0,
                 azimuth_deg: 180.0,

@@ -84,3 +84,6 @@ openspec/changes/pv-self-consumption-reward/*
 **/.env
 !.env.example
 !**/.env.example
+
+# Local profile copies carrying the real site coordinates (see VEN/.env.example)
+VEN/profiles-local/

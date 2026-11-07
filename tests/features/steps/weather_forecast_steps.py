@@ -33,7 +33,7 @@ def _publish_mqtt(topic: str, payload: dict) -> None:
 def _sample_forecast_message(fetched_at: datetime, temperature_c: float = 20.0) -> dict:
     # 24 hourly samples spanning a full day ahead, not just a single sample
     # 1h out: a single-sample fixture is time-of-day flaky against real solar
-    # position (Zunzgen) — whenever the suite happens to run in the evening,
+    # position (Hometown) — whenever the suite happens to run in the evening,
     # "1h ahead" can land after sunset, making every plan slot's forecast_ac_kw
     # zero regardless of the (nonzero) GHI. Spanning 24h guarantees genuine
     # daytime coverage within the test profile's plan horizon no matter what
@@ -53,7 +53,7 @@ def _sample_forecast_message(fetched_at: datetime, temperature_c: float = 20.0) 
     return {
         "schema_version": "1.0.0",
         "source_id": "bdd-test-source",
-        "location": {"latitude_deg": 47.4491, "longitude_deg": 7.8081},
+        "location": {"latitude_deg": 46.9480, "longitude_deg": 7.4474},
         "fetched_at": fetched_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "samples": samples,
     }

@@ -85,7 +85,7 @@ impl MqttWeatherAdapter {
         // ID gets the previous holder disconnected ("Connection closed by
         // peer abruptly"). Multiple VEN instances legitimately share one
         // site_id (same physical site, e.g. ven-1/2/3 all monitoring
-        // Zunzgen), so site_id alone collides; disambiguate with VEN_NAME
+        // Hometown), so site_id alone collides; disambiguate with VEN_NAME
         // (already required per instance — see config.rs).
         let ven_name = std::env::var("VEN_NAME").unwrap_or_else(|_| "ven-1".into());
         let client_id = format!("ven-weather-{}-{}", ven_name, config.site_id);

@@ -24,7 +24,7 @@ profile config (`profile/weather_pv.rs`: each PV asset's own `weather:` block in
 `VEN/profiles/ven-{1,2,3}.yaml`, W5b — one geometry and rating per array, so an east and a west
 array get different power curves from the same raw forecast; the site-level `weather_pv:`
 section is refused with the new place). The
-production feed for ven-1/2/3 is the Zunzgen site, published by the
+production feed for ven-1/2/3 is the Hometown site, published by the
 `data_acquisition` project's `WeatherMqttPublisher`/`SrfWeatherToMqtt`
 modules from SRF Meteo data — see that project's own docs for the publisher
 side; this document covers the VEN (consumer) side and the wire contract
@@ -357,7 +357,7 @@ crashed an hour ago."
   offset is a silent off-by-one-hour bug during DST transitions, not a parse
   error the consuming side would ever catch.
 - **Topic naming**: `<root>/weather/<site_id>/<subtopic>`, e.g.
-  `openadr-lab/weather/zunzgen/forecast`. `<root>` and `site_id` are
+  `openadr-lab/weather/hometown/forecast`. `<root>` and `site_id` are
   deployment-configurable (VEN's `WEATHER_MQTT_ROOT`/`WEATHER_MQTT_SITE_ID`
   env vars) so multiple sites/suppliers coexist on one broker without any
   VEN-side code change.
@@ -434,7 +434,7 @@ Example message:
 {
   "schema_version": "1.0.0",
   "source_id": "srf_meteo",
-  "location": { "latitude_deg": 47.4491, "longitude_deg": 7.8081 },
+  "location": { "latitude_deg": 46.9480, "longitude_deg": 7.4474 },
   "fetched_at": "2026-07-19T05:54:48Z",
   "samples": [
     { "valid_at": "2026-07-19T05:00:00Z", "age_h": 0, "temperature_c": 15.0,

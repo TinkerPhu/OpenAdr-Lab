@@ -1080,7 +1080,7 @@ drivers:
 
 - ven-1 specifically runs on real MQTT weather/load ground truth
   (`measurements.pv_enabled: true` in its profile), not the modeled PV
-  curve every other VEN uses — its result reflects actual Zunzgen weather
+  curve every other VEN uses — its result reflects actual Hometown weather
   on 2026-08-16/17, not the idealized diurnal shape the scenario assumes,
   and shouldn't be read as representative of the fleet.
 - Every EV-touching VEN's correlation was noise, for a root cause found by

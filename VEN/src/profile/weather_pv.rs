@@ -26,14 +26,14 @@ mod tests {
     #[test]
     fn a_pv_weather_block_parses_required_fields_and_defaults() {
         let p = profile_with_weather(
-            "      latitude_deg: 47.4491\n      longitude_deg: 7.8081\n      tilt_deg: 30.0\n      azimuth_deg: 180.0\n      rated_kwp: 10.0\n",
+            "      latitude_deg: 46.9480\n      longitude_deg: 7.4474\n      tilt_deg: 30.0\n      azimuth_deg: 180.0\n      rated_kwp: 10.0\n",
         );
         let params = &p.pv_weather_params()["pv"];
         assert_eq!(params.rated_kwp, 10.0);
         assert_eq!(params.geometry.tilt_deg, 30.0);
         assert_eq!(params.geometry.azimuth_deg, 180.0);
-        assert_eq!(params.geometry.location.latitude_deg, 47.4491);
-        assert_eq!(params.geometry.location.longitude_deg, 7.8081);
+        assert_eq!(params.geometry.location.latitude_deg, 46.9480);
+        assert_eq!(params.geometry.location.longitude_deg, 7.4474);
         // Defaults applied for omitted tuning fields.
         assert_eq!(params.performance_ratio, 0.87);
         assert_eq!(params.temp_coeff_pct_per_c, -0.35);
@@ -47,7 +47,7 @@ mod tests {
     #[test]
     fn a_pv_weather_block_overrides_tuning_fields() {
         let p = profile_with_weather(
-            "      latitude_deg: 47.4491\n      longitude_deg: 7.8081\n      tilt_deg: 30.0\n      azimuth_deg: 180.0\n      rated_kwp: 10.0\n      performance_ratio: 0.80\n      ac_limit_kw: 8.0\n",
+            "      latitude_deg: 46.9480\n      longitude_deg: 7.4474\n      tilt_deg: 30.0\n      azimuth_deg: 180.0\n      rated_kwp: 10.0\n      performance_ratio: 0.80\n      ac_limit_kw: 8.0\n",
         );
         let params = &p.pv_weather_params()["pv"];
         assert_eq!(params.performance_ratio, 0.80);

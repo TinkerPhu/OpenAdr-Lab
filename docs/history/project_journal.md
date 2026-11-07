@@ -7348,7 +7348,7 @@ history + every plausible in-app override mechanism) rather than guessing.
 
 **Root cause 1 — orphaned fix branch, not a silent revert.** `assets.pv.rated_kw` (the DC panel
 peak, used by the sin-model whenever the live weather feed is stale) had drifted from
-`weather_pv.rated_kwp` (the real calibrated Zunzgen array size, already correct) since the weather
+`weather_pv.rated_kwp` (the real calibrated Hometown array size, already correct) since the weather
 feed was wired up. A fix already existed — commit `70f42d7`, `ven-1: 8.0→14.4`, `ven-3: 6.0→8.0` —
 but it lived only on `040-pv-export-curtailment`, a branch that was never merged into `main`. No
 code anywhere reads/writes/infers these values outside the profile YAML and its direct

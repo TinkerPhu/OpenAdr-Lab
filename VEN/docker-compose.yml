@@ -66,22 +66,22 @@ services:
       # its published host port rather than joining that network — keeps
       # this stack's compose self-contained. See extra_hosts below.
       WEATHER_MQTT_HOST: "host.docker.internal"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
       # Real-measurement plugin (docs/architecture/real_measurement_mqtt.md).
-      # ven-1 only — real PV inverter + house-load meter at the Zunzgen site.
+      # ven-1 only — real PV inverter + house-load meter at the Hometown site.
       # Same broker/host as the weather feed above.
       PV_MEASUREMENT_MQTT_HOST: "host.docker.internal"
-      PV_MEASUREMENT_MQTT_SITE_ID: "zunzgen"
+      PV_MEASUREMENT_MQTT_SITE_ID: "${SITE_ID:-hometown}"
       BASE_LOAD_MEASUREMENT_MQTT_HOST: "host.docker.internal"
-      BASE_LOAD_MEASUREMENT_MQTT_SITE_ID: "zunzgen"
+      BASE_LOAD_MEASUREMENT_MQTT_SITE_ID: "${SITE_ID:-hometown}"
       # The lab-forecaster's retained PV and base-load forecasts (docs/architecture/forecast_publication.md),
       # preferred while fresh; the VEN's own computation otherwise. ven-1 only: the forecaster is built from
       # ven-1's profile (14.4 kWp), while ven-2 and ven-3 model smaller arrays at the same site.
       FORECAST_MQTT_HOST: "host.docker.internal"
-      FORECAST_MQTT_SITE_ID: "zunzgen"
+      FORECAST_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-1:/data
-      - ./profiles/ven-1.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-./profiles}/ven-1.yaml:/config/profile.yaml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -130,10 +130,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "host.docker.internal"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-2:/data
-      - ./profiles/ven-2.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-./profiles}/ven-2.yaml:/config/profile.yaml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -182,10 +182,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "host.docker.internal"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-3:/data
-      - ./profiles/ven-3.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-./profiles}/ven-3.yaml:/config/profile.yaml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -211,8 +211,8 @@ services:
       - vtn_openadr-net
 
   # ---------------------------------------------------------------------------
-  # lab-forecaster -- publishes the PV forecast of the Zunzgen site as retained MQTT messages under
-  # openadr-lab/forecast/zunzgen/ (docs/architecture/forecast_publication.md). It reads the same weather
+  # lab-forecaster -- publishes the PV forecast of the Hometown site as retained MQTT messages under
+  # openadr-lab/forecast/hometown/ (docs/architecture/forecast_publication.md). It reads the same weather
   # and PV-measurement topics as ven-1, from the same house broker, and the same profile file for the
   # array geometry. It needs nothing else: no database, no VTN. A fixed producer id keeps a recreate of
   # this container from being refused by its own retained status.
@@ -225,12 +225,12 @@ services:
     restart: unless-stopped
     environment:
       FORECASTER_MQTT_HOST: "host.docker.internal"
-      FORECASTER_SITE_ID: "zunzgen"
+      FORECASTER_SITE_ID: "${SITE_ID:-hometown}"
       FORECASTER_PROFILE_PATH: "/config/profile.yaml"
-      FORECASTER_PRODUCER_ID: "lab-forecaster-zunzgen"
+      FORECASTER_PRODUCER_ID: "lab-forecaster-${SITE_ID:-hometown}"
       RUST_LOG: "info"
     volumes:
-      - ./profiles/ven-1.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-./profiles}/ven-1.yaml:/config/profile.yaml:ro
       # The learned base-load history; deleting it loses only that history.
       - lab-forecaster-data:/data
     extra_hosts:

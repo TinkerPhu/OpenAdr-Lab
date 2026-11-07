@@ -71,8 +71,8 @@ mod tests {
         WeatherForecast {
             source_id: "srf_meteo".into(),
             location: GeoPosition {
-                latitude_deg: 47.4491,
-                longitude_deg: 7.8081,
+                latitude_deg: 46.9480,
+                longitude_deg: 7.4474,
             },
             fetched_at: Utc.with_ymd_and_hms(2026, 7, 19, 6, 0, 0).unwrap(),
             samples: vec![],

@@ -132,10 +132,10 @@ mod tests {
 
     fn engine(measured: bool) -> Engine {
         let yaml = format!(
-            "assets:\n  - type: pv\n    id: pv\n    rated_kw: 10.0\n    weather:\n      latitude_deg: 47.4491\n      longitude_deg: 7.8081\n      tilt_deg: 30.0\n      azimuth_deg: 180.0\n      rated_kwp: 10.0\n    measurement: {{enabled: {measured}}}\n"
+            "assets:\n  - type: pv\n    id: pv\n    rated_kw: 10.0\n    weather:\n      latitude_deg: 46.9480\n      longitude_deg: 7.4474\n      tilt_deg: 30.0\n      azimuth_deg: 180.0\n      rated_kwp: 10.0\n    measurement: {{enabled: {measured}}}\n"
         );
         Engine::new(EngineSettings {
-            topics: ForecastTopics::new("openadr-lab", "zunzgen").unwrap(),
+            topics: ForecastTopics::new("openadr-lab", "hometown").unwrap(),
             arrays: pv_arrays_from_yaml(&yaml).unwrap(),
             producer_id: "fc-a".into(),
             model_version: "pv-weather-1".into(),
@@ -145,7 +145,7 @@ mod tests {
     }
 
     fn feeds() -> FeedTopics {
-        FeedTopics::new("openadr-lab", "zunzgen", true, false)
+        FeedTopics::new("openadr-lab", "hometown", true, false)
     }
 
     fn weather_message(fetched_at: DateTime<Utc>) -> Vec<u8> {
@@ -153,8 +153,8 @@ mod tests {
         let forecast = WeatherForecast {
             source_id: "test".into(),
             location: GeoPosition {
-                latitude_deg: 47.4491,
-                longitude_deg: 7.8081,
+                latitude_deg: 46.9480,
+                longitude_deg: 7.4474,
             },
             fetched_at,
             samples: (0..24)
@@ -177,15 +177,15 @@ mod tests {
     #[test]
     fn feed_topics_listen_for_the_pv_measurement_only_when_one_is_configured() {
         assert_eq!(
-            FeedTopics::new("openadr-lab", "zunzgen", true, false),
+            FeedTopics::new("openadr-lab", "hometown", true, false),
             FeedTopics {
-                weather_forecast: "openadr-lab/weather/zunzgen/forecast".into(),
-                pv_measurement: Some("openadr-lab/measurement/zunzgen/pv".into()),
+                weather_forecast: "openadr-lab/weather/hometown/forecast".into(),
+                pv_measurement: Some("openadr-lab/measurement/hometown/pv".into()),
                 base_load_measurement: None,
             }
         );
         assert_eq!(
-            FeedTopics::new("openadr-lab", "zunzgen", false, false).pv_measurement,
+            FeedTopics::new("openadr-lab", "hometown", false, false).pv_measurement,
             None
         );
     }
@@ -196,7 +196,7 @@ mod tests {
         let h = handle_message(
             &mut e,
             &feeds(),
-            "openadr-lab/weather/zunzgen/forecast",
+            "openadr-lab/weather/hometown/forecast",
             &weather_message(NOW() - Duration::minutes(5)),
             NOW(),
         );
@@ -204,9 +204,9 @@ mod tests {
         assert_eq!(
             topics,
             [
-                "openadr-lab/forecast/zunzgen/pv/pv/power_kw",
-                "openadr-lab/forecast/zunzgen/pv/total/power_kw",
-                "openadr-lab/forecast/zunzgen/status",
+                "openadr-lab/forecast/hometown/pv/pv/power_kw",
+                "openadr-lab/forecast/hometown/pv/total/power_kw",
+                "openadr-lab/forecast/hometown/status",
             ]
         );
         assert_eq!(h.rejected, None);
@@ -218,7 +218,7 @@ mod tests {
         let h = handle_message(
             &mut e,
             &feeds(),
-            "openadr-lab/weather/zunzgen/forecast",
+            "openadr-lab/weather/hometown/forecast",
             b"not json",
             NOW(),
         );
@@ -233,7 +233,7 @@ mod tests {
         let h = handle_message(
             &mut e,
             &feeds(),
-            "openadr-lab/measurement/zunzgen/pv",
+            "openadr-lab/measurement/hometown/pv",
             format!(
                 r#"{{"power_kw": 2.5, "ts": "{}"}}"#,
                 (NOW() - Duration::seconds(20)).to_rfc3339()
@@ -251,9 +251,9 @@ mod tests {
     fn a_base_load_measurement_is_routed_to_the_learner_only_when_it_is_configured() {
         let mut e = engine(false);
         e.recompute(NOW());
-        let topic = "openadr-lab/measurement/zunzgen/base_load";
+        let topic = "openadr-lab/measurement/hometown/base_load";
         let body = format!(r#"{{"power_kw": 0.5, "ts": "{}"}}"#, NOW().to_rfc3339());
-        let on = FeedTopics::new("openadr-lab", "zunzgen", false, true);
+        let on = FeedTopics::new("openadr-lab", "hometown", false, true);
         assert_eq!(
             on.base_load_measurement.as_deref(),
             Some(topic),
@@ -263,7 +263,7 @@ mod tests {
             handle_message(&mut e, &on, topic, body.as_bytes(), NOW()),
             Handled::default()
         );
-        let off = FeedTopics::new("openadr-lab", "zunzgen", false, false);
+        let off = FeedTopics::new("openadr-lab", "hometown", false, false);
         assert_eq!(off.base_load_measurement, None);
         assert_eq!(
             handle_message(&mut e, &off, topic, body.as_bytes(), NOW()),
@@ -279,7 +279,7 @@ mod tests {
         let h = handle_message(
             &mut e,
             &feeds(),
-            "openadr-lab/measurement/zunzgen/pv",
+            "openadr-lab/measurement/hometown/pv",
             br#"{"power_kw": "high"}"#,
             NOW(),
         );
@@ -309,7 +309,7 @@ mod tests {
         handle_message(
             &mut e,
             &feeds(),
-            "openadr-lab/weather/zunzgen/forecast",
+            "openadr-lab/weather/hometown/forecast",
             &weather_message(NOW() - Duration::minutes(5)),
             NOW(),
         );

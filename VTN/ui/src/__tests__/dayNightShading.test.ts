@@ -5,8 +5,8 @@
 import { describe, it, expect } from "vitest";
 import { dayNightBands, nightAlphaAt, renderDayNightShading } from "@lab/ui/DayNightShading";
 
-const LAT = 47.4491;
-const LON = 7.8081;
+const LAT = 46.9480;
+const LON = 7.4474;
 const spec = (tMin: number, tMax: number, steps?: number) => ({
   tMin,
   tMax,

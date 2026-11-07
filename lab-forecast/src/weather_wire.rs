@@ -101,7 +101,7 @@ mod tests {
     const VALID_MESSAGE: &str = r#"{
         "schema_version": "1.0.0",
         "source_id": "srf_meteo",
-        "location": { "latitude_deg": 47.4491, "longitude_deg": 7.8081 },
+        "location": { "latitude_deg": 46.9480, "longitude_deg": 7.4474 },
         "fetched_at": "2026-07-19T05:54:48Z",
         "samples": [
             { "valid_at": "2026-07-19T06:00:00Z", "age_h": 1, "temperature_c": 16.0, "ghi_w_m2": 97.0 }
@@ -120,7 +120,7 @@ mod tests {
         let missing_fetched_at = r#"{
             "schema_version": "1.0.0",
             "source_id": "srf_meteo",
-            "location": { "latitude_deg": 47.4491, "longitude_deg": 7.8081 },
+            "location": { "latitude_deg": 46.9480, "longitude_deg": 7.4474 },
             "samples": []
         }"#;
         assert!(parse_forecast_message(missing_fetched_at.as_bytes()).is_err());
@@ -131,7 +131,7 @@ mod tests {
         let bad = r#"{
             "schema_version": "1.0.0",
             "source_id": "srf_meteo",
-            "location": { "latitude_deg": 47.4491, "longitude_deg": 7.8081 },
+            "location": { "latitude_deg": 46.9480, "longitude_deg": 7.4474 },
             "fetched_at": "2026-07-19T05:54:48Z",
             "samples": [
                 { "valid_at": "2026-07-19T06:00:00Z", "age_h": 1, "temperature_c": 999.0, "ghi_w_m2": 97.0 }
@@ -145,7 +145,7 @@ mod tests {
         let bad = r#"{
             "schema_version": "1.0.0",
             "source_id": "srf_meteo",
-            "location": { "latitude_deg": 47.4491, "longitude_deg": 7.8081 },
+            "location": { "latitude_deg": 46.9480, "longitude_deg": 7.4474 },
             "fetched_at": "2026-07-19T05:54:48Z",
             "samples": [
                 { "valid_at": "2026-07-19T06:00:00Z", "age_h": 1, "temperature_c": 16.0, "ghi_w_m2": -5.0 }
@@ -159,7 +159,7 @@ mod tests {
         let with_extra = r#"{
             "schema_version": "1.0.0",
             "source_id": "srf_meteo",
-            "location": { "latitude_deg": 47.4491, "longitude_deg": 7.8081 },
+            "location": { "latitude_deg": 46.9480, "longitude_deg": 7.4474 },
             "fetched_at": "2026-07-19T05:54:48Z",
             "samples": [
                 { "valid_at": "2026-07-19T06:00:00Z", "age_h": 1, "temperature_c": 16.0, "ghi_w_m2": 97.0,

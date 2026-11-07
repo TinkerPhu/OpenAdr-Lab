@@ -26,7 +26,7 @@ to the rest of the [[ven-hexagonal-architecture]].
 `paho-mqtt`/`rumqttc`. Any process publishing the documented schema to the topic counts as a
 "plugin" — decoupled from VEN's process lifecycle entirely (retained messages mean a
 reconnecting VEN gets the last forecast immediately). The production feed for ven-1/2/3 is
-the Zunzgen site, published by a separate `data_acquisition` project from SRF Meteo data.
+the Hometown site, published by a separate `data_acquisition` project from SRF Meteo data.
 
 ## Two consumers, one resolution path
 

@@ -63,10 +63,10 @@ services:
       # No shared Docker network with the primary host's Mosquitto, so this
       # reaches it over the real LAN instead of host.docker.internal.
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-4:/data
-      - ../../profiles/ven-4.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-4.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -112,10 +112,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-5:/data
-      - ../../profiles/ven-5.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-5.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -161,10 +161,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-6:/data
-      - ../../profiles/ven-6.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-6.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -210,10 +210,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-7:/data
-      - ../../profiles/ven-7.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-7.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -259,10 +259,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-8:/data
-      - ../../profiles/ven-8.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-8.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -308,10 +308,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-9:/data
-      - ../../profiles/ven-9.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-9.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -357,10 +357,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-10:/data
-      - ../../profiles/ven-10.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-10.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -406,10 +406,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-11:/data
-      - ../../profiles/ven-11.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-11.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -455,10 +455,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-12:/data
-      - ../../profiles/ven-12.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-12.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -504,10 +504,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-13:/data
-      - ../../profiles/ven-13.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-13.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -553,10 +553,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-14:/data
-      - ../../profiles/ven-14.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-14.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -602,10 +602,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-15:/data
-      - ../../profiles/ven-15.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-15.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -651,10 +651,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-16:/data
-      - ../../profiles/ven-16.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-16.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -700,10 +700,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-17:/data
-      - ../../profiles/ven-17.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-17.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -749,10 +749,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-18:/data
-      - ../../profiles/ven-18.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-18.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -798,10 +798,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-19:/data
-      - ../../profiles/ven-19.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-19.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s
@@ -847,10 +847,10 @@ services:
       PROFILE_PATH: "/config/profile.yaml"
       RUST_LOG: "info"
       WEATHER_MQTT_HOST: "${PRIMARY_HOST_LAN_IP:-192.168.1.103}"
-      WEATHER_MQTT_SITE_ID: "zunzgen"
+      WEATHER_MQTT_SITE_ID: "${SITE_ID:-hometown}"
     volumes:
       - ./data/ven-20:/data
-      - ../../profiles/ven-20.yaml:/config/profile.yaml:ro
+      - ${PROFILES_DIR:-../../profiles}/ven-20.yaml:/config/profile.yaml:ro
     healthcheck:
       test: curl --fail http://127.0.0.1:8080/health || exit 1
       interval: 10s

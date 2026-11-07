@@ -12,7 +12,7 @@ vi.mock("../api/hooks", () => ({
 
 const mockRawForecast: WeatherForecast = {
   source_id: "srf_meteo",
-  location: { latitude_deg: 47.4491, longitude_deg: 7.8081 },
+  location: { latitude_deg: 46.9480, longitude_deg: 7.4474 },
   fetched_at: "2026-07-19T05:54:48Z",
   samples: [
     {

@@ -352,15 +352,15 @@ mod tests {
     use crate::pv_params::PvSnowParams;
     use chrono::TimeZone;
 
-    // Zunzgen, the site used throughout the design doc.
-    const ZUNZGEN: GeoPosition = GeoPosition {
-        latitude_deg: 47.4491,
-        longitude_deg: 7.8081,
+    // Hometown, the site used throughout the design doc.
+    const HOMETOWN: GeoPosition = GeoPosition {
+        latitude_deg: 46.9480,
+        longitude_deg: 7.4474,
     };
 
     fn south_facing_tilted() -> PvArrayGeometry {
         PvArrayGeometry {
-            location: ZUNZGEN,
+            location: HOMETOWN,
             tilt_deg: 30.0,
             azimuth_deg: 180.0, // south
         }
@@ -368,7 +368,7 @@ mod tests {
 
     fn horizontal() -> PvArrayGeometry {
         PvArrayGeometry {
-            location: ZUNZGEN,
+            location: HOMETOWN,
             tilt_deg: 0.0,
             azimuth_deg: 0.0,
         }
@@ -378,8 +378,8 @@ mod tests {
     fn solar_position_summer_solstice_noon_elevation_near_expected() {
         // 2026-06-21 ~11:41 UTC ≈ solar noon at this longitude.
         let t = Utc.with_ymd_and_hms(2026, 6, 21, 11, 41, 0).unwrap();
-        let pos = solar_position(&ZUNZGEN, t);
-        // At 47.45°N on the summer solstice, solar noon elevation ≈ 90 - lat + 23.44 ≈ 66°.
+        let pos = solar_position(&HOMETOWN, t);
+        // At 46.95°N on the summer solstice, solar noon elevation ≈ 90 - lat + 23.44 ≈ 66°.
         assert!(
             (pos.elevation_deg - 66.0).abs() < 3.0,
             "expected ~66°, got {}",
@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn solar_position_winter_solstice_noon_elevation_near_expected() {
         let t = Utc.with_ymd_and_hms(2026, 12, 21, 11, 41, 0).unwrap();
-        let pos = solar_position(&ZUNZGEN, t);
+        let pos = solar_position(&HOMETOWN, t);
         // ≈ 90 - lat - 23.44 ≈ 19°.
         assert!(
             (pos.elevation_deg - 19.0).abs() < 3.0,
@@ -402,14 +402,14 @@ mod tests {
     #[test]
     fn solar_position_midnight_is_below_horizon() {
         let t = Utc.with_ymd_and_hms(2026, 6, 21, 23, 0, 0).unwrap();
-        let pos = solar_position(&ZUNZGEN, t);
+        let pos = solar_position(&HOMETOWN, t);
         assert!(pos.elevation_deg < 0.0);
     }
 
     #[test]
     fn tilted_south_panel_exceeds_horizontal_near_solstice_noon() {
         let t = Utc.with_ymd_and_hms(2026, 6, 21, 11, 41, 0).unwrap();
-        let sun = solar_position(&ZUNZGEN, t);
+        let sun = solar_position(&HOMETOWN, t);
         let tilted = poa_irradiance_w_m2(600.0, &sun, &south_facing_tilted());
         let flat = poa_irradiance_w_m2(600.0, &sun, &horizontal());
         assert!(
@@ -427,9 +427,9 @@ mod tests {
         // the direct component in isolation, so assert on the lower-level
         // clear_sky_irradiance_w_m2 building block instead.
         let t = Utc.with_ymd_and_hms(2026, 6, 21, 11, 41, 0).unwrap();
-        let sun = solar_position(&ZUNZGEN, t);
+        let sun = solar_position(&HOMETOWN, t);
         let north_facing_steep = PvArrayGeometry {
-            location: ZUNZGEN,
+            location: HOMETOWN,
             tilt_deg: 90.0,
             azimuth_deg: 0.0, // north
         };
@@ -444,7 +444,7 @@ mod tests {
     #[test]
     fn poa_irradiance_zero_at_night() {
         let t = Utc.with_ymd_and_hms(2026, 6, 21, 23, 0, 0).unwrap();
-        let sun = solar_position(&ZUNZGEN, t);
+        let sun = solar_position(&HOMETOWN, t);
         assert_eq!(poa_irradiance_w_m2(0.0, &sun, &south_facing_tilted()), 0.0);
     }
 
@@ -557,7 +557,7 @@ mod tests {
         let fetched_at = samples[0].valid_at;
         WeatherForecast {
             source_id: "test".into(),
-            location: ZUNZGEN,
+            location: HOMETOWN,
             fetched_at,
             samples,
         }

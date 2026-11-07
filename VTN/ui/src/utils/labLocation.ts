@@ -12,6 +12,6 @@
  * serve the location from the BFF rather than to edit this in step.
  */
 export const LAB_LOCATION = {
-  latitudeDeg: 47.4491,
-  longitudeDeg: 7.8081,
+  latitudeDeg: 46.9480,
+  longitudeDeg: 7.4474,
 } as const;

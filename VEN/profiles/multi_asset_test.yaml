@@ -15,11 +15,11 @@ assets:
   - type: pv
     id: pv-east
     rated_kw: 4.0
-    # Same site as the weather test fixture (Zunzgen, 47.4491/7.8081), facing east: its
+    # Same site as the weather test fixture (Hometown, 46.9480/7.4474), facing east: its
     # derived forecast peaks in the morning.
     weather:
-      latitude_deg: 47.4491
-      longitude_deg: 7.8081
+      latitude_deg: 46.9480
+      longitude_deg: 7.4474
       tilt_deg: 30.0
       azimuth_deg: 90.0
       rated_kwp: 4.0
@@ -28,8 +28,8 @@ assets:
     rated_kw: 4.0
     # Facing west: its derived forecast peaks in the afternoon.
     weather:
-      latitude_deg: 47.4491
-      longitude_deg: 7.8081
+      latitude_deg: 46.9480
+      longitude_deg: 7.4474
       tilt_deg: 30.0
       azimuth_deg: 270.0
       rated_kwp: 4.0

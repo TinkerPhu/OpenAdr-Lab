@@ -88,7 +88,7 @@ mod tests {
 
     const MINIMAL: [(&str, &str); 3] = [
         ("FORECASTER_MQTT_HOST", "broker"),
-        ("FORECASTER_SITE_ID", "zunzgen"),
+        ("FORECASTER_SITE_ID", "hometown"),
         ("FORECASTER_PROFILE_PATH", "/profiles/ven-1.yaml"),
     ];
 
@@ -98,7 +98,7 @@ mod tests {
         assert_eq!(c.mqtt_host, "broker");
         assert_eq!(c.mqtt_port, 1883);
         assert_eq!(c.root, "openadr-lab");
-        assert_eq!(c.site, "zunzgen");
+        assert_eq!(c.site, "hometown");
         assert_eq!(c.profile_path, "/profiles/ven-1.yaml");
         assert_eq!(c.freshness, chrono::Duration::minutes(90));
         assert_eq!(c.model_version, "pv-weather-1");

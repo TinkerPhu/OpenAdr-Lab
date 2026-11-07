@@ -157,8 +157,8 @@ mod tests {
     use super::*;
 
     const WEATHER: &str = "    weather:
-      latitude_deg: 47.4491
-      longitude_deg: 7.8081
+      latitude_deg: 46.9480
+      longitude_deg: 7.4474
       tilt_deg: 22.0
       azimuth_deg: 267.0
       rated_kwp: 14.4
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn weather_pv_config_applies_defaults_for_the_tuning_fields() {
         let cfg: WeatherPvConfig = serde_yaml::from_str(
-            "latitude_deg: 47.4491\nlongitude_deg: 7.8081\ntilt_deg: 30.0\nazimuth_deg: 180.0\nrated_kwp: 10.0\n",
+            "latitude_deg: 46.9480\nlongitude_deg: 7.4474\ntilt_deg: 30.0\nazimuth_deg: 180.0\nrated_kwp: 10.0\n",
         )
         .unwrap();
         let p = cfg.to_params();

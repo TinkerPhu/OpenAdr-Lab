@@ -27,24 +27,24 @@ mod tests {
     #[test]
     fn weather_topics_follow_the_documented_layout() {
         assert_eq!(
-            weather_forecast_topic("openadr-lab", "zunzgen"),
-            "openadr-lab/weather/zunzgen/forecast"
+            weather_forecast_topic("openadr-lab", "hometown"),
+            "openadr-lab/weather/hometown/forecast"
         );
         assert_eq!(
-            weather_status_topic("openadr-lab", "zunzgen"),
-            "openadr-lab/weather/zunzgen/status"
+            weather_status_topic("openadr-lab", "hometown"),
+            "openadr-lab/weather/hometown/status"
         );
     }
 
     #[test]
     fn measurement_topic_names_the_signal() {
         assert_eq!(
-            measurement_topic("openadr-lab", "zunzgen", "pv"),
-            "openadr-lab/measurement/zunzgen/pv"
+            measurement_topic("openadr-lab", "hometown", "pv"),
+            "openadr-lab/measurement/hometown/pv"
         );
         assert_eq!(
-            measurement_topic("openadr-lab", "zunzgen", "base_load"),
-            "openadr-lab/measurement/zunzgen/base_load"
+            measurement_topic("openadr-lab", "hometown", "base_load"),
+            "openadr-lab/measurement/hometown/base_load"
         );
     }
 }

@@ -692,27 +692,27 @@ mod tests {
 
     #[test]
     fn topics_follow_the_documented_layout() {
-        let tp = ForecastTopics::new("openadr-lab", "zunzgen").unwrap();
+        let tp = ForecastTopics::new("openadr-lab", "hometown").unwrap();
         assert_eq!(
             tp.pv_array("pv-1").unwrap(),
-            "openadr-lab/forecast/zunzgen/pv/pv-1/power_kw"
+            "openadr-lab/forecast/hometown/pv/pv-1/power_kw"
         );
         assert_eq!(
             tp.pv_total(),
-            "openadr-lab/forecast/zunzgen/pv/total/power_kw"
+            "openadr-lab/forecast/hometown/pv/total/power_kw"
         );
         assert_eq!(
             tp.base_load(),
-            "openadr-lab/forecast/zunzgen/base_load/power_kw"
+            "openadr-lab/forecast/hometown/base_load/power_kw"
         );
-        assert_eq!(tp.status(), "openadr-lab/forecast/zunzgen/status");
+        assert_eq!(tp.status(), "openadr-lab/forecast/hometown/status");
     }
 
     #[test]
     fn topics_refuse_wildcards_and_separators_in_names() {
         assert!(ForecastTopics::new("openadr-lab", "a/b").is_err());
         assert!(ForecastTopics::new("openadr-lab", "a+").is_err());
-        let tp = ForecastTopics::new("openadr-lab", "zunzgen").unwrap();
+        let tp = ForecastTopics::new("openadr-lab", "hometown").unwrap();
         assert!(tp.pv_array("total/x").is_err());
         assert!(tp.pv_array("#").is_err());
         assert!(

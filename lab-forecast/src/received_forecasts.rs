@@ -320,21 +320,21 @@ mod tests {
 
     #[test]
     fn subscriptions_pair_each_pv_array_topic_and_the_base_load_with_its_key() {
-        let topics = ForecastTopics::new("openadr-lab", "zunzgen").unwrap();
+        let topics = ForecastTopics::new("openadr-lab", "hometown").unwrap();
         let subs = subscriptions(&topics, &["pv".to_string(), "roof-2".to_string()]);
         assert_eq!(
             subs,
             vec![
                 (
-                    "openadr-lab/forecast/zunzgen/pv/pv/power_kw".to_string(),
+                    "openadr-lab/forecast/hometown/pv/pv/power_kw".to_string(),
                     "pv/pv".to_string()
                 ),
                 (
-                    "openadr-lab/forecast/zunzgen/pv/roof-2/power_kw".to_string(),
+                    "openadr-lab/forecast/hometown/pv/roof-2/power_kw".to_string(),
                     "pv/roof-2".to_string()
                 ),
                 (
-                    "openadr-lab/forecast/zunzgen/base_load/power_kw".to_string(),
+                    "openadr-lab/forecast/hometown/base_load/power_kw".to_string(),
                     BASE_LOAD_KEY.to_string()
                 ),
             ]
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn subscriptions_leave_out_an_array_id_the_topic_layout_refuses() {
-        let topics = ForecastTopics::new("openadr-lab", "zunzgen").unwrap();
+        let topics = ForecastTopics::new("openadr-lab", "hometown").unwrap();
         let subs = subscriptions(&topics, &["total".to_string(), "a/b".to_string()]);
         assert_eq!(subs.len(), 1, "only the base load remains: {subs:?}");
     }

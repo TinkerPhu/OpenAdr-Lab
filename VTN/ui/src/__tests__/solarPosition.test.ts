@@ -10,25 +10,25 @@
 import { describe, it, expect } from "vitest";
 import { solarElevationDeg } from "@lab/ui/solarPosition";
 
-// Zunzgen — the lab, and the site solar.rs is calibrated against.
-const LAT = 47.4491;
-const LON = 7.8081;
+// Hometown — the lab, and the site solar.rs is calibrated against.
+const LAT = 46.9480;
+const LON = 7.4474;
 
 const at = (iso: string) => solarElevationDeg(Date.parse(iso), LAT, LON);
 
 describe("solarElevationDeg", () => {
   it("puts the summer solstice sun where the geometry says", () => {
-    // 90 - 47.4491 + 23.44 ≈ 66°, and 11:41 UTC is solar noon at this longitude.
+    // 90 - 46.9480 + 23.44 ≈ 66.5°, and 11:41 UTC is solar noon at this longitude.
     //
     // This assertion is also the UTC guard: on a UTC+2 machine a port using
     // local-time getters would compute 13:41 instead, ~6° lower, and fail here.
     // That is the most likely porting bug and this is what catches it.
-    expect(at("2026-06-21T11:41:00Z")).toBeCloseTo(66, 0);
+    expect(at("2026-06-21T11:41:00Z")).toBeCloseTo(66.5, 0);
   });
 
   it("puts the winter solstice sun where the geometry says", () => {
-    // 90 - 47.4491 - 23.44 ≈ 19°.
-    expect(at("2026-12-21T11:41:00Z")).toBeCloseTo(19, 0);
+    // 90 - 46.9480 - 23.44 ≈ 19.6°.
+    expect(at("2026-12-21T11:41:00Z")).toBeCloseTo(19.6, 0);
   });
 
   it("puts the sun below the horizon at night", () => {

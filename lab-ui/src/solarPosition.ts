@@ -11,7 +11,7 @@
  * **This is a second implementation of one concept, in a second language**, and
  * `one-concept-one-function` says not to do that. It is accepted here because
  * the alternatives are worse: a clock-based approximation is wrong by hours for
- * half the year at this latitude (sunset at 47.45°N swings from ~16:40 in
+ * half the year at this latitude (sunset at 46.95°N swings from ~16:40 in
  * December to ~21:30 in June), and there is no channel that could carry the
  * Rust answer to a browser — `SolarPosition` is not serialized and no endpoint
  * exposes it. Recorded in docs/reference/TECHNICAL_DEBTS.md; if the two ever

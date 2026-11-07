@@ -43,13 +43,13 @@ assets:
     rated_kw: 10.0
     inverter_max_kw: 9.0
     # Weather-sourced PV forecast (docs/architecture/weather_forecast.md).
-    # 10 kWp hypothetical array at the same Zunzgen site/geometry as ven-1
+    # 10 kWp hypothetical array at the same Hometown site/geometry as ven-1
     # (which uses the real 14.4 kWp installation as calibration reference).
     # performance_ratio reuses ven-1's calibrated value since it's a site
     # electrical-loss factor, not size-dependent.
     weather:
-      latitude_deg: 47.4491
-      longitude_deg: 7.8081
+      latitude_deg: 46.9480
+      longitude_deg: 7.4474
       tilt_deg: 22.0
       azimuth_deg: 267.0
       rated_kwp: 10.0

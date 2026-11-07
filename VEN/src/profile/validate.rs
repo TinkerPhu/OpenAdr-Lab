@@ -774,8 +774,8 @@ spikes:
     id: pv
     rated_kw: 14.4
 weather_pv:
-  latitude_deg: 47.4491
-  longitude_deg: 7.8081
+  latitude_deg: 46.9480
+  longitude_deg: 7.4474
   tilt_deg: 22.0
   azimuth_deg: 267.0
   rated_kwp: 14.4
