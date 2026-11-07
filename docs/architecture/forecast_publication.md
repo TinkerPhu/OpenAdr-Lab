@@ -62,6 +62,10 @@ It reads `<root>/weather/<site>/forecast` and, when a profile array switches `me
 Per hourly weather sample the value is the weather model's PV output at the start of that hour, declared as the average
 over the step; the first sample is the weather feed's already-past hour, so a reader skips slots before now.
 
+To look at a forecast by hand, read the retained message; it arrives at once on subscribing:
+`mosquitto_sub -h <broker> -t 'openadr-lab/forecast/<site>/pv/total/power_kw' -C 1` (likewise `.../base_load/power_kw` and `.../status`).
+There is deliberately no HTTP endpoint: MQTT is the one channel (openspec design D15).
+
 Where the code is: `forecaster/src/engine.rs` (the decision), `dispatch.rs` (message routing and the single-producer guard),
 `config.rs`, `runtime.rs` (the broker session). `base_load.rs` keeps the measured load in 10-minute buckets and calls the shared learner (`lab-forecast/src/base_load_learner.rs`, the one the VEN uses); `cache.rs` is the cache file text. The VEN reading these topics follows.
 
