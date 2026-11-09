@@ -16873,3 +16873,6 @@ for the effective value after a recreate, and measure the effect (log bytes over
 
 ## 2026-11-07 - CI red twice on the Node2 rust-vtn lane (reboots)
 Ticket 20261107T0422Z went red when Node2 rebooted mid-compile; the re-run (20261107T0834Z) saw a second reboot. Everything else was green. With the user's yes (cap and retry on Node2) the openleadr test image now uses CARGO_BUILD_JOBS=2 and `nice -n 19`. Open: ssh keepalive and per-suite timeout, persistent journal on Node2 (both need the user).
+
+## 2026-11-09 - rusqlite 0.32 to 0.41 (RUSTSEC-2026-0459)
+`cargo audit` started failing on `libsqlite3-sys` 0.30.1 (C SQLite CVE, fix in >= 0.39). With the user's yes: `rusqlite` 0.41.1 pulls `libsqlite3-sys` 0.39.1. One compile break: rusqlite no longer binds `u64` (`plan_history.rs` solver_ms, now cast to i64). `history_store` tests 42/42 green locally; CI runs the rest.

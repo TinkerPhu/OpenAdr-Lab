@@ -50,7 +50,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 async-trait = "0.1"
 # Phase 1 (A-1) history store. "bundled" vendors sqlite3 (public domain) — no
 # cmake/system dependency issue on WSL or Node1 ARM. MIT licence.
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 
 # Weather forecast plugin (MQTT adapter for WeatherForecastPort). Pure-Rust,
 # tokio-native, no C bindings — cross-compiles cleanly for the Node1 ARM64 target.

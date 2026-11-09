@@ -63,7 +63,8 @@ pub(super) fn append(conn: &mut Connection, rows: &[PlanHistorySample]) -> Resul
                 row.plan_id.to_string(),
                 to_unix(row.created_at),
                 row.trigger,
-                row.solver_ms,
+                // rusqlite 0.41 no longer binds u64 (it can exceed SQLite's i64); solver times are milliseconds, far below that.
+                row.solver_ms.map(|v| v as i64),
                 stored(row.solve_status),
                 row.objective_eur,
                 row.friction_eur,
