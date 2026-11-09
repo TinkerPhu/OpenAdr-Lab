@@ -47,6 +47,7 @@ debt (`R-*`) is in `docs/reference/TECHNICAL_DEBTS.md`.
 | Advisory | Where | Status | Re-check |
 |---|---|---|---|
 | RUSTSEC-2023-0071 (`rsa` 0.9.10, Marvin timing side-channel, medium 5.9) | `VTN/bff/Cargo.lock` only | Accepted: lockfile-only. `rsa` arrives through `sqlx-mysql`, an optional sqlx driver the BFF never enables (`sqlx` is built with `default-features = false` and the postgres features), so it is not compiled; `cargo tree -i rsa` resolves to nothing. No fixed release exists upstream. | On every sqlx upgrade |
+| RUSTSEC-2026-0459 (`libsqlite3-sys` 0.30.1, C SQLite CVE, medium 6.8) | `VTN/bff/Cargo.lock` and `openleadr-rs/Cargo.lock` only | Accepted: lockfile-only. It arrives through `sqlx-sqlite`, an optional sqlx driver the BFF never enables; `cargo tree -i libsqlite3-sys` resolves to nothing. The VEN, which compiles it, was upgraded (rusqlite 0.41, libsqlite3-sys 0.39.1). openleadr-rs: not checked whether it compiles it. | On every sqlx upgrade; openleadr-rs check open |
 
 **Risk context:** the lab is not exposed to the internet. Re-run both audits before any exposed
 deployment.
