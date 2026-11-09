@@ -33,13 +33,18 @@ pub struct WeatherForecastSample {
     pub valid_at: DateTime<Utc>,
     /// 0 = most recent actual/"fact", 1..=N = hours ahead.
     pub age_h: u32,
+    #[serde(alias = "temperature_C")]
     pub temperature_c: f64,
     /// Global Horizontal Irradiance, as reported by the supplier — NOT yet
     /// projected onto any panel plane. Projection is VEN's job (`entities::solar`).
+    #[serde(alias = "irradiance_Wm2")]
     pub ghi_w_m2: f64,
+    #[serde(alias = "windspeed_kmh")]
     pub wind_speed_kmh: Option<f64>,
+    #[serde(alias = "rainprob_Perc")]
     pub rain_prob_pct: Option<f64>,
     /// New snowfall this hour. Drives the snow-cover state model.
+    #[serde(alias = "snow_cmh")]
     pub new_snowfall_cm: Option<f64>,
     /// Supplier-specific icon/description, translated by the adapter into
     /// this shared vocabulary.

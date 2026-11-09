@@ -115,6 +115,35 @@ mod tests {
         assert_eq!(f.samples.len(), 1);
     }
 
+    /// Schema 2.0.0 of the feed renames the sample fields to the catalogue names; both name sets
+    /// are accepted so the producer can switch in place.
+    #[test]
+    fn parses_catalogue_field_names_like_the_old_ones() {
+        let renamed = r#"{
+            "schema_version": "2.0.0",
+            "source_id": "srf_meteo",
+            "location": { "latitude_deg": 46.9480, "longitude_deg": 7.4474 },
+            "fetched_at": "2026-07-19T05:54:48Z",
+            "samples": [
+                { "valid_at": "2026-07-19T06:00:00Z", "age_h": 1, "temperature_C": 16.0,
+                  "irradiance_Wm2": 97.0, "windspeed_kmh": 12.0, "rainprob_Perc": 30.0, "snow_cmh": 0.5 }
+            ]
+        }"#;
+        let old = r#"{
+            "schema_version": "1.0.0",
+            "source_id": "srf_meteo",
+            "location": { "latitude_deg": 46.9480, "longitude_deg": 7.4474 },
+            "fetched_at": "2026-07-19T05:54:48Z",
+            "samples": [
+                { "valid_at": "2026-07-19T06:00:00Z", "age_h": 1, "temperature_c": 16.0,
+                  "ghi_w_m2": 97.0, "wind_speed_kmh": 12.0, "rain_prob_pct": 30.0, "new_snowfall_cm": 0.5 }
+            ]
+        }"#;
+        let new_names = parse_forecast_message(renamed.as_bytes()).unwrap();
+        let old_names = parse_forecast_message(old.as_bytes()).unwrap();
+        assert_eq!(new_names.samples, old_names.samples);
+    }
+
     #[test]
     fn rejects_message_missing_required_field() {
         let missing_fetched_at = r#"{
